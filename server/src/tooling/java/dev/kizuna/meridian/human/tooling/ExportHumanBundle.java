@@ -23,6 +23,9 @@ public final class ExportHumanBundle {
         try {
             Files.createDirectories(target.getParent());
             Files.write(target, payload);
+            // 呼吸能力使用同一公开 Protobuf，可供非 Java 宿主直接装配。
+            Path breathingTarget = Path.of(arguments[0]).resolve(HumanContent.BREATHING_RESOURCE);
+            Files.write(breathingTarget, HumanContent.breathing().toByteArray());
         } catch (IOException exception) {
             // 构建失败时阻止 JAR 发布，不能回退到过期或空白内容。
             throw HumanErrors.exportFailed(exception);

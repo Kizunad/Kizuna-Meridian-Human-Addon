@@ -37,6 +37,10 @@ final class HumanAnatomy {
             addMuscle(body, side + "_flexor_digitorum_brevis", label + "趾短屈肌", side + "_foot", 80, 40, 1200);
         }
         addMuscle(body, "diaphragm", "膈肌", "chest", 150, 80, 10000);
+        // 精力以控制组织的可用做功预算表达，和膈肌共享疲劳规则但各自保存状态。
+        body.addTissues(TissueDefinition.newBuilder().setId("attention_network").setDisplayName("注意控制组织")
+                .setKind("human:neural").setPartId("head").setMaxHp(10).setFatigueCapacity(100)
+                .setCapacity(TissueCapacity.newBuilder().setStrengthNewtons(0).setBurstWatts(1000).setEnduranceJoules(300)));
 
         // 皮肤单独记录局部 HP；当前不具备主动做功能力。
         for (PartDefinition part : body.getPartsList()) {

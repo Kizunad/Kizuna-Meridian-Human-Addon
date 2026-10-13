@@ -1,4 +1,11 @@
 schema_version: 1
+breathing {
+  surface_layer: "surface"
+  animation_provider: "kizuna_players_animation"
+  animation_id: "meditate"
+  intake_point { y: 1.67 z: 0.25 }
+  intake_bone: "head"
+}
 template {
   id: "human:adult"
   version: 1
@@ -444,6 +451,7 @@ visuals {
 }
 visuals {
   id: "organs.left_lung"
+  animation_bone: "chest"
   display_name: "左肺"
   layer_id: "organs"
   target_kind: ORGAN
@@ -454,6 +462,7 @@ visuals {
 }
 visuals {
   id: "organs.right_lung"
+  animation_bone: "chest"
   display_name: "右肺"
   layer_id: "organs"
   target_kind: ORGAN

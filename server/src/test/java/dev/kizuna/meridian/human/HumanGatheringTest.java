@@ -23,6 +23,9 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.*;
 import dev.kizuna.meridian.server.AddonRegistry;
 import dev.kizuna.meridian.server.BodyCommandHandler;
 import dev.kizuna.meridian.server.InMemoryBodyStore;
+import dev.kizuna.meridian.server.GatheringSession;
+import dev.kizuna.meridian.protocol.pb.GatheringMessages.*;
+import dev.kizuna.meridian.protocol.pb.BreathingMessages.*;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -35,6 +38,204 @@ import static org.junit.Assert.*;
 
 /** 整体回归：独立附属内容经过公开协议安装，并用真实权威处理器完成聚气。 */
 public class HumanGatheringTest {
+    @Test
+    public void manualBreathingIsRepeatableBoundedAndConservesRealResources() throws IOException {
+        // 人体内容经真实会话完成两次吸呼；输入没有剂量字段，服务端粒子命中才会摄入。
+        var host = new Host(source(100), null);
+        var session = host.session();
+        session.enableBreathing(HumanContent.breathing());
+        long sequence = 1;
+        breath(session, sequence++, BreathAction.BEGIN_BREATHING, .5, .4);
+        // 停气也有三轴游离运动，移动机会标记不能免费增加资源或扣除组织耐力。
+        var beforeDrift = session.view().getBreathing();
+        breath(session, sequence++, BreathAction.HOLD, .5, .4);
+        host.now += 250;
+        session.advance();
+        var afterDrift = session.view().getBreathing();
+        assertNotEquals(beforeDrift.getParticlesList(), afterDrift.getParticlesList());
+        assertNotEquals(beforeDrift.getParticles(0).getZ(), afterDrift.getParticles(0).getZ(), 0);
+        assertEquals(beforeDrift.getAbsorbedQi(), afterDrift.getAbsorbedQi(), 0);
+        assertEquals(beforeDrift.getStaminaRatio(), afterDrift.getStaminaRatio(), 0);
+        assertEquals(FailureCode.INVALID_REQUEST, GatheringResponse.parseFrom(session.handle(
+                startRequest(host, "bypass").toByteArray())).getFailure().getCode());
+        for (int step = 0; step < 36; step++) {
+            var particle = session.view().getBreathing().getParticlesList().stream()
+                    .min(java.util.Comparator.comparingDouble(value -> Math.pow(value.getX() - .5, 2)
+                            + Math.pow(value.getY() - .4, 2) + Math.pow(value.getZ() - .5, 2)))
+                    .orElseThrow();
+            BreathAction action = step < 18 ? BreathAction.INHALE : BreathAction.EXHALE;
+            breath(session, sequence++, action, particle.getX(), particle.getY(), particle.getZ());
+            host.now += 250;
+            session.advance();
+            var view = session.view().getBreathing();
+            assertTrue(view.getAirLiters() >= 0 && view.getAirLiters() <= view.getCapacityLiters());
+            if (step == 17) {
+                assertEquals(5, view.getAirLiters(), 1e-9);
+            }
+        }
+        var finished = session.view().getBreathing();
+        assertEquals(0, finished.getAirLiters(), 1e-9);
+        assertTrue(finished.getAbsorbedQi() > 0);
+        assertTrue(finished.getAttentionRatio() < 1 && finished.getStaminaRatio() < 1);
+        assertEquals(100.36, host.body().totalQi() + host.sourceTotal() + host.store.environmentQi().totalQi(), 1e-9);
+
+        // 停止、重开不会回填组织预算，同请求重放也不能再次消费或领取。
+        breath(session, sequence++, BreathAction.END_BREATHING, .5, .4);
+        BodySnapshot stopped = host.body();
+        session.close();
+        var reopened = host.session();
+        reopened.enableBreathing(HumanContent.breathing());
+        assertEquals(finished.getAttentionRatio(), reopened.view().getBreathing().getAttentionRatio(), 0);
+        breath(reopened, 1, BreathAction.BEGIN_BREATHING, .5, .4);
+        assertEquals(stopped.tissueStates(), host.body().tissueStates());
+        BodySnapshot restarted = host.body();
+        breath(reopened, 1, BreathAction.BEGIN_BREATHING, .5, .4);
+        assertEquals(restarted, host.body());
+        host.now += 1000;
+        reopened.advance();
+        assertFalse(reopened.view().getBreathing().getActive());
+        assertEquals(restarted, host.body());
+    }
+
+    @Test
+    public void intakeCostsAreAtomicAndExhaustionStopsTheFirstResource() throws IOException {
+        // 控制组织已耗尽时，带负载的摄入必须同时保留环境、身体和回执。
+        var host = new Host(source(100), null);
+        var loads = ExertTissues.newBuilder()
+                .addLoads(ExertTissue.newBuilder().setTissueId("diaphragm").setPowerWatts(30).setDurationSeconds(1))
+                .addLoads(ExertTissue.newBuilder().setTissueId("attention_network").setPowerWatts(400).setDurationSeconds(1));
+        host.now = 250;
+        RequestEnvelope request = RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId("expensive-intake")
+                .setBodyCommand(BodyCommand.newBuilder().setBodyId("test-human").setExpectedRevision(0)
+                        .setIntakeQi(IntakeQi.newBuilder().setOrganId("left_lung").setQi(inventory("meridian:wood", .05))
+                                .addAllLoads(loads.getLoadsList()))).build();
+        host.rejectUnchanged(request.toByteArray(), FailureCode.TISSUE_LOAD_EXCEEDED);
+
+        var session = host.session();
+        session.enableBreathing(HumanContent.breathing().toBuilder().setAttentionWatts(100).build());
+        breath(session, 1, BreathAction.BEGIN_BREATHING, 0, 0);
+        for (int step = 0; step < 32 && session.view().getBreathing().getActive(); step++) {
+            breath(session, step + 2, step < 16 ? BreathAction.INHALE : BreathAction.EXHALE, 0, 0);
+            host.now += 250;
+            session.advance();
+        }
+        assertFalse(session.view().getBreathing().getActive());
+        assertEquals(0, session.view().getBreathing().getAttentionRatio(), .00001);
+        assertTrue(session.view().getBreathing().getStaminaRatio() > .9);
+    }
+
+    private static void breath(GatheringSession<String> session, long sequence, BreathAction action, double x, double y)
+            throws IOException {
+        // 未指定深度时按公开默认入口平面处理，保留普通开始与结束操作的简明调用。
+        breath(session, sequence, action, x, y, .5);
+    }
+
+    private static void breath(GatheringSession<String> session, long sequence, BreathAction action, double x, double y, double z)
+            throws IOException {
+        // 用公开 Protobuf 入口而非内部函数，连同序号校验和业务回执一起覆盖。
+        var request = GatheringRequest.newBuilder().setProtocolVersion(1).setBodyId("test-human")
+                .setRequestId("breath-" + sequence).setBreath(BreathControl.newBuilder()
+                        .setAction(action).setSequence(sequence).setAimX(x).setAimY(y).setAimZ(z)).build();
+        var response = GatheringResponse.parseFrom(session.handle(request.toByteArray()));
+        assertTrue(response.toString(), response.hasView());
+    }
+
+    @Test
+    public void oneClickGatheringUsesBoundariesAndRejectsDuplicatesAndFullTargets() throws IOException {
+        // 从公开聚气协议驱动整个链路，等待中的刷新与提前唤醒都不能提交身体变化。
+        var host = new Host(source(100), null);
+        var session = host.session();
+        BodySnapshot initial = host.body();
+        assertEquals(20, session.view().getChoicesCount());
+        assertEquals(initial, host.body());
+        host.now = 2000;
+        GatheringRequest first = startRequest(host, "one-click");
+        assertEquals(GatheringStage.INTAKING, GatheringResponse.parseFrom(session.handle(first.toByteArray())).getView().getProgress().getStage());
+        assertEquals(3000, session.nextBoundaryMillis());
+        BodySnapshot waiting = host.body();
+        for (int i = 0; i < 100; i++) {
+            boolean advanced = session.advance();
+            assertFalse(session.view().getProgress().toString(), advanced);
+            session.view();
+        }
+        session.handle(first.toByteArray());
+        assertEquals(waiting, host.body());
+        assertEquals(100, host.sourceTotal(), 0);
+        assertEquals(FailureCode.GATHERING_BUSY, GatheringResponse.parseFrom(session.handle(startRequest(host, "second").toByteArray()))
+                .getFailure().getCode());
+
+        finishRound(host, session);
+        assertEquals(GatheringStage.COMPLETED, session.view().getProgress().getStage());
+        assertEquals(0.2, session.view().getProgress().getStoredQi(), 0);
+        assertEquals(initial.totalQi() + 0.2, host.body().totalQi(), 1e-12);
+        assertEquals(initial.totalQi() + 100, host.body().totalQi() + host.sourceTotal() + host.store.environmentQi().totalQi(), 1e-12);
+        long revision = host.body().revision();
+        session.handle(first.toByteArray());
+        assertEquals(revision, host.body().revision());
+
+        session.handle(startRequest(host, "second-round").toByteArray());
+        finishRound(host, session);
+        BodySnapshot full = host.body();
+        assertEquals(FailureCode.CAPACITY_EXCEEDED, GatheringResponse.parseFrom(session.handle(startRequest(host, "third-round").toByteArray()))
+                .getFailure().getCode());
+        assertEquals(full, host.body());
+        assertEquals(98, host.sourceTotal(), 0);
+        assertEquals(FailureCode.REVISION_CONFLICT, GatheringResponse.parseFrom(session.handle(first.toByteArray())).getFailure().getCode());
+
+        // 未开拓经脉可以接收上述真元，但不能借普通发运请求绕过首脉开拓。
+        var route = host.message().getStructure().getConnectionsList().stream()
+                .filter(connection -> connection.getFrom().equals("left_lung_meridian.out")).findFirst().orElseThrow();
+        host.rejectUnchanged(GatheringRequests.store(host.message(), "unopened-send", route.getId(),
+                inventory("meridian:none", 0.1), 1), FailureCode.MERIDIAN_UNOPENED);
+    }
+
+    @Test
+    public void gatheringFailureAndDisconnectKeepAlreadyCommittedResources() throws IOException {
+        // 新的外部身体变更使自动计划失效；已经炼化的输入仍归身体，不会静默退款或重做。
+        var host = new Host(source(100), null);
+        var session = host.session();
+        GatheringResponse started = GatheringResponse.parseFrom(session.handle(startRequest(host, "start").toByteArray()));
+        assertTrue(started.toString(), started.hasView());
+        host.now = session.nextBoundaryMillis();
+        session.advance();
+        assertEquals(GatheringStage.REFINING, session.view().getProgress().getStage());
+        host.now += 100;
+        host.commit(GatheringRequests.settle(host.message(), "another-operation"));
+        session.advance();
+        assertEquals(FailureCode.REVISION_CONFLICT, session.view().getProgress().getFailure());
+        assertEquals(1, host.body().organQiTotal(), 0);
+        assertEquals(99, host.sourceTotal(), 0);
+        session.close();
+        host.now = 2000;
+        host.commit(GatheringRequests.settle(host.message(), "normal-host-settlement"));
+        assertEquals(0.2, host.body().organQiTotal(), 1e-12);
+        assertFalse(session.advance());
+
+        // 撤销读权限后不返回快照，已完成的事务保持原样。
+        var deniedHost = new Host(source(100), null);
+        var denied = deniedHost.session();
+        deniedHost.readable = false;
+        var result = GatheringResponse.parseFrom(denied.handle(startRequest(deniedHost, "denied").toByteArray()));
+        assertEquals(FailureCode.ACCESS_DENIED, result.getFailure().getCode());
+        assertFalse(result.hasView());
+        assertEquals(0, deniedHost.body().revision());
+    }
+
+    private static GatheringRequest startRequest(Host host, String id) {
+        // 请求只选择人体内容身份，所有数值仍从服务端内容目录解析。
+        return GatheringRequest.newBuilder().setProtocolVersion(1).setBodyId("test-human").setRequestId(id)
+                .setStart(StartGathering.newBuilder().setExpectedRevision(host.body().revision()).setOrganId("left_lung")
+                        .setRecipeId("human:lung_refine_wood").setRecipeVersion(1).setConnectionId("left_lung.to.meridian")).build();
+    }
+
+    private static void finishRound(Host host, GatheringSession<String> session) {
+        // 按框架返回的边界唤醒，分别执行摄入与启动、加工完成与发运、运输到达。
+        for (int step = 0; step < 3; step++) {
+            host.now = session.nextBoundaryMillis();
+            assertTrue(session.advance());
+        }
+        assertEquals(GatheringStage.COMPLETED, session.view().getProgress().getStage());
+    }
     @Test
     public void packagedContentHasExplicitDependencyAndNoEmbeddedFramework() throws IOException {
         // 检查真正的交付 JAR，防止源码测试通过却遗漏内容、许可或偷偷打入框架实现。
@@ -52,6 +253,9 @@ public class HumanGatheringTest {
             assertNotNull(resource);
             try (var input = jar.getInputStream(resource)) {
                 assertEquals(HumanContent.bundle(), AddonProtobuf.decodeBundle(input.readAllBytes()));
+            }
+            try (var input = jar.getInputStream(jar.getEntry(HumanContent.BREATHING_RESOURCE))) {
+                assertEquals(HumanContent.breathing(), dev.kizuna.meridian.protocol.pb.BreathingMessages.BreathingProfile.parseFrom(input));
             }
             assertNotNull(jar.getEntry("LICENSE"));
             assertFalse(jar.stream().anyMatch(entry -> entry.getName().startsWith("dev/kizuna/meridian/core/")
@@ -136,7 +340,8 @@ public class HumanGatheringTest {
     public void eachElementCanGatherIntoEitherUnopenedLungMeridianWithoutDuplication() {
         // 五行逐个验证，避免仅在木气样例中正确；左右实例必须互不覆盖。
         for (String side : List.of("left", "right")) {
-            for (BodyMessages.OrganRecipe recipe : HumanContent.bundle().getOrganRecipesList()) {
+            for (BodyMessages.OrganRecipe recipe : HumanContent.bundle().getOrganRecipesList().stream()
+                    .filter(value -> value.getId().startsWith("human:lung_refine_")).toList()) {
                 var host = new Host(source(100), null);
                 double initialTotal = host.body().totalQi();
                 host.now = 1000;
@@ -310,6 +515,16 @@ public class HumanGatheringTest {
         private final AddonRegistry registry = AddonRegistry.load(registration());
         private final List<CommandReceipt> receipts = new ArrayList<>();
         private long now;
+        private boolean readable = true;
+
+        private GatheringSession<String> session() {
+            // 模拟可信宿主把同一时钟、权限、来源和核心交给可选操作编排。
+            return new GatheringSession<>("owner", new BodyId("test-human"), handler(), store,
+                    (context, id) -> readable && context.equals("owner") && id.value().equals("test-human"),
+                    (context, body) -> TimeAdvancePlan.newBuilder().setTarget(time(now))
+                            .setBiologicalSecondsPerSimulationSecond(1).setMode(TimeAdvanceMode.ACTIVE).build(),
+                    body -> store.environmentSource("test-region"), registry.recipes());
+        }
 
         private Host(EnvironmentQiSource source, BodyMessages.BodySnapshot initial) {
             // 仅可信宿主负责首次安装候选；测试变体用于验证损伤，不是客户端写账入口。

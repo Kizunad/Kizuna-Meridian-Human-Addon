@@ -3,6 +3,7 @@ package dev.kizuna.meridian.human.server;
 import dev.kizuna.meridian.protocol.AddonProtobuf;
 import dev.kizuna.meridian.protocol.pb.AddonMessages.*;
 import dev.kizuna.meridian.protocol.pb.BodyMessages.*;
+import dev.kizuna.meridian.protocol.pb.BreathingMessages.*;
 
 import java.util.List;
 import java.util.TreeSet;
@@ -13,6 +14,7 @@ public final class HumanContent {
     public static final String TEMPLATE_ID = "human:adult";
     public static final int CONTENT_VERSION = 1;
     public static final String BUNDLE_RESOURCE = "META-INF/kizuna_meridian/addons/human.pb";
+    public static final String BREATHING_RESOURCE = "META-INF/kizuna_meridian/human-breathing.pb";
     public static final List<String> INPUT_ATTRIBUTES = List.of("meridian:metal", "meridian:wood",
             "meridian:water", "meridian:fire", "meridian:earth");
     public static final double RAW_QI_PER_BATCH = 1;
@@ -58,6 +60,12 @@ public final class HumanContent {
                     .setInput(inventory(attribute, RAW_QI_PER_BATCH))
                     .setOutput(inventory("meridian:none", REFINED_QI_PER_BATCH))
                     .setDurationMillis(REFINING_MILLIS).setMinimumRealm(Realm.AWAKENING));
+            // 手动吐纳采用更小的批次，仍由同一器官目录和环境原子交换执行。
+            bundle.addOrganRecipes(OrganRecipe.newBuilder()
+                    .setId("human:breath_" + attribute.substring(attribute.indexOf(':') + 1))
+                    .setVersion(CONTENT_VERSION).setOrganKind("human:lung")
+                    .setInput(inventory(attribute, .05)).setOutput(inventory("meridian:none", .01))
+                    .setDurationMillis(100).setMinimumRealm(Realm.AWAKENING));
         }
         AddonBundle result = bundle.build();
         AddonProtobuf.validateBundle(result);
@@ -67,6 +75,20 @@ public final class HumanContent {
     public static byte[] payload() {
         // JAR 资源与跨语言宿主取得同一份有界 Protobuf 内容，不要求对方运行 Java 定义代码。
         return AddonProtobuf.encodeBundle(bundle());
+    }
+
+    public static BreathingProfile breathing() {
+        // 空气容量与流速是人体内容；双肺总计 5 升、每秒 1.25 升，一次完整吸气约 4 秒。
+        var profile = BreathingProfile.newBuilder().setRespiratoryTissueId("diaphragm")
+                .setAttentionTissueId("attention_network").setRespiratoryWatts(30).setAttentionWatts(4);
+        for (String side : List.of("left", "right")) {
+            profile.addOrgans(BreathingOrgan.newBuilder().setOrganId(side + "_lung")
+                    .setAirCapacityLiters(2.5).setAirflowLitersPerSecond(.625));
+        }
+        for (String attribute : INPUT_ATTRIBUTES) {
+            profile.addRecipeIds("human:breath_" + attribute.substring(attribute.indexOf(':') + 1));
+        }
+        return profile.build();
     }
 
     private static QiInventory inventory(String attribute, double amount) {
