@@ -1,0 +1,55 @@
+description = '人体内容、可信出生候选与框架接入验证。'
+
+dependencies {
+    api 'local.meridian:server'
+    testImplementation project(':client')
+    testImplementation 'junit:junit:4.13.2'
+}
+test {
+    useJUnit()
+}
+
+// 内容导出和运行演示属于开发工具，独立于最终附属 JAR。
+sourceSets {
+    tooling {
+        java.srcDir 'src/tooling/java'
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+    demo {
+        java.srcDir 'src/demo/java'
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+}
+dependencies {
+    demoImplementation project(':client')
+}
+
+def contentDirectory = layout.buildDirectory.dir('generated/human-content')
+tasks.register('exportHumanBundle', JavaExec) {
+    group = 'build'
+    dependsOn tasks.named('toolingClasses')
+    classpath = sourceSets.tooling.runtimeClasspath
+    mainClass = 'dev.kizuna.meridian.human.tooling.ExportHumanBundle'
+    args contentDirectory.get().asFile.absolutePath
+    inputs.files(sourceSets.main.output.classesDirs, sourceSets.tooling.output.classesDirs)
+    inputs.files(configurations.runtimeClasspath)
+    outputs.dir(contentDirectory)
+}
+tasks.named('jar') {
+    dependsOn tasks.named('exportHumanBundle')
+    from(contentDirectory)
+}
+tasks.named('test') {
+    // 整体回归也验证最终 JAR 的内容边界与内嵌 Protobuf，而非只测内存 Builder。
+    dependsOn tasks.named('jar'), project(':client').tasks.named('jar')
+    systemProperty 'human.serverJar', tasks.named('jar').get().archiveFile.get().asFile.absolutePath
+    systemProperty 'human.clientJar', project(':client').tasks.named('jar').get().archiveFile.get().asFile.absolutePath
+}
+tasks.register('demo', JavaExec) {
+    group = 'application'
+    dependsOn tasks.named('demoClasses')
+    classpath = sourceSets.demo.runtimeClasspath
+    mainClass = 'dev.kizuna.meridian.human.demo.GatheringDemo'
+}

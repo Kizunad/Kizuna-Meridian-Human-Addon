@@ -1,0 +1,55 @@
+plugins {
+    id 'base'
+}
+
+allprojects {
+    group = 'dev.kizuna.meridian.human'
+    version = '0.1.0-SNAPSHOT'
+}
+
+subprojects {
+    apply plugin: 'java-library'
+
+    repositories {
+        mavenCentral()
+    }
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(17)
+        }
+    }
+    base.archivesName = "${rootProject.name}-${project.name}"
+    tasks.withType(JavaCompile).configureEach {
+        options.release = 17
+        options.encoding = 'UTF-8'
+    }
+    tasks.withType(JavaExec).configureEach {
+        // 导出和演示也使用 Java 17，不能依赖开发机默认 JDK 的额外能力。
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(17)
+        }
+    }
+    tasks.withType(Jar).configureEach {
+        // 附属 JAR 只分发自身代码与内容，不内嵌框架或第二套真元账本。
+        from(rootProject.files('LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md'))
+    }
+}
+
+tasks.named('assemble') {
+    dependsOn ':client:assemble', ':server:assemble'
+}
+tasks.named('check') {
+    dependsOn ':client:check', ':server:check'
+}
+tasks.named('clean') {
+    dependsOn ':client:clean', ':server:clean'
+}
+tasks.register('test') {
+    group = 'verification'
+    dependsOn ':client:test', ':server:test'
+}
+tasks.register('demo') {
+    group = 'application'
+    description = '通过真实 Protobuf 命令演示一轮人体聚气。'
+    dependsOn ':server:demo'
+}

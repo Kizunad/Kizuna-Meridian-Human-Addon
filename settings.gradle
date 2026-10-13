@@ -1,0 +1,19 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'kizuna-meridian-human-addon'
+include 'client', 'server'
+
+// 框架尚未发布 Maven 产物；开发时显式从独立仓库构建，不复制它的源码或协议。
+def frameworkDirectory = providers.gradleProperty('meridianFrameworkDir')
+        .getOrElse('../Kizuna-Meridian-Mod-Framework')
+includeBuild(frameworkDirectory) {
+    dependencySubstitution {
+        substitute module('local.meridian:client') using project(':client')
+        substitute module('local.meridian:server') using project(':server')
+    }
+}

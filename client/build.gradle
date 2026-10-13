@@ -1,0 +1,6 @@
+description = '聚气请求构造；仅依赖经脉框架 protoc 生成的公开消息。'
+
+dependencies {
+    // local.meridian 是 settings 中的本地替换键，不是已发布的 Maven 坐标。
+    compileOnlyApi 'local.meridian:client'
+}
