@@ -19,15 +19,15 @@ Human server → 框架 server 公共编解码/内容校验 API
 python3 "scripts/check_docs.py"
 ```
 
-Java 编译、测试、内容导出与演示均使用 17。框架自己的构建负责 protoc 生成；Human 直接使用生成消息，不复制 `.proto`，本轮也不需要新增通信字段。开发构建依赖指定 checkout 的实际源码，不会自动锁定或拉取远端提交，升级需重跑整体回归。
+Java 编译、测试、内容导出与演示均使用 17。框架自己的构建负责 protoc 生成；Human 直接使用生成消息，不复制 `.proto`。人体模型所需的 `presentation.proto` 已在框架提交 `bc7cdfc` 中提供，旧基线 `90d2205` 不包含该文件。开发构建依赖指定 checkout 的实际源码，不会自动锁定或拉取远端提交，升级需重跑整体回归。
 
 构建生成：
 
-- `client/build/libs/kizuna-meridian-human-addon-client-0.1.0-SNAPSHOT.jar`：Protobuf 操作意图构造器。
+- `client/build/libs/kizuna-meridian-human-addon-client-0.1.0-SNAPSHOT.jar`：Protobuf 操作意图构造器与 `assets/meridian_human/meridian/adult.pb` 展示资源。
 - `server/build/libs/kizuna-meridian-human-addon-server-0.1.0-SNAPSHOT.jar`：人体定义与出生候选，内含 `META-INF/kizuna_meridian/addons/human.pb`。
 - `server/build/generated/human-content/META-INF/kizuna_meridian/addons/human.pb`：同一内容的独立二进制文件，其他语言宿主也可读取。
 
-宿主需提供对应框架及其运行依赖。Human JAR 不内嵌框架、Protobuf 运行库、测试或演示代码，不提供 Fabric 自动加载元数据。
+宿主需提供对应框架及其运行依赖。Human JAR 不内嵌框架、Protobuf 运行库、测试或演示代码。客户端含 `meridian_human` Fabric 资源容器清单，使模型进入资源管理器；无运行入口、渲染依赖或 UI 反向依赖，服务端仍为 Java 内容库。
 
 ## 内容前置
 

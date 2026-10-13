@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "meridian_human",
+  "version": "${version}",
+  "name": "Kizuna's Meridian Human Addon - Client Content",
+  "description": "人体模型、位置映射与聚气请求内容",
+  "authors": ["Kizunad"],
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "environment": "client",
+  "depends": {"java": ">=17", "fabricloader": ">=0.16.10"}
+}

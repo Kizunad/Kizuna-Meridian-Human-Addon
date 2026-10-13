@@ -8,6 +8,8 @@ import dev.kizuna.meridian.environment.EnvironmentConfigLoader;
 import dev.kizuna.meridian.environment.EnvironmentQiRules;
 import dev.kizuna.meridian.error.MeridianErrors;
 import dev.kizuna.meridian.human.client.GatheringRequests;
+import dev.kizuna.meridian.human.client.HumanPresentation;
+import dev.kizuna.meridian.protocol.pb.PresentationMessages.*;
 import dev.kizuna.meridian.human.server.HumanBirth;
 import dev.kizuna.meridian.human.server.HumanContent;
 import dev.kizuna.meridian.protocol.AddonProtobuf;
@@ -40,7 +42,7 @@ public class HumanGatheringTest {
         AddonRegistry registry = AddonRegistry.load(registration);
         var template = registry.findTemplate(HumanContent.TEMPLATE_ID, 1).orElseThrow();
         assertEquals(17, template.getStructure().getPartsCount());
-        assertEquals(13, template.getStructure().getOrgansCount());
+        assertEquals(15, template.getStructure().getOrgansCount());
         assertEquals(36, template.getStructure().getMeridiansCount());
         assertEquals(20, template.getStructure().getMeridiansList().stream().mapToDouble(BodyMessages.MeridianDefinition::getLumenCapacity).sum(), 0);
         assertEquals(20, template.getStructure().getMeridiansList().stream().mapToDouble(BodyMessages.MeridianDefinition::getWallCapacity).sum(), 0);
@@ -60,6 +62,53 @@ public class HumanGatheringTest {
         try (var jar = new ZipFile(System.getProperty("human.clientJar"))) {
             assertFalse(jar.stream().anyMatch(entry -> entry.getName().startsWith("dev/kizuna/meridian/human/server/")
                     || entry.getName().startsWith("dev/kizuna/meridian/protocol/")));
+            assertNotNull(jar.getEntry("fabric.mod.json"));
+            var visualResource = jar.getEntry(HumanPresentation.RESOURCE);
+            assertNotNull(visualResource);
+            try (var input = jar.getInputStream(visualResource)) {
+                BodyPresentation presentation = BodyPresentation.parseFrom(input.readAllBytes());
+                assertEquals(HumanPresentation.create(), presentation);
+                assertEquals(HumanContent.bundle().getTemplates(0).getReference(), presentation.getTemplate());
+                assertEquals(5, presentation.getLayersCount());
+                // 对实际打包资源检查完整覆盖，模型坐标表不能悄悄引用过期或拼错的身体 ID。
+                var structure = HumanContent.bundle().getTemplates(0).getStructure();
+                for (BodyVisual node : presentation.getVisualsList()) {
+                    String id = node.getTargetId();
+                    boolean exists = switch (node.getTargetKind()) {
+                        case PART -> structure.getPartsList().stream().anyMatch(value -> value.getId().equals(id));
+                        case TISSUE -> structure.getTissuesList().stream().anyMatch(value -> value.getId().equals(id));
+                        case ORGAN -> structure.getOrgansList().stream().anyMatch(value -> value.getId().equals(id));
+                        case MERIDIAN -> structure.getMeridiansList().stream().anyMatch(value -> value.getId().equals(id));
+                        default -> false;
+                    };
+                    assertTrue(node.getId(), exists);
+                    // 每层共用相机范围，资源越界会导致切层后裁切或选择错位。
+                    for (ModelPoint vertex : node.getVerticesList()) {
+                        assertTrue(Float.isFinite(vertex.getX()) && Float.isFinite(vertex.getY()) && Float.isFinite(vertex.getZ()));
+                        assertTrue(vertex.getX() >= presentation.getMinimum().getX() && vertex.getX() <= presentation.getMaximum().getX());
+                        assertTrue(vertex.getY() >= presentation.getMinimum().getY() && vertex.getY() <= presentation.getMaximum().getY());
+                        assertTrue(vertex.getZ() >= presentation.getMinimum().getZ() && vertex.getZ() <= presentation.getMaximum().getZ());
+                    }
+                    assertEquals(0, node.getTrianglesCount() % 3);
+                    for (int index : node.getTrianglesList()) {
+                        assertTrue(index >= 0 && index < node.getVerticesCount());
+                    }
+                    // UV、实际 PNG 和身份绑定一起验证，防止模型有形状却丢失贴图或独立眼球状态。
+                    if (!node.getTextureResource().isEmpty()) {
+                        assertEquals(node.getVerticesCount(), node.getTextureUvCount());
+                        String[] resource = node.getTextureResource().split(":", 2);
+                        assertNotNull(jar.getEntry("assets/" + resource[0] + "/" + resource[1]));
+                        for (ModelUv uv : node.getTextureUvList()) {
+                            assertTrue(uv.getU() >= 0 && uv.getU() <= 1 && uv.getV() >= 0 && uv.getV() <= 1);
+                        }
+                    }
+                }
+                assertEquals(19, presentation.getVisualsList().stream().filter(node -> node.getTargetKind() == BodyTargetKind.TISSUE).count());
+                assertEquals(15, presentation.getVisualsList().stream().filter(node -> node.getTargetKind() == BodyTargetKind.ORGAN).count());
+                assertTrue(presentation.getVisualsList().stream().anyMatch(node -> node.getTargetId().equals("left_eye")));
+                assertTrue(presentation.getVisualsList().stream().anyMatch(node -> node.getTargetId().equals("right_eye")));
+                assertEquals(36, presentation.getVisualsList().stream().filter(node -> node.getTargetKind() == BodyTargetKind.MERIDIAN).count());
+            }
         }
 
         // 下游功法包直接依赖 human 并引用 lung 类型，缺失或版本不符时必须明确拒绝。
@@ -175,7 +224,9 @@ public class HumanGatheringTest {
 
         // 肺或胸部失能都由框架拒绝，不允许附属通过另一个入口绕过人体伤势。
         var initialMessage = BodyProtobuf.toMessage(initial);
-        int leftLungIndex = 1;
+        int leftLungIndex = java.util.stream.IntStream.range(0, initialMessage.getOrganStatesCount())
+                .filter(index -> initialMessage.getOrganStates(index).getId().equals("left_lung"))
+                .findFirst().orElseThrow();
         var hurtLung = initialMessage.toBuilder().setOrganStates(leftLungIndex,
                 initialMessage.getOrganStates(leftLungIndex).toBuilder().setHp(0)).build();
         var injured = new Host(source(100), hurtLung);

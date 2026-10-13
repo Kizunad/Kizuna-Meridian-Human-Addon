@@ -1,0 +1,1134 @@
+schema_version: 1
+template {
+  id: "human:adult"
+  version: 1
+}
+minimum {
+  x: -0.5
+  z: -0.25
+}
+maximum {
+  x: 0.5
+  y: 2.0
+  z: 0.25
+}
+layers {
+  id: "surface"
+  display_name: "表层"
+}
+layers {
+  id: "skeleton"
+  display_name: "骨架"
+}
+layers {
+  id: "muscles"
+  display_name: "肌肉"
+}
+layers {
+  id: "organs"
+  display_name: "器官"
+}
+layers {
+  id: "meridians"
+  display_name: "经脉"
+}
+visuals {
+  id: "surface.head"
+  display_name: "头部"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "head"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "surface.neck"
+  display_name: "颈部"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "neck"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "surface.chest"
+  display_name: "胸部"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "chest"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "surface.abdomen"
+  display_name: "腹部"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "abdomen"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "surface.pelvis"
+  display_name: "骨盆"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "pelvis"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "surface.left_upper_arm"
+  display_name: "左上臂"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "left_upper_arm"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "surface.left_forearm"
+  display_name: "左前臂"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "left_forearm"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "surface.left_hand"
+  display_name: "左手"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "left_hand"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "surface.left_thigh"
+  display_name: "左大腿"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "left_thigh"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "surface.left_lower_leg"
+  display_name: "左小腿"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "left_lower_leg"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "surface.left_foot"
+  display_name: "左足"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "left_foot"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "surface.right_upper_arm"
+  display_name: "右上臂"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "right_upper_arm"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "surface.right_forearm"
+  display_name: "右前臂"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "right_forearm"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "surface.right_hand"
+  display_name: "右手"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "right_hand"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "surface.right_thigh"
+  display_name: "右大腿"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "right_thigh"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "surface.right_lower_leg"
+  display_name: "右小腿"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "right_lower_leg"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "surface.right_foot"
+  display_name: "右足"
+  layer_id: "surface"
+  target_kind: PART
+  target_id: "right_foot"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "身体最外侧的轮廓与选择区域。关闭表层可观察内部装配。"
+}
+visuals {
+  id: "skeleton.skull"
+  display_name: "颅骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "head"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.jaw"
+  display_name: "下颌骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "head"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.cervical"
+  display_name: "颈椎"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "neck"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.thoracic"
+  display_name: "胸椎"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "chest"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.sternum"
+  display_name: "胸骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "chest"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.left_ribs"
+  display_name: "左肋骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "chest"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.left_shoulder"
+  display_name: "左锁骨与肩胛骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "chest"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.right_ribs"
+  display_name: "右肋骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "chest"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.right_shoulder"
+  display_name: "右锁骨与肩胛骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "chest"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.lumbar"
+  display_name: "腰椎"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "abdomen"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.pelvis"
+  display_name: "骨盆"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "pelvis"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.left_humerus"
+  display_name: "左肱骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "left_upper_arm"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.left_forearm"
+  display_name: "左桡骨与尺骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "left_forearm"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.left_hand"
+  display_name: "左腕骨、掌骨与指骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "left_hand"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.left_femur"
+  display_name: "左股骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "left_thigh"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.left_lower_leg"
+  display_name: "左髌骨、胫骨与腓骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "left_lower_leg"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.left_foot"
+  display_name: "左跗骨、跖骨与趾骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "left_foot"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.right_humerus"
+  display_name: "右肱骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "right_upper_arm"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.right_forearm"
+  display_name: "右桡骨与尺骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "right_forearm"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.right_hand"
+  display_name: "右腕骨、掌骨与指骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "right_hand"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.right_femur"
+  display_name: "右股骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "right_thigh"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.right_lower_leg"
+  display_name: "右髌骨、胫骨与腓骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "right_lower_leg"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "skeleton.right_foot"
+  display_name: "右跗骨、跖骨与趾骨"
+  layer_id: "skeleton"
+  target_kind: PART
+  target_id: "right_foot"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "支撑并保护所属部位，作为软组织的附着基础。当前健康数值读取所属部位。"
+}
+visuals {
+  id: "organs.brain"
+  display_name: "脑"
+  layer_id: "organs"
+  target_kind: ORGAN
+  target_id: "brain"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "位于颅腔，负责感知整合与身体控制。"
+}
+visuals {
+  id: "organs.left_lung"
+  display_name: "左肺"
+  layer_id: "organs"
+  target_kind: ORGAN
+  target_id: "left_lung"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "左侧胸腔的呼吸器官，承担环境灵气摄入与炼化。"
+}
+visuals {
+  id: "organs.right_lung"
+  display_name: "右肺"
+  layer_id: "organs"
+  target_kind: ORGAN
+  target_id: "right_lung"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "右侧胸腔的呼吸器官，与左肺分别记录损伤和加工状态。"
+}
+visuals {
+  id: "organs.heart"
+  display_name: "心脏"
+  layer_id: "organs"
+  target_kind: ORGAN
+  target_id: "heart"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "位于双肺之间偏左，是循环系统的动力器官。"
+}
+visuals {
+  id: "organs.liver"
+  display_name: "肝脏"
+  layer_id: "organs"
+  target_kind: ORGAN
+  target_id: "liver"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "位于右上腹，承担物质代谢与转化。"
+}
+visuals {
+  id: "organs.gallbladder"
+  display_name: "胆囊"
+  layer_id: "organs"
+  target_kind: ORGAN
+  target_id: "gallbladder"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "附着于肝下方的囊状器官，储存并释放胆汁。"
+}
+visuals {
+  id: "organs.stomach"
+  display_name: "胃"
+  layer_id: "organs"
+  target_kind: ORGAN
+  target_id: "stomach"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "左上腹的消化器官，接收摄入物并进行初步加工。"
+}
+visuals {
+  id: "organs.spleen"
+  display_name: "脾脏"
+  layer_id: "organs"
+  target_kind: ORGAN
+  target_id: "spleen"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "位于胃外侧偏后，参与血液与免疫相关活动。"
+}
+visuals {
+  id: "organs.left_kidney"
+  display_name: "左肾"
+  layer_id: "organs"
+  target_kind: ORGAN
+  target_id: "left_kidney"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "腹腔后侧的左肾，承担过滤与体液调节。"
+}
+visuals {
+  id: "organs.right_kidney"
+  display_name: "右肾"
+  layer_id: "organs"
+  target_kind: ORGAN
+  target_id: "right_kidney"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "腹腔后侧的右肾，位置略低于左肾。"
+}
+visuals {
+  id: "organs.small_intestine"
+  display_name: "小肠"
+  layer_id: "organs"
+  target_kind: ORGAN
+  target_id: "small_intestine"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "盘曲于腹腔中央，承担消化与营养吸收。"
+}
+visuals {
+  id: "organs.large_intestine"
+  display_name: "大肠"
+  layer_id: "organs"
+  target_kind: ORGAN
+  target_id: "large_intestine"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "围绕小肠分布，承担水分回收与排出。"
+}
+visuals {
+  id: "organs.bladder"
+  display_name: "膀胱"
+  layer_id: "organs"
+  target_kind: ORGAN
+  target_id: "bladder"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "位于骨盆腔前方，暂存排泄液体。"
+}
+visuals {
+  id: "organs.left_eye"
+  display_name: "左眼"
+  layer_id: "organs"
+  target_kind: ORGAN
+  target_id: "left_eye"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "嵌于左眼眶，接收光线形成视觉输入；独立记录左眼损伤。"
+}
+visuals {
+  id: "organs.right_eye"
+  display_name: "右眼"
+  layer_id: "organs"
+  target_kind: ORGAN
+  target_id: "right_eye"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "嵌于右眼眶，接收光线形成视觉输入；独立记录右眼损伤。"
+}
+visuals {
+  id: "muscles.left_pectoralis_major"
+  display_name: "左胸大肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "left_pectoralis_major"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.left_biceps_brachii"
+  display_name: "左肱二头肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "left_biceps_brachii"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.left_triceps_brachii"
+  display_name: "左肱三头肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "left_triceps_brachii"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.left_brachioradialis"
+  display_name: "左肱桡肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "left_brachioradialis"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.left_opponens_pollicis"
+  display_name: "左拇对掌肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "left_opponens_pollicis"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.left_gluteus_maximus"
+  display_name: "左臀大肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "left_gluteus_maximus"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.left_rectus_femoris"
+  display_name: "左股直肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "left_rectus_femoris"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.left_gastrocnemius"
+  display_name: "左腓肠肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "left_gastrocnemius"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.left_flexor_digitorum_brevis"
+  display_name: "左趾短屈肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "left_flexor_digitorum_brevis"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.right_pectoralis_major"
+  display_name: "右胸大肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "right_pectoralis_major"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.right_biceps_brachii"
+  display_name: "右肱二头肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "right_biceps_brachii"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.right_triceps_brachii"
+  display_name: "右肱三头肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "right_triceps_brachii"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.right_brachioradialis"
+  display_name: "右肱桡肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "right_brachioradialis"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.right_opponens_pollicis"
+  display_name: "右拇对掌肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "right_opponens_pollicis"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.right_gluteus_maximus"
+  display_name: "右臀大肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "right_gluteus_maximus"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.right_rectus_femoris"
+  display_name: "右股直肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "right_rectus_femoris"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.right_gastrocnemius"
+  display_name: "右腓肠肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "right_gastrocnemius"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.right_flexor_digitorum_brevis"
+  display_name: "右趾短屈肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "right_flexor_digitorum_brevis"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "muscles.diaphragm"
+  display_name: "膈肌"
+  layer_id: "muscles"
+  target_kind: TISSUE
+  target_id: "diaphragm"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "沿骨架附着的具名肌肉，力量、爆发、耐力、疲劳和损伤分别由身体状态提供。"
+}
+visuals {
+  id: "meridians.left_lung_meridian"
+  display_name: "左手太阴肺经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "left_lung_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.left_pericardium_meridian"
+  display_name: "左手厥阴心包经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "left_pericardium_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.left_heart_meridian"
+  display_name: "左手少阴心经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "left_heart_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.left_large_intestine_meridian"
+  display_name: "左手阳明大肠经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "left_large_intestine_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.left_small_intestine_meridian"
+  display_name: "左手太阳小肠经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "left_small_intestine_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.left_triple_burner_meridian"
+  display_name: "左手少阳三焦经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "left_triple_burner_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.left_spleen_meridian"
+  display_name: "左足太阴脾经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "left_spleen_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.left_kidney_meridian"
+  display_name: "左足少阴肾经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "left_kidney_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.left_liver_meridian"
+  display_name: "左足厥阴肝经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "left_liver_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.left_stomach_meridian"
+  display_name: "左足阳明胃经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "left_stomach_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.left_bladder_meridian"
+  display_name: "左足太阳膀胱经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "left_bladder_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.left_gallbladder_meridian"
+  display_name: "左足少阳胆经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "left_gallbladder_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.left_yin_qiao"
+  display_name: "左阴跷脉"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "left_yin_qiao"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.left_yang_qiao"
+  display_name: "左阳跷脉"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "left_yang_qiao"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.left_yin_wei"
+  display_name: "左阴维脉"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "left_yin_wei"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.left_yang_wei"
+  display_name: "左阳维脉"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "left_yang_wei"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.right_lung_meridian"
+  display_name: "右手太阴肺经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "right_lung_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.right_pericardium_meridian"
+  display_name: "右手厥阴心包经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "right_pericardium_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.right_heart_meridian"
+  display_name: "右手少阴心经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "right_heart_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.right_large_intestine_meridian"
+  display_name: "右手阳明大肠经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "right_large_intestine_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.right_small_intestine_meridian"
+  display_name: "右手太阳小肠经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "right_small_intestine_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.right_triple_burner_meridian"
+  display_name: "右手少阳三焦经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "right_triple_burner_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.right_spleen_meridian"
+  display_name: "右足太阴脾经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "right_spleen_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.right_kidney_meridian"
+  display_name: "右足少阴肾经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "right_kidney_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.right_liver_meridian"
+  display_name: "右足厥阴肝经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "right_liver_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.right_stomach_meridian"
+  display_name: "右足阳明胃经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "right_stomach_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.right_bladder_meridian"
+  display_name: "右足太阳膀胱经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "right_bladder_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.right_gallbladder_meridian"
+  display_name: "右足少阳胆经"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "right_gallbladder_meridian"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.right_yin_qiao"
+  display_name: "右阴跷脉"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "right_yin_qiao"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.right_yang_qiao"
+  display_name: "右阳跷脉"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "right_yang_qiao"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.right_yin_wei"
+  display_name: "右阴维脉"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "right_yin_wei"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.right_yang_wei"
+  display_name: "右阳维脉"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "right_yang_wei"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.ren"
+  display_name: "任脉"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "ren"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.du"
+  display_name: "督脉"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "du"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.chong"
+  display_name: "冲脉"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "chong"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}
+visuals {
+  id: "meridians.dai"
+  display_name: "带脉"
+  layer_id: "meridians"
+  target_kind: MERIDIAN
+  target_id: "dai"
+  color_rgb: 16777215
+  texture_resource: "meridian_human:textures/body/anatomy.png"
+  description: "具有独立主干与支络的真元通道，穿行于组织间隙；内腔、外壁与开拓状态独立记录。"
+}

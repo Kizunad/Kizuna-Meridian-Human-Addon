@@ -4,3 +4,31 @@ dependencies {
     // local.meridian 是 settings 中的本地替换键，不是已发布的 Maven 坐标。
     compileOnlyApi 'local.meridian:client'
 }
+
+sourceSets {
+    tooling {
+        compileClasspath += sourceSets.main.output.classesDirs + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output.classesDirs + sourceSets.main.compileClasspath
+    }
+}
+def presentationDirectory = layout.buildDirectory.dir('generated/presentation')
+dependencies {
+    // Gson 只在构建时读取 Blockbench；跨包展示仍使用 Protobuf。
+    toolingImplementation 'com.google.code.gson:gson:2.10.1'
+}
+tasks.register('exportPresentation', JavaExec) {
+    // 导出类只依赖 main 的编译结果，避免资源生成反向依赖自身 processResources。
+    dependsOn tasks.named('compileToolingJava')
+    classpath = sourceSets.tooling.runtimeClasspath
+    mainClass = 'dev.kizuna.meridian.human.tooling.ExportPresentation'
+    args file('src/model').absolutePath, presentationDirectory.get().asFile.absolutePath
+    inputs.files(sourceSets.main.output.classesDirs, sourceSets.tooling.output.classesDirs, configurations.compileClasspath)
+    inputs.dir('src/model')
+    outputs.dir(presentationDirectory)
+}
+tasks.named('processResources') {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') { expand version: project.version }
+    dependsOn tasks.named('exportPresentation')
+    from(presentationDirectory)
+}

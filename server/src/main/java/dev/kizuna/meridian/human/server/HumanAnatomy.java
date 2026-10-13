@@ -47,6 +47,9 @@ final class HumanAnatomy {
         }
 
         addOrgan(body, "brain", "脑", "head", 20);
+        // 双眼各自持有损伤与缓存状态，不能用头部 HP 冒充单眼健康程度。
+        addOrgan(body, "left_eye", "左眼", "head", 4);
+        addOrgan(body, "right_eye", "右眼", "head", 4);
         addLung(body, "left", "左肺");
         addLung(body, "right", "右肺");
         addOrgan(body, "heart", "心脏", "chest", 20);
