@@ -1,0 +1,63 @@
+plugins {
+    id 'fabric-loom'
+}
+
+description = '人体内容的 Minecraft 玩家适配；身体结算仍调用经脉框架。'
+
+repositories {
+    maven { url = 'https://maven.fabricmc.net/' }
+    maven { url = 'https://maven.wispforest.io/releases' }
+}
+
+dependencies {
+    minecraft 'com.mojang:minecraft:1.20.1'
+    mappings 'net.fabricmc:yarn:1.20.1+build.10:v2'
+    modImplementation 'net.fabricmc:fabric-loader:0.16.10'
+    modImplementation 'net.fabricmc.fabric-api:fabric-api:0.92.3+1.20.1'
+    implementation project(':server')
+    // 人体资源包的编译期协议已由下方服务端库提供，避免 Loom 再解析一份客户端协议副本。
+    modImplementation(project(':client')) { transitive = false }
+    // 独立安装产物携带其实际运行依赖；源码与 Protobuf 仍只从各自仓库构建。
+    include project(':server')
+    include project(':client')
+    include implementation('local.meridian:server')
+    include implementation('com.google.protobuf:protobuf-java:4.36.2')
+    include implementation('org.tomlj:tomlj:1.1.1')
+    include implementation('org.antlr:antlr4-runtime:4.11.1')
+    testImplementation 'junit:junit:4.13.2'
+}
+
+test { useJUnit() }
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') { expand version: project.version }
+}
+
+// 身体 UI 为可选运行依赖，人体绑定与查询命令在没有 UI 时仍可使用。
+if (providers.gradleProperty('withBodyUi').getOrElse('false').toBoolean()) {
+    dependencies {
+        modRuntimeOnly files('../../Kizuna-Meridian-UI-Addon/client/build/libs/kizuna-meridian-ui-addon-client-0.1.0-SNAPSHOT.jar')
+        modRuntimeOnly files('../../Kizuna-Inventory-UI-Framework/build/libs/kizuna-inventory-ui-framework-0.1.0-SNAPSHOT.jar')
+        modRuntimeOnly 'io.wispforest:owo-lib:0.11.2+1.20'
+    }
+
+    // 显式提供动画 checkout 时一起装配，UI 的盘坐预览复用其资源而非另造动画。
+    if (providers.gradleProperty('playerAnimationDir').isPresent()) {
+        def animationDirectory = rootProject.file(providers.gradleProperty('playerAnimationDir').get())
+        dependencies {
+            modRuntimeOnly files(new File(animationDirectory, 'build/libs/kizuna-players-animation-0.1.0-SNAPSHOT.jar'))
+        }
+    }
+}
+
+loom {
+    runs {
+        client {
+            runDir 'build/playtest'
+            programArgs '--width', '1440', '--height', '1000'
+        }
+        server {
+            runDir 'build/server'
+        }
+    }
+}

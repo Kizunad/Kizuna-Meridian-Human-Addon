@@ -1,5 +1,6 @@
 plugins {
     id 'base'
+    id 'fabric-loom' version '1.6-SNAPSHOT' apply false
 }
 
 allprojects {
@@ -30,23 +31,23 @@ subprojects {
         }
     }
     tasks.withType(Jar).configureEach {
-        // 附属 JAR 只分发自身代码与内容，不内嵌框架或第二套真元账本。
+        // 各产物保留许可；fabric 安装包另外通过 Loom include 装配所需的原始依赖 JAR。
         from(rootProject.files('LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md'))
     }
 }
 
 tasks.named('assemble') {
-    dependsOn ':client:assemble', ':server:assemble'
+    dependsOn ':client:assemble', ':server:assemble', ':fabric:assemble'
 }
 tasks.named('check') {
-    dependsOn ':client:check', ':server:check'
+    dependsOn ':client:check', ':server:check', ':fabric:check'
 }
 tasks.named('clean') {
-    dependsOn ':client:clean', ':server:clean'
+    dependsOn ':client:clean', ':server:clean', ':fabric:clean'
 }
 tasks.register('test') {
     group = 'verification'
-    dependsOn ':client:test', ':server:test'
+    dependsOn ':client:test', ':server:test', ':fabric:test'
 }
 tasks.register('demo') {
     group = 'application'

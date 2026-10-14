@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "meridian_human_host",
+  "version": "${version}",
+  "name": "Kizuna's Meridian Human Addon - Fabric",
+  "description": "服务端玩家运动、环境吐纳、身体持久化与数值同步",
+  "authors": ["Kizunad"],
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "environment": "*",
+  "entrypoints": {"main": ["dev.kizuna.meridian.human.fabric.HumanFabric"]},
+  "depends": {"java": ">=17", "minecraft": "1.20.1", "fabricloader": ">=0.16.10", "fabric-api": "*"}
+}

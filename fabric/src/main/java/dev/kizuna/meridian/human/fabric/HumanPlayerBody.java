@@ -1,0 +1,350 @@
+package dev.kizuna.meridian.human.fabric;
+
+import dev.kizuna.meridian.core.Anatomy;
+import dev.kizuna.meridian.core.BodyId;
+import dev.kizuna.meridian.core.BodySnapshot;
+import dev.kizuna.meridian.core.BodyTimeAdvancement;
+import dev.kizuna.meridian.core.QiInventory;
+import dev.kizuna.meridian.core.TissueCapabilities;
+import dev.kizuna.meridian.human.server.HumanBirth;
+import dev.kizuna.meridian.human.server.HumanContent;
+import dev.kizuna.meridian.human.server.HumanErrors;
+import dev.kizuna.meridian.protocol.BodyProtobuf;
+import dev.kizuna.meridian.protocol.MeridianProtocol;
+import dev.kizuna.meridian.protocol.pb.AddonMessages.*;
+import dev.kizuna.meridian.protocol.pb.BodyMessages;
+import dev.kizuna.meridian.protocol.pb.GatheringMessages.*;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.*;
+import dev.kizuna.meridian.server.AddonRegistry;
+import dev.kizuna.meridian.server.BodyCommandHandler;
+import dev.kizuna.meridian.server.InMemoryBodyStore;
+import dev.kizuna.meridian.server.GatheringSession;
+import dev.kizuna.meridian.server.BodyTimeSource;
+
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.function.Consumer;
+
+/** 单玩家的可信运动编排；账本、占用与恢复只由框架命令处理器修改。 */
+final class HumanPlayerBody {
+    static final String MOVEMENT_INSTANCE = "human.minecraft.locomotion";
+    static final double WALK_ENDURANCE_SECONDS = 300;
+    static final double SPRINT_ENDURANCE_SECONDS = 75;
+    private static final AddonRegistry CONTENT = installContent();
+
+    enum Motion {
+        IDLE("", "静止"), WALK("human:walk", "行走"), SPRINT("human:run", "疾跑");
+
+        final String actionId;
+        final String displayName;
+
+        Motion(String actionId, String displayName) {
+            // Minecraft 适配只识别三种当前运动状态，实际占用来自注册的内容定义。
+            this.actionId = actionId;
+            this.displayName = displayName;
+        }
+    }
+
+    private final BodyId id;
+    private final InMemoryBodyStore store;
+    private final BodyCommandHandler<String> commands;
+    private Motion motion = Motion.IDLE;
+    private long targetMillis;
+    private long accountedMillis;
+    private long nextBoundaryMillis;
+    private TimeAdvanceMode timeMode = TimeAdvanceMode.ACTIVE;
+    private String sourceId;
+    private GatheringSession<String> gathering;
+    private Consumer<GatheringResponse> gatheringOutput;
+    private final Set<String> breathingActions = new HashSet<>();
+
+    HumanPlayerBody(BodySnapshot saved, List<CommandReceipt> receipts, QiInventory releasedQi) {
+        // 同时恢复身体、成功回执及释放账，不能在登录时重建疲劳或重发历史释放。
+        this(saved, new InMemoryBodyStore(List.of(saved), receipts, releasedQi), Set.of());
+    }
+
+    HumanPlayerBody(BodySnapshot saved, InMemoryBodyStore store, Set<String> breathingActions) {
+        // 世界中所有玩家共享同一个事务 Store，同区域灵气不会被每个玩家各复制一份。
+        id = saved.id();
+        accountedMillis = saved.settledAt().elapsedMillis();
+        targetMillis = accountedMillis;
+        this.store = store;
+        this.breathingActions.addAll(breathingActions);
+        BodyTimeSource<String> clock = (caller, body) -> TimeAdvancePlan.newBuilder()
+                .setTarget(BodyProtobuf.toTime(body.settledAt()).toBuilder().setElapsedMillis(targetMillis))
+                .setBiologicalSecondsPerSimulationSecond(1).setMode(timeMode).build();
+        commands = new BodyCommandHandler<>((caller, command) -> {
+            // 仅内部调度身份可提交命令；网络入口不暴露这些资源变更请求。
+            if (caller.equals(id.value()) && command.getBodyId().equals(id.value())) {
+                return Optional.of(caller);
+            }
+            return Optional.empty();
+        }, (caller, command, body) -> true, clock,
+                store, (caller, receipt, before, after) -> { /* 保存由宿主在事件完成后统一标脏。 */ },
+                CONTENT.recipes(), (caller, body, plan) -> Optional.ofNullable(sourceId), CONTENT.actions());
+    }
+
+    static HumanPlayerBody born(UUID playerId, String epoch, long millis) {
+        // 首次出现该玩家时才使用出生候选；世界存档保留时钟世代和 UUID 绑定。
+        var store = new InMemoryBodyStore(List.of(), List.of(), QiInventory.empty());
+        return born(playerId, epoch, millis, store);
+    }
+
+    static HumanPlayerBody born(UUID playerId, String epoch, long millis, InMemoryBodyStore store) {
+        // 出生只登记新身份，其他身体和环境账户保持在同一 Store 中。
+        var time = BodyMessages.TimeCursor.newBuilder().setDomain("human:minecraft")
+                .setEpoch(epoch).setElapsedMillis(millis).build();
+        byte[] candidate = HumanBirth.candidate(CONTENT.findTemplate(HumanContent.TEMPLATE_ID, 1).orElseThrow(),
+                playerId.toString(), time);
+        BodySnapshot body = BodyProtobuf.decodeSnapshot(candidate);
+        store.registerBody(body);
+        return new HumanPlayerBody(body, store, Set.of());
+    }
+
+    void resume(long millis) {
+        // 离线区间仅按世界模拟时间推进年龄，暂停的单机世界没有额外现实时间恢复。
+        targetMillis = millis;
+        timeMode = TimeAdvanceMode.LIFESPAN_ONLY;
+        advanceTime();
+        timeMode = TimeAdvanceMode.ACTIVE;
+        accountedMillis = millis;
+        for (String instance : Set.copyOf(breathingActions)) {
+            // 世界保存可能发生在按住吸气时；重连只清理本宿主记下的旧会话占用。
+            if (snapshot().actions().stream().anyMatch(action -> action.instanceId().equals(instance))) {
+                execute(BodyCommand.newBuilder().setStopAction(StopAction.newBuilder().setInstanceId(instance)));
+            }
+        }
+        breathingActions.clear();
+        if (!snapshot().vitality().dead() && hasMovementAction()) {
+            // 异常退出的旧移动实例不能在重新登录后永久占用下肢。
+            execute(BodyCommand.newBuilder().setStopAction(StopAction.newBuilder().setInstanceId(MOVEMENT_INSTANCE)));
+        }
+        motion = Motion.IDLE;
+        scheduleNextBoundary();
+    }
+
+    boolean observe(long millis, Motion observed) {
+        // 每 tick 只比较动作和下一边界；持续做功及空闲恢复最多每秒结算一次。
+        if (observed == motion && millis < nextBoundaryMillis) {
+            return false;
+        }
+        settle(millis);
+        if (snapshot().vitality().dead()) {
+            motion = Motion.IDLE;
+            nextBoundaryMillis = Long.MAX_VALUE;
+            return true;
+        }
+        if (observed != motion) {
+            // 先结清旧动作整个区间，再停止旧占用和建立新占用，防止边走边恢复。
+            if (hasMovementAction()) {
+                execute(BodyCommand.newBuilder().setStopAction(StopAction.newBuilder().setInstanceId(MOVEMENT_INSTANCE)));
+            }
+            if (observed != Motion.IDLE) {
+                execute(BodyCommand.newBuilder().setStartAction(StartAction.newBuilder().setInstanceId(MOVEMENT_INSTANCE)
+                        .setActionId(observed.actionId).setActionVersion(1)));
+            }
+            motion = observed;
+        }
+        scheduleNextBoundary();
+        return true;
+    }
+
+    void settle(long millis) {
+        // 同一时刻的观察和查询不能重复扣费；时间来自服务端主世界累计 tick。
+        if (millis < accountedMillis) {
+            throw HumanErrors.invalid(HumanErrors.INVALID_MOVEMENT_TIME);
+        }
+        double elapsedSeconds = (millis - accountedMillis) / 1000.0;
+        targetMillis = millis;
+        advanceTime();
+        if (elapsedSeconds > 0 && motion != Motion.IDLE && !snapshot().vitality().dead()) {
+            // 行走按基础耐力的 1/300 每秒、疾跑按 1/75 每秒申请做功；伤势和疲劳仍限制实际能力。
+            double enduranceSeconds = motion == Motion.SPRINT ? SPRINT_ENDURANCE_SECONDS : WALK_ENDURANCE_SECONDS;
+            BodySnapshot body = snapshot();
+            var loads = ExertTissues.newBuilder();
+            var action = CONTENT.actions().find(motion.actionId, 1).orElseThrow();
+            for (String tissueId : action.getTissueIdsList()) {
+                Anatomy.TissueDefinition definition = body.structure().tissues().stream()
+                        .filter(tissue -> tissue.id().value().equals(tissueId)).findFirst().orElseThrow();
+                Anatomy.TissueCapacity available = TissueCapabilities.available(body, definition.id());
+                double desiredWatts = definition.capacity().enduranceJoules() / enduranceSeconds;
+                double payableWatts = Math.min(desiredWatts, available.burstWatts());
+                payableWatts = Math.min(payableWatts, available.enduranceJoules() / elapsedSeconds);
+                if (payableWatts > 0) {
+                    loads.addLoads(ExertTissue.newBuilder().setTissueId(tissueId).setForceNewtons(0)
+                            .setPowerWatts(payableWatts).setDurationSeconds(elapsedSeconds));
+                }
+            }
+            if (loads.getLoadsCount() > 0) {
+                execute(BodyCommand.newBuilder().setExertTissues(loads));
+            }
+        }
+        accountedMillis = millis;
+        scheduleNextBoundary();
+    }
+
+    BodySnapshot snapshot() {
+        // 暴露不可变权威事实供保存和展示，不提供外部写入入口。
+        return store.find(id).orElseThrow();
+    }
+
+    List<CommandReceipt> receipts() {
+        // 去重事实与身体放进同一份世界持久化记录。
+        return store.receipts().stream().filter(receipt -> receipt.getCommand().getBodyId().equals(id.value())).toList();
+    }
+
+    void selectEnvironment(String sourceId, long millis) {
+        // 跨区域先结清旧位置的时间，不能用新区域浓度追溯领取上一段灵气。
+        if (!java.util.Objects.equals(this.sourceId, sourceId)) {
+            settle(millis);
+            this.sourceId = sourceId;
+        }
+    }
+
+    void connectGathering(long millis, Consumer<GatheringResponse> output) {
+        // 同一个真实身体仅保留一个连接会话，窗口开关不会创建演示身体。
+        disconnectGathering(millis);
+        targetMillis = millis;
+        gathering = new GatheringSession<>(id.value(), id, commands, store,
+                (caller, requested) -> caller.equals(id.value()) && requested.equals(id),
+                (caller, body) -> TimeAdvancePlan.newBuilder()
+                        .setTarget(BodyProtobuf.toTime(body.settledAt()).toBuilder().setElapsedMillis(targetMillis))
+                        .setBiologicalSecondsPerSimulationSecond(1).setMode(timeMode).build(),
+                body -> sourceId == null ? Optional.empty() : store.environmentSource(sourceId), CONTENT.recipes());
+        gathering.enableBreathing(HumanContent.breathing());
+        gatheringOutput = output;
+    }
+
+    GatheringResponse gather(long millis, GatheringRequest request) {
+        // 请求只有输入方向与序号；玩家、时钟、环境和能力由当前宿主绑定。
+        targetMillis = millis;
+        gathering.synchronizeBodyRevision();
+        Set<String> previous = actionIds();
+        try {
+            return GatheringResponse.parseFrom(gathering.handle(request.toByteArray()));
+        } catch (com.google.protobuf.InvalidProtocolBufferException failure) {
+            throw HumanErrors.invalidGatheringResponse(failure);
+        } finally {
+            rememberBreathingActions(previous);
+            scheduleNextBoundary();
+        }
+    }
+
+    boolean advanceGathering(long millis) {
+        // 只在会话边界执行气流；普通玩家静止且未吐纳时没有这项周期计算。
+        targetMillis = millis;
+        if (gathering == null || gathering.nextBoundaryMillis() == 0 || millis < gathering.nextBoundaryMillis()) {
+            return false;
+        }
+        gathering.synchronizeBodyRevision();
+        Set<String> previous = actionIds();
+        boolean changed = gathering.advance();
+        rememberBreathingActions(previous);
+        if (changed) {
+            publishGathering();
+            scheduleNextBoundary();
+        }
+        return changed;
+    }
+
+    void publishGathering() {
+        // 恢复或气流改变后推送同一身体投影，使关闭吐纳后的余力也跟随实际恢复。
+        if (gathering != null && gatheringOutput != null) {
+            gatheringOutput.accept(GatheringResponse.newBuilder().setProtocolVersion(1)
+                    .setRequestId("state").setView(gathering.view()).build());
+        }
+    }
+
+    void disconnectGathering(long millis) {
+        // 先解除旧会话占用再清掉连接；已经进入器官或在途的真元留在权威身体中。
+        targetMillis = millis;
+        if (gathering != null) {
+            gathering.close();
+            gathering = null;
+            gatheringOutput = null;
+            breathingActions.clear();
+            scheduleNextBoundary();
+        }
+    }
+
+    Set<String> breathingActions() {
+        // 保存宿主自己的占用身份，重连不会误删其他附属启动的动作。
+        return Set.copyOf(breathingActions);
+    }
+
+    private Set<String> actionIds() {
+        // 记录会话执行前的身份集，用差集追踪本次新增占用。
+        return snapshot().actions().stream().map(action -> action.instanceId())
+                .collect(java.util.stream.Collectors.toSet());
+    }
+
+    private void rememberBreathingActions(Set<String> previous) {
+        // 服务器串行执行期间只可能由该会话新增动作，结束后的身份及时移除。
+        Set<String> current = actionIds();
+        breathingActions.retainAll(current);
+        current.removeAll(previous);
+        breathingActions.addAll(current);
+    }
+
+    QiInventory releasedQi() {
+        // 寿尽释放保留唯一账本，宿主后续可按世界环境规则接收。
+        return store.environmentQi();
+    }
+
+    Motion motion() {
+        // 显示已接受的服务端运动状态，不能从客户端按键猜测。
+        return motion;
+    }
+
+    private boolean hasMovementAction() {
+        // 只管理 Minecraft 移动自己的实例，保留吐纳与功法的其他占用。
+        return snapshot().actions().stream().anyMatch(action -> action.instanceId().equals(MOVEMENT_INSTANCE));
+    }
+
+    private void advanceTime() {
+        // 死体和同毫秒无需提交；冻结恢复与正常推进都经过同一核心时间契约。
+        BodySnapshot body = snapshot();
+        if (!body.vitality().dead() && targetMillis != body.settledAt().elapsedMillis()) {
+            execute(BodyCommand.newBuilder().setAdvanceTime(AdvanceTime.getDefaultInstance()));
+        }
+    }
+
+    private void execute(BodyCommand.Builder command) {
+        // 每笔内部意图有独立身份和当前版本；收到明确成功后才继续下一步编排。
+        var request = RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId(UUID.randomUUID().toString())
+                .setBodyCommand(command.setBodyId(id.value()).setExpectedRevision(snapshot().revision())).build();
+        ResponseEnvelope response = MeridianProtocol.decodeResponse(commands.handle(id.value(), request.toByteArray()));
+        if (response.hasFailure()) {
+            throw HumanErrors.hostRejected(response.getFailure().getCode());
+        }
+    }
+
+    private void scheduleNextBoundary() {
+        // 满恢复的静止身体只等待已有事件或真实动作变化，不安排恢复轮询。
+        BodySnapshot body = snapshot();
+        if (body.vitality().dead()) {
+            nextBoundaryMillis = Long.MAX_VALUE;
+            return;
+        }
+        long existingEvent = BodyTimeAdvancement.nextEventBoundary(body, 1, BodyTimeAdvancement.Mode.ACTIVE)
+                .map(boundary -> boundary.elapsedMillis()).orElse(Long.MAX_VALUE);
+        boolean hasFatigue = body.tissueStates().stream().anyMatch(tissue -> tissue.fatigue() > 0);
+        nextBoundaryMillis = existingEvent;
+        if (motion != Motion.IDLE || hasFatigue) {
+            nextBoundaryMillis = Math.min(existingEvent, accountedMillis + 1000);
+        }
+    }
+
+    private static AddonRegistry installContent() {
+        // Fabric 与参考宿主使用同一清单校验，无人体内容的框架仍可独立运行。
+        var host = AddonHostProfile.newBuilder().setHostId("meridian:fabric").setApiVersion(1)
+                .addCapabilities(AddonRegistry.BODY_TEMPLATES).addCapabilities(AddonRegistry.ORGAN_RECIPES)
+                .addCapabilities(AddonRegistry.ORGAN_INTAKE).addCapabilities(AddonRegistry.ACTIONS)
+                .addCapabilities(AddonRegistry.TISSUE_RECOVERY);
+        return AddonRegistry.load(AddonRegistration.newBuilder().setProtocolVersion(1).setHost(host)
+                .addBundles(HumanContent.bundle()).build());
+    }
+}

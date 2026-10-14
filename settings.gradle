@@ -1,12 +1,13 @@
 pluginManagement {
     repositories {
+        maven { url = 'https://maven.fabricmc.net/' }
         gradlePluginPortal()
         mavenCentral()
     }
 }
 
 rootProject.name = 'kizuna-meridian-human-addon'
-include 'client', 'server'
+include 'client', 'server', 'fabric'
 
 // 框架尚未发布 Maven 产物；开发时显式从独立仓库构建，不复制它的源码或协议。
 def frameworkDirectory = providers.gradleProperty('meridianFrameworkDir')
