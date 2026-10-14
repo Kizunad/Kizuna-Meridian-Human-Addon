@@ -79,7 +79,7 @@ public class HumanGatheringTest {
         assertTrue(finished.getAttentionRatio() < 1 && finished.getStaminaRatio() < 1);
         assertEquals(100.36, host.body().totalQi() + host.sourceTotal() + host.store.environmentQi().totalQi(), 1e-9);
 
-        // 停止、重开不会回填组织预算，同请求重放也不能再次消费或领取。
+        // 同时刻停止、重开不会额外恢复；同请求重放也不能再次消费或领取。
         breath(session, sequence++, BreathAction.END_BREATHING, .5, .4);
         BodySnapshot stopped = host.body();
         session.close();
@@ -95,6 +95,48 @@ public class HumanGatheringTest {
         reopened.advance();
         assertFalse(reopened.view().getBreathing().getActive());
         assertEquals(restarted, host.body());
+    }
+
+    @Test
+    public void registeredActionsBlockOnlyTheirTissuesAndBreathingReleasesItsOwnUse() throws IOException {
+        // 行走与吐纳由人体包登记，实际动作和疲劳统一留在框架快照。
+        var host = new Host(source(100), null);
+        assertTrue(host.registry.actions().find("human:run", 1).isPresent());
+        host.commit(RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId("walk")
+                .setBodyCommand(BodyCommand.newBuilder().setBodyId("test-human").setExpectedRevision(host.body().revision())
+                        .setStartAction(StartAction.newBuilder().setInstanceId("walking").setActionId("human:walk")
+                                .setActionVersion(1))).build().toByteArray());
+        var session = host.session();
+        session.enableBreathing(HumanContent.breathing());
+        breath(session, 1, BreathAction.BEGIN_BREATHING, 0, 0);
+        breath(session, 2, BreathAction.INHALE, 0, 0);
+        assertEquals(2, host.body().actions().size());
+        host.now = 250;
+        session.advance();
+        breath(session, 3, BreathAction.HOLD, 0, 0);
+        assertEquals("human:walk", host.body().actions().get(0).definition().id().value());
+        assertEquals(1, host.body().actions().size());
+        double fatigue = tissueFatigue(host.body(), "diaphragm");
+        assertTrue(fatigue > 0);
+        host.now = 500;
+        session.advance();
+        assertEquals(fatigue * Math.exp(-Math.log(2) * .25 / 30), tissueFatigue(host.body(), "diaphragm"), 1e-10);
+
+        // 外部动作令原编排版本失效时，关闭仍能解除吐纳；行走占用不会被一并删除。
+        breath(session, 4, BreathAction.INHALE, 0, 0);
+        host.commit(RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId("run")
+                .setBodyCommand(BodyCommand.newBuilder().setBodyId("test-human").setExpectedRevision(host.body().revision())
+                        .setStartAction(StartAction.newBuilder().setInstanceId("running").setActionId("human:run")
+                                .setActionVersion(1))).build().toByteArray());
+        session.close();
+        assertEquals(List.of("human:walk", "human:run"), host.body().actions().stream()
+                .map(action -> action.definition().id().value()).toList());
+    }
+
+    private static double tissueFatigue(BodySnapshot body, String tissueId) {
+        // 断言实际组织的唯一疲劳状态，避免只核验可能过期的界面比例。
+        return body.tissueStates().stream().filter(tissue -> tissue.id().value().equals(tissueId))
+                .findFirst().orElseThrow().fatigue();
     }
 
     @Test
@@ -482,7 +524,8 @@ public class HumanGatheringTest {
         // 宿主画像由可信测试宿主提供，不能借 Human 自己声称有能力跳过校验。
         var host = AddonHostProfile.newBuilder().setHostId("meridian:java_reference").setApiVersion(1)
                 .addCapabilities(AddonRegistry.BODY_TEMPLATES).addCapabilities(AddonRegistry.ORGAN_RECIPES)
-                .addCapabilities(AddonRegistry.ORGAN_INTAKE);
+                .addCapabilities(AddonRegistry.ORGAN_INTAKE).addCapabilities(AddonRegistry.ACTIONS)
+                .addCapabilities(AddonRegistry.TISSUE_RECOVERY);
         return AddonRegistration.newBuilder().setProtocolVersion(1).setHost(host)
                 .addBundles(AddonProtobuf.decodeBundle(HumanContent.payload())).build();
     }
@@ -549,7 +592,7 @@ public class HumanGatheringTest {
                     (context, body) -> TimeAdvancePlan.newBuilder().setTarget(time(now))
                             .setBiologicalSecondsPerSimulationSecond(1).setMode(TimeAdvanceMode.ACTIVE).build(),
                     store, (context, receipt, before, after) -> receipts.add(receipt), registry.recipes(),
-                    (context, body, plan) -> Optional.of("test-region"));
+                    (context, body, plan) -> Optional.of("test-region"), registry.actions());
         }
 
         private BodySnapshot body() {

@@ -32,13 +32,16 @@ public final class HumanContent {
                 .addRequiredCapabilities("meridian:body_templates_v1")
                 .addRequiredCapabilities("meridian:organ_recipes_v1")
                 .addRequiredCapabilities("meridian:organ_intake_v1")
+                .addRequiredCapabilities("meridian:actions_v1")
+                .addRequiredCapabilities("meridian:tissue_recovery_v2")
                 .addSupportedHosts("meridian:java_reference")
                 .addSupportedHosts("meridian:fabric")
                 .addSupportedHosts("bong:server");
         BodyStructure structure = HumanAnatomy.structure();
         var template = BodyTemplate.newBuilder().setReference(TemplateReference.newBuilder()
                 .setId(TEMPLATE_ID).setVersion(CONTENT_VERSION)).setStructure(structure).build();
-        var bundle = AddonBundle.newBuilder().setSchemaVersion(1).setManifest(manifest).addTemplates(template);
+        var bundle = AddonBundle.newBuilder().setSchemaVersion(1).setManifest(manifest).addTemplates(template)
+                .addAllActions(HumanActions.definitions());
 
         // 先登记模板实际使用的类型；两肺共享 lung 类型，但局部器官 ID 各自独立。
         var tissueKinds = new TreeSet<String>();
@@ -80,7 +83,8 @@ public final class HumanContent {
     public static BreathingProfile breathing() {
         // 空气容量与流速是人体内容；双肺总计 5 升、每秒 1.25 升，一次完整吸气约 4 秒。
         var profile = BreathingProfile.newBuilder().setRespiratoryTissueId("diaphragm")
-                .setAttentionTissueId("attention_network").setRespiratoryWatts(30).setAttentionWatts(4);
+                .setAttentionTissueId("attention_network").setRespiratoryWatts(30).setAttentionWatts(4)
+                .setBodyAction(BreathingActionReference.newBuilder().setId("human:breathing").setVersion(1));
         for (String side : List.of("left", "right")) {
             profile.addOrgans(BreathingOrgan.newBuilder().setOrganId(side + "_lung")
                     .setAirCapacityLiters(2.5).setAirflowLitersPerSecond(.625));

@@ -35,7 +35,8 @@ public final class GatheringDemo {
         // 宿主先提供能力画像并注册内容，再以自己的身份与时钟首次创建人体。
         var profile = AddonHostProfile.newBuilder().setHostId("meridian:java_reference").setApiVersion(1)
                 .addCapabilities(AddonRegistry.BODY_TEMPLATES).addCapabilities(AddonRegistry.ORGAN_RECIPES)
-                .addCapabilities(AddonRegistry.ORGAN_INTAKE);
+                .addCapabilities(AddonRegistry.ORGAN_INTAKE).addCapabilities(AddonRegistry.ACTIONS)
+                .addCapabilities(AddonRegistry.TISSUE_RECOVERY);
         var registration = AddonRegistration.newBuilder().setProtocolVersion(1).setHost(profile)
                 .addBundles(AddonProtobuf.decodeBundle(HumanContent.payload())).build();
         AddonRegistry registry = AddonRegistry.load(registration);
@@ -62,7 +63,7 @@ public final class GatheringDemo {
                 (caller, body) -> TimeAdvancePlan.newBuilder().setTarget(time(clock.millis))
                         .setBiologicalSecondsPerSimulationSecond(1).setMode(TimeAdvanceMode.ACTIVE).build(),
                 store, (caller, receipt, before, after) -> { /* 审计不承担资源转移。 */ },
-                registry.recipes(), (caller, body, plan) -> Optional.of("demo-region"));
+                registry.recipes(), (caller, body, plan) -> Optional.of("demo-region"), registry.actions());
 
         // 一轮由五个显式请求组成；等待时间取权威事件，不创建逐帧轮询或额外运行账本。
         show("出生", store);

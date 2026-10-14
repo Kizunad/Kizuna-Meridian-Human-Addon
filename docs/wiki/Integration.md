@@ -31,7 +31,7 @@ Java 编译、测试、内容导出与演示均使用 17。框架自己的构建
 
 ## 内容前置
 
-Human 清单声明 API 修订 `[1,1]`，要求 `body_templates_v1`、`organ_recipes_v1`、`organ_intake_v1` 三项框架能力。框架保留命名空间 `meridian` 不是可以注册的普通包，因此不能伪造一条名为 `meridian` 的 `AddonDependency`。
+Human 清单声明 API 修订 `[1,1]`，要求 `body_templates_v1`、`organ_recipes_v1`、`organ_intake_v1`、`actions_v1`、`tissue_recovery_v2` 五项 `meridian:` 框架能力。后两项对应动作占用和指数恢复，须同步使用支持这些契约的框架 checkout。框架保留命名空间 `meridian` 不是可以注册的普通包，因此不能伪造一条名为 `meridian` 的 `AddonDependency`。
 
 本包没有其他生物内容包前置。其他附属使用 `human:lung` 等类型时，必须显式声明 `human` 及允许的包修订区间。例如以下是 `AddonManifest` 中的 Protobuf TextFormat 字段片段：
 
@@ -62,10 +62,12 @@ var initialBody = BodyProtobuf.decodeSnapshot(candidate);
 
 跨语言宿主读取同一个 `AddonBundle` 得到完整构型和配方，可接收可信 Java 初始化方输出的 `BodySnapshot` 字节；若独立实现出生初始化，还须遵循[人体初值](Human-Definition.md)，当前包清单尚无通用出生参数字段。Java 函数不是跨语言通信要求。
 
-`registry.recipes()` 传入框架 `BodyCommandHandler`。宿主提供真实身份授权、私有策略、可信时间、区间位置来源与事务存储；Human 不替宿主绕过这些边界。基本聚气使用 [GatheringRequests 请求流程](Gathering.md)，未来界面和 3D 编辑器可走相同入口。
+`registry.recipes()`、宿主环境来源和 `registry.actions()` 分别传入框架 `BodyCommandHandler` 第六至第八个参数。宿主提供真实身份授权、私有策略、可信时间、区间位置来源与事务存储；Human 不替宿主绕过这些边界。基本聚气使用 [GatheringRequests 请求流程](Gathering.md)，未来界面和 3D 编辑器可走相同入口。
+
+宿主根据真实行走/跑步状态提交 `start_action` / `stop_action`，每次切换前先结算至该事件时刻；玩家不能自己报告停止跑步以骗取恢复。吐纳会话已经管理 `human:breathing` 实例，关闭会话须在撤销权限前执行；清理失败交给可信宿主重试。动画播放请求与身体动作实例分别管理，播放成功不等于动作已登记或费用已支付。
 
 ## 整体验证
 
-`HumanGatheringTest` 保留四类整体回归：交付 JAR/依赖关系；五行及左右肺完整聚气与守恒；浓度、器官状态、授权和容量失败；加工/在途保存恢复与幂等重试。既有框架内部算法测试不在人体仓库重复复制。
+`HumanGatheringTest` 保留交付 JAR/依赖关系、五行及左右肺聚气与守恒、授权/容量失败、加工/在途保存恢复、幂等重试与手动吐纳整体回归。动作覆盖行走和吐纳并存、停气释放、指数恢复以及外部版本变化后的占用清理；框架内部算法测试不在人体仓库逐项复制。
 
 新增自定义宿主、支持另一版内容协议、改变模板或配方后，应重跑 `build` 与 `demo`。当前使用内存权威核心，真实单机、专服和 Bong 的网络与持久化验收另行完成。
