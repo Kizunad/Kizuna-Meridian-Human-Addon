@@ -11,7 +11,7 @@ import java.util.List;
 public final class HumanOpening {
     public static final String ACTION_ID = "human:open_meridian";
     public static final String POLICY_ID = "human:meridian_opening";
-    public static final int RULE_VERSION = 4;
+    public static final int RULE_VERSION = 5;
     public static final double CAPACITY_GAIN = 16.25;
     public static final double PRESSURE_QI = 22;
 
@@ -25,19 +25,20 @@ public final class HumanOpening {
     }
 
     public static Realm minimumRealm(String meridianId) {
-        // 左右各四条手部正经作为起步层；展示导出和权威条件共用这份人体内容定义。
+        // 起步覆盖四肢：每侧先开放两条手经、两条足经，后续逐层补全其他正经与奇经。
+        // 展示导出和权威条件共用此表，保证看见的经脉与当前可拓宽的范围一致。
         return switch (meridianId) {
             case "left_lung_meridian", "right_lung_meridian",
                     "left_large_intestine_meridian", "right_large_intestine_meridian",
-                    "left_heart_meridian", "right_heart_meridian",
-                    "left_small_intestine_meridian", "right_small_intestine_meridian" -> Realm.AWAKENING;
+                    "left_spleen_meridian", "right_spleen_meridian",
+                    "left_stomach_meridian", "right_stomach_meridian" -> Realm.AWAKENING;
+            case "left_heart_meridian", "right_heart_meridian",
+                    "left_small_intestine_meridian", "right_small_intestine_meridian",
+                    "left_kidney_meridian", "right_kidney_meridian",
+                    "left_bladder_meridian", "right_bladder_meridian" -> Realm.QI_GUIDANCE;
             case "left_pericardium_meridian", "right_pericardium_meridian",
                     "left_triple_burner_meridian", "right_triple_burner_meridian",
-                    "left_spleen_meridian", "right_spleen_meridian",
-                    "left_stomach_meridian", "right_stomach_meridian" -> Realm.QI_GUIDANCE;
-            case "left_kidney_meridian", "right_kidney_meridian",
                     "left_liver_meridian", "right_liver_meridian",
-                    "left_bladder_meridian", "right_bladder_meridian",
                     "left_gallbladder_meridian", "right_gallbladder_meridian" -> Realm.MERIDIAN_CONDENSATION;
             case "left_yin_qiao", "left_yang_qiao", "left_yin_wei", "left_yang_wei",
                     "right_yin_qiao", "right_yang_qiao", "right_yin_wei", "right_yang_wei" -> Realm.ESSENCE_SOLIDIFICATION;

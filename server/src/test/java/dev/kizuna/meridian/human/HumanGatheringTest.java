@@ -37,6 +37,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.zip.ZipFile;
 
 import static org.junit.Assert.*;
@@ -53,7 +55,7 @@ public class HumanGatheringTest {
         var locked = RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId("locked-opening")
                 .setBodyCommand(BodyCommand.newBuilder().setBodyId("test-human").setExpectedRevision(host.body().revision())
                         .setStartMeridianOpening(dev.kizuna.meridian.protocol.pb.OpeningMessages.StartMeridianOpening.newBuilder()
-                                .setRuleId("human:open/left_spleen_meridian").setRuleVersion(HumanOpening.RULE_VERSION)))
+                                .setRuleId("human:open/left_heart_meridian").setRuleVersion(HumanOpening.RULE_VERSION)))
                 .build().toByteArray();
         host.rejectUnchanged(locked, FailureCode.OPENING_REQUIREMENTS_UNMET);
 
@@ -62,7 +64,7 @@ public class HumanGatheringTest {
         var higher = new Host(source(100), higherBody);
         higher.commit(locked);
         var rule = HumanContent.bundle().getOpeningRulesList().stream()
-                .filter(item -> item.getTargetMeridianId().equals("left_spleen_meridian")).findFirst().orElseThrow();
+                .filter(item -> item.getTargetMeridianId().equals("left_heart_meridian")).findFirst().orElseThrow();
         var check = dev.kizuna.meridian.protocol.pb.OpeningPolicyMessages.OpeningPolicyRequest.newBuilder()
                 .setProtocolVersion(1).setBody(higher.message().toBuilder().setRealm(BodyMessages.Realm.AWAKENING))
                 .setRule(rule).setPhase(dev.kizuna.meridian.protocol.pb.OpeningPolicyMessages.OpeningPolicyPhase.CHECK_OPENING)
@@ -94,6 +96,22 @@ public class HumanGatheringTest {
         double[] expectedGroupQi = {22, 39.75, 58.5, 78.25, 99, 120.75, 143.5, 167.25};
         var awakeningRules = rules.stream().filter(item ->
                 HumanOpening.minimumRealm(item.getTargetMeridianId()) == BodyMessages.Realm.AWAKENING).toList();
+
+        // 醒灵必须同时覆盖双臂与双腿，不能在满足八条数量时又退回到只有手经的分组。
+        Set<String> awakeningIds = awakeningRules.stream()
+                .map(BodyMessages.MeridianOpeningRule::getTargetMeridianId).collect(Collectors.toSet());
+        assertEquals(Set.of("left_lung_meridian", "right_lung_meridian",
+                "left_large_intestine_meridian", "right_large_intestine_meridian",
+                "left_spleen_meridian", "right_spleen_meridian",
+                "left_stomach_meridian", "right_stomach_meridian"), awakeningIds);
+        Set<String> coveredParts = initial.getStructure().getMeridiansList().stream()
+                .filter(meridian -> awakeningIds.contains(meridian.getId()))
+                .flatMap(meridian -> meridian.getPartIdsList().stream()).collect(Collectors.toSet());
+        assertTrue(coveredParts.containsAll(Set.of("left_upper_arm", "right_upper_arm",
+                "left_forearm", "right_forearm", "left_hand", "right_hand",
+                "left_thigh", "right_thigh", "left_lower_leg", "right_lower_leg",
+                "left_foot", "right_foot")));
+
         var progressedBody = initial.toBuilder();
         for (int index = 0; index < awakeningRules.size(); index++) {
             var openingRule = awakeningRules.get(index);

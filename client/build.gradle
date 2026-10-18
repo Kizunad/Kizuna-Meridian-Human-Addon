@@ -25,6 +25,8 @@ tasks.register('exportPresentation', JavaExec) {
     mainClass = 'dev.kizuna.meridian.human.tooling.ExportPresentation'
     args file('src/model').absolutePath, presentationDirectory.get().asFile.absolutePath
     inputs.files(sourceSets.main.output.classesDirs, sourceSets.tooling.output.classesDirs, configurations.compileClasspath)
+    // 分层来自服务端内容；其运行依赖变化后也必须重新导出，避免仍使用旧的可见范围。
+    inputs.files(configurations.toolingRuntimeClasspath)
     inputs.dir('src/model')
     outputs.dir(presentationDirectory)
 }
