@@ -31,18 +31,18 @@ public final class HumanOpening {
             case "left_lung_meridian", "right_lung_meridian",
                     "left_large_intestine_meridian", "right_large_intestine_meridian",
                     "left_spleen_meridian", "right_spleen_meridian",
-                    "left_stomach_meridian", "right_stomach_meridian" -> Realm.AWAKENING;
+                    "left_stomach_meridian", "right_stomach_meridian" -> Realm.WANDERING_QI;
             case "left_heart_meridian", "right_heart_meridian",
                     "left_small_intestine_meridian", "right_small_intestine_meridian",
                     "left_kidney_meridian", "right_kidney_meridian",
-                    "left_bladder_meridian", "right_bladder_meridian" -> Realm.QI_GUIDANCE;
+                    "left_bladder_meridian", "right_bladder_meridian" -> Realm.TRUE_QI;
             case "left_pericardium_meridian", "right_pericardium_meridian",
                     "left_triple_burner_meridian", "right_triple_burner_meridian",
                     "left_liver_meridian", "right_liver_meridian",
-                    "left_gallbladder_meridian", "right_gallbladder_meridian" -> Realm.MERIDIAN_CONDENSATION;
+                    "left_gallbladder_meridian", "right_gallbladder_meridian" -> Realm.ESSENCE_TRANSFORMATION;
             case "left_yin_qiao", "left_yang_qiao", "left_yin_wei", "left_yang_wei",
-                    "right_yin_qiao", "right_yang_qiao", "right_yin_wei", "right_yang_wei" -> Realm.ESSENCE_SOLIDIFICATION;
-            case "ren", "du", "chong", "dai" -> Realm.SPIRITUAL_ATTUNEMENT;
+                    "right_yin_qiao", "right_yang_qiao", "right_yin_wei", "right_yang_wei" -> Realm.ESSENCE_CONDENSATION;
+            case "ren", "du", "chong", "dai" -> Realm.HEAVENLY_PATTERN;
             default -> throw HumanErrors.invalid(HumanErrors.INVALID_OPENING_POLICY);
         };
     }

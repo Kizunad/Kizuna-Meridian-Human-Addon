@@ -66,13 +66,13 @@ public final class HumanContent {
                     .setVersion(CONTENT_VERSION).setOrganKind("human:lung")
                     .setInput(inventory(attribute, RAW_QI_PER_BATCH))
                     .setOutput(inventory("meridian:none", REFINED_QI_PER_BATCH))
-                    .setDurationMillis(REFINING_MILLIS).setMinimumRealm(Realm.AWAKENING));
+                    .setDurationMillis(REFINING_MILLIS).setMinimumRealm(Realm.WANDERING_QI));
             // 手动接触摄入读取此配方的转换比例，实际剂量由环境浓度和粒子采样体积决定。
             bundle.addOrganRecipes(OrganRecipe.newBuilder()
                     .setId("human:breath_" + attribute.substring(attribute.indexOf(':') + 1))
                     .setVersion(CONTENT_VERSION).setOrganKind("human:lung")
                     .setInput(inventory(attribute, .05)).setOutput(inventory("meridian:none", .01))
-                    .setDurationMillis(100).setMinimumRealm(Realm.AWAKENING));
+                    .setDurationMillis(100).setMinimumRealm(Realm.WANDERING_QI));
         }
         AddonBundle result = bundle.build();
         AddonProtobuf.validateBundle(result);

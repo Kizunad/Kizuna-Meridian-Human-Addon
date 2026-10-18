@@ -25,7 +25,7 @@ public final class HumanBirth {
         }
         BodyProtobuf.fromMessage(installedTemplate);
         var body = BodySnapshot.newBuilder().setSchemaVersion(2).setId(bodyId).setTemplate(reference)
-                .setStructure(installedTemplate.getStructure()).setRealm(Realm.AWAKENING).setRevision(0)
+                .setStructure(installedTemplate.getStructure()).setRealm(Realm.WANDERING_QI).setRevision(0)
                 .setSettledAt(initialTime)
                 .setVitality(VitalityState.newBuilder().setAgeSeconds(INITIAL_AGE_YEARS * SECONDS_PER_YEAR)
                         .setLifespanLimitSeconds(LIFESPAN_YEARS * SECONDS_PER_YEAR)

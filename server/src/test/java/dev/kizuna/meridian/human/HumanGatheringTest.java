@@ -60,13 +60,13 @@ public class HumanGatheringTest {
         host.rejectUnchanged(locked, FailureCode.OPENING_REQUIREMENTS_UNMET);
 
         // 同一规则在满足境界后可启动；运行中失去层级不再累计适应时间。
-        var higherBody = initial.toBuilder().setRealm(BodyMessages.Realm.QI_GUIDANCE).build();
+        var higherBody = initial.toBuilder().setRealm(BodyMessages.Realm.TRUE_QI).build();
         var higher = new Host(source(100), higherBody);
         higher.commit(locked);
         var rule = HumanContent.bundle().getOpeningRulesList().stream()
                 .filter(item -> item.getTargetMeridianId().equals("left_heart_meridian")).findFirst().orElseThrow();
         var check = dev.kizuna.meridian.protocol.pb.OpeningPolicyMessages.OpeningPolicyRequest.newBuilder()
-                .setProtocolVersion(1).setBody(higher.message().toBuilder().setRealm(BodyMessages.Realm.AWAKENING))
+                .setProtocolVersion(1).setBody(higher.message().toBuilder().setRealm(BodyMessages.Realm.WANDERING_QI))
                 .setRule(rule).setPhase(dev.kizuna.meridian.protocol.pb.OpeningPolicyMessages.OpeningPolicyPhase.CHECK_OPENING)
                 .setIntervalMillis(1000).build();
         try {
@@ -77,7 +77,7 @@ public class HumanGatheringTest {
             throw new AssertionError(invalid);
         }
 
-        // 每个阶段都是累计层级；醒灵的八条增量加上全身出生容量，恰好为 150 元。
+        // 每个阶段都是累计层级；游炁的八条增量加上全身出生容量，恰好为 150 元。
         var rules = HumanContent.bundle().getOpeningRulesList();
         int[] expectedCounts = {8, 16, 24, 32, 36, 36};
         for (int realm = 1; realm <= expectedCounts.length; realm++) {
@@ -87,25 +87,25 @@ public class HumanGatheringTest {
         }
         double initialCapacity = initial.getStructure().getMeridiansList().stream()
                 .mapToDouble(BodyMessages.MeridianDefinition::getLumenCapacity).sum();
-        double awakeningGain = rules.stream().filter(item ->
-                        HumanOpening.minimumRealm(item.getTargetMeridianId()) == BodyMessages.Realm.AWAKENING)
+        double wanderingQiGain = rules.stream().filter(item ->
+                        HumanOpening.minimumRealm(item.getTargetMeridianId()) == BodyMessages.Realm.WANDERING_QI)
                 .mapToDouble(BodyMessages.MeridianOpeningRule::getLumenCapacityGain).sum();
-        assertEquals(150, initialCapacity + awakeningGain, 0);
+        assertEquals(150, initialCapacity + wanderingQiGain, 0);
 
         // 各条都通过真实启动请求固定要求，保护递增公式、临时额度与展示使用同一份计划。
         double[] expectedGroupQi = {22, 39.75, 58.5, 78.25, 99, 120.75, 143.5, 167.25};
-        var awakeningRules = rules.stream().filter(item ->
-                HumanOpening.minimumRealm(item.getTargetMeridianId()) == BodyMessages.Realm.AWAKENING).toList();
+        var wanderingQiRules = rules.stream().filter(item ->
+                HumanOpening.minimumRealm(item.getTargetMeridianId()) == BodyMessages.Realm.WANDERING_QI).toList();
 
-        // 醒灵必须同时覆盖双臂与双腿，不能在满足八条数量时又退回到只有手经的分组。
-        Set<String> awakeningIds = awakeningRules.stream()
+        // 游炁必须同时覆盖双臂与双腿，不能在满足八条数量时又退回到只有手经的分组。
+        Set<String> wanderingQiIds = wanderingQiRules.stream()
                 .map(BodyMessages.MeridianOpeningRule::getTargetMeridianId).collect(Collectors.toSet());
         assertEquals(Set.of("left_lung_meridian", "right_lung_meridian",
                 "left_large_intestine_meridian", "right_large_intestine_meridian",
                 "left_spleen_meridian", "right_spleen_meridian",
-                "left_stomach_meridian", "right_stomach_meridian"), awakeningIds);
+                "left_stomach_meridian", "right_stomach_meridian"), wanderingQiIds);
         Set<String> coveredParts = initial.getStructure().getMeridiansList().stream()
-                .filter(meridian -> awakeningIds.contains(meridian.getId()))
+                .filter(meridian -> wanderingQiIds.contains(meridian.getId()))
                 .flatMap(meridian -> meridian.getPartIdsList().stream()).collect(Collectors.toSet());
         assertTrue(coveredParts.containsAll(Set.of("left_upper_arm", "right_upper_arm",
                 "left_forearm", "right_forearm", "left_hand", "right_hand",
@@ -113,8 +113,8 @@ public class HumanGatheringTest {
                 "left_foot", "right_foot")));
 
         var progressedBody = initial.toBuilder();
-        for (int index = 0; index < awakeningRules.size(); index++) {
-            var openingRule = awakeningRules.get(index);
+        for (int index = 0; index < wanderingQiRules.size(); index++) {
+            var openingRule = wanderingQiRules.get(index);
             var attempt = new Host(source(100), fullMeridians(progressedBody.build()));
             attempt.commit(RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId("progressive-opening-" + index)
                     .setBodyCommand(BodyCommand.newBuilder().setBodyId("test-human").setExpectedRevision(attempt.body().revision())
