@@ -34,6 +34,10 @@ public final class HumanContent {
                 .addRequiredCapabilities("meridian:organ_intake_v1")
                 .addRequiredCapabilities("meridian:actions_v1")
                 .addRequiredCapabilities("meridian:tissue_recovery_v2")
+                .addRequiredCapabilities("meridian:passive_qi_flow_v1")
+                .addRequiredCapabilities("meridian:opening_definitions_v1")
+                .addRequiredCapabilities("meridian:opening_runtime_v1")
+                .addRequiredCapabilities("meridian:organ_endurance_v1")
                 .addSupportedHosts("meridian:java_reference")
                 .addSupportedHosts("meridian:fabric")
                 .addSupportedHosts("bong:server");
@@ -41,7 +45,7 @@ public final class HumanContent {
         var template = BodyTemplate.newBuilder().setReference(TemplateReference.newBuilder()
                 .setId(TEMPLATE_ID).setVersion(CONTENT_VERSION)).setStructure(structure).build();
         var bundle = AddonBundle.newBuilder().setSchemaVersion(1).setManifest(manifest).addTemplates(template)
-                .addAllActions(HumanActions.definitions());
+                .addAllActions(HumanActions.definitions()).addAllOpeningRules(HumanOpening.definitions(structure));
 
         // 先登记模板实际使用的类型；两肺共享 lung 类型，但局部器官 ID 各自独立。
         var tissueKinds = new TreeSet<String>();
@@ -63,7 +67,7 @@ public final class HumanContent {
                     .setInput(inventory(attribute, RAW_QI_PER_BATCH))
                     .setOutput(inventory("meridian:none", REFINED_QI_PER_BATCH))
                     .setDurationMillis(REFINING_MILLIS).setMinimumRealm(Realm.AWAKENING));
-            // 手动吐纳采用更小的批次，仍由同一器官目录和环境原子交换执行。
+            // 手动接触摄入读取此配方的转换比例，实际剂量由环境浓度和粒子采样体积决定。
             bundle.addOrganRecipes(OrganRecipe.newBuilder()
                     .setId("human:breath_" + attribute.substring(attribute.indexOf(':') + 1))
                     .setVersion(CONTENT_VERSION).setOrganKind("human:lung")
@@ -84,7 +88,8 @@ public final class HumanContent {
         // 空气容量与流速是人体内容；双肺总计 5 升、每秒 1.25 升，一次完整吸气约 4 秒。
         var profile = BreathingProfile.newBuilder().setRespiratoryTissueId("diaphragm")
                 .setAttentionTissueId("attention_network").setRespiratoryWatts(30).setAttentionWatts(4)
-                .setBodyAction(BreathingActionReference.newBuilder().setId("human:breathing").setVersion(1));
+                .setBodyAction(BreathingActionReference.newBuilder().setId("human:breathing").setVersion(1))
+                .setParticleVolumeBlocks(1);
         for (String side : List.of("left", "right")) {
             profile.addOrgans(BreathingOrgan.newBuilder().setOrganId(side + "_lung")
                     .setAirCapacityLiters(2.5).setAirflowLitersPerSecond(.625));

@@ -6,13 +6,13 @@
 
 | 层 | 当前内容 | 绑定 |
 |---|---|---|
-| `surface` | 原版宽臂玩家静止外形，灰色表层，17 个连续选择区域 | 部位 ID |
+| `surface` | 原版玩家静止外形，使用当前玩家基础皮肤，支持宽臂与窄臂，17 个连续选择区域；默认只显示此层 | 部位 ID |
 | `skeleton` | 23 个骨骼组：颅骨、下颌、分节脊柱、胸骨、左右肋骨/肩带、骨盆、四肢骨及手足骨 | 部位 ID；不是独立骨骼 HP |
 | `muscles` | 19 块具名肌肉，阶梯肌腹、表面肌束、收窄附着端及左右镜像 | 组织 ID |
 | `organs` | 15 个器官：脑、左右眼、左右肺、心、肝胆胃脾肾、膀胱、小肠与大肠 | 器官 ID |
 | `meridians` | 36 条金色血管式脉络；各有弯曲主干、渐细分支、交织深度和局部管径起伏 | 经脉 ID |
 
-唯一几何与贴图编辑源为 `client/src/model/human.bbmodel`，身体映射与说明存放于 `human.textproto`，使用框架 `BodyPresentation` 的标准 Protobuf 文本格式。`HumanPresentation.create()` 读取构建产物，不再用 Java 坐标生成模型。`BlockbenchModel` 在构建期导出 `assets/meridian_human/meridian/adult.pb` 及 `assets/meridian_human/textures/body/anatomy.png`。资源 ID 为 `meridian_human:meridian/adult.pb`，精确绑定 `human:adult` 修订 1。
+解剖模型的几何与贴图编辑源为 `client/src/model/human.bbmodel`，身体映射与说明存放于 `human.textproto`，使用框架 `BodyPresentation` 的标准 Protobuf 文本格式。`BlockbenchModel` 在构建期导出解剖网格与图集；`PlayerSkinSurface` 根据体表选区范围生成原版 64×64 皮肤 UV 与同拓扑窄臂变体，再写入通用 `player_skin` 声明。运行时 `HumanPresentation.create()` 只读取构建产物，不生成坐标。产物为 `assets/meridian_human/meridian/adult.pb` 和 `assets/meridian_human/textures/body/anatomy.png`，模型资源 ID 为 `meridian_human:meridian/adult.pb`，精确绑定 `human:adult` 修订 1。
 
 ## 拼装与编辑
 
@@ -24,7 +24,7 @@
 
 模型内嵌一张 256×320 原创图集，包含骨质孔隙、纵向肌束、脑沟回、肺表面、内脏组织、眼白虹膜、灰色表层与金色经脉材质。直接在 Blockbench 绘制并保存即可参与构建；导出的 PNG 是构建产物，不是第二份编辑源。骨架、肌肉、器官和经脉共用图集，UV 接缝顶点独立，其他重复顶点合并。图集和网格只影响展示，不改变血量与器官能力。
 
-坐标为局部米，Y 向上、Z 向前，X 正向为人体自身左侧。剪影采用原版玩家基础几何：头 8×8×8、躯干 8×12×4、四肢 4×12×4 模型像素，每像素 1/16 米，展示高度为 2 米（不是碰撞箱高度）。使用中立站姿，不叠加帽子、衣袖、护甲或皮肤图案；当前是宽臂版，不读取账号皮肤或动态姿态。17 个命中区域贴合为原版外轮廓，选中单一区域不会改变其比例。
+坐标为局部米，Y 向上、Z 向前，X 正向为人体自身左侧。体表采用原版玩家基础几何：头 8×8×8、躯干 8×12×4、宽臂与腿 4×12×4 模型像素，每像素 1/16 米，展示高度为 2 米（不是碰撞箱高度）。窄臂宽 3 像素，肩位置沿原版模型下移半像素。UI 使用当前本地玩家基础皮肤；没有玩家时回退到原版 Steve 资源。17 个命中区域仍绑定原有部位，不增加身体状态。使用中立站姿，目前不叠加皮肤的帽子、外套和袖套第二层，也不展示装备；吐纳与经脉场景继续使用黑色剪影。
 
 骨架沿该外形布置：眼眶和鼻孔为几何凹槽，颅腔、胸廓和骨盆保留空腔；前臂及小腿为双骨，手足分出指趾轮廓。骨骼组可分别选择和聚焦，信息仍显示所绑定部位的状态。整体包围盒各层固定；肌肉前后位置区分，左右器官分别绑定各自实例。经脉路径为现有简化连接设计的示意，不能用于医学或推导真元运输距离。
 

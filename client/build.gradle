@@ -15,6 +15,8 @@ def presentationDirectory = layout.buildDirectory.dir('generated/presentation')
 dependencies {
     // Gson 只在构建时读取 Blockbench；跨包展示仍使用 Protobuf。
     toolingImplementation 'com.google.code.gson:gson:2.10.1'
+    // 构建期从权威人体定义导出层级；客户端成品不依赖或打包服务端计算。
+    toolingImplementation project(':server')
 }
 tasks.register('exportPresentation', JavaExec) {
     // 导出类只依赖 main 的编译结果，避免资源生成反向依赖自身 processResources。

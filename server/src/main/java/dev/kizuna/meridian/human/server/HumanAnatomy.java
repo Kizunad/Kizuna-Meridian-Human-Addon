@@ -51,7 +51,12 @@ final class HumanAnatomy {
                     .setCapacity(TissueCapacity.newBuilder().setStrengthNewtons(0).setBurstWatts(0).setEnduranceJoules(0)));
         }
 
-        addOrgan(body, "brain", "脑", "head", 20);
+        // 大脑有独立耐力，和注意组织的精力各自扣费、各自恢复。
+        body.addOrgans(OrganDefinition.newBuilder().setId("brain").setDisplayName("脑").setKind("human:brain")
+                .setPartId("head").setMaxHp(20).setQiCapacity(1).setThroughputPerSecond(1)
+                .setEndurance(OrganEndurance.newBuilder().setEnduranceJoules(600).setMaximumWatts(20)
+                        .setRecoveryHalfLifeSeconds(30))
+                .addPorts(port("brain.in", PortDirection.INPUT)).addPorts(port("brain.out", PortDirection.OUTPUT)));
         // 双眼各自持有损伤与缓存状态，不能用头部 HP 冒充单眼健康程度。
         addOrgan(body, "left_eye", "左眼", "head", 4);
         addOrgan(body, "right_eye", "右眼", "head", 4);
@@ -127,7 +132,7 @@ final class HumanAnatomy {
             for (int index = 0; index < regularIds.size(); index++) {
                 String from = side + "_" + regularIds.get(index) + "_meridian";
                 String to = side + "_" + regularIds.get((index + 1) % regularIds.size()) + "_meridian";
-                connect(body, from + ".to." + to, from + ".out", to + ".in", 0.3);
+                connectMeridians(body, from, to, 0.3);
             }
             String lung = side + "_lung";
             String channel = lung + "_meridian";
@@ -184,8 +189,17 @@ final class HumanAnatomy {
 
     private static void link(BodyStructure.Builder body, String first, String second) {
         // 双向交汇显式使用两条有向连接，保留各方向独立的引用。
-        connect(body, first + ".to." + second, first + ".out", second + ".in", 0.2);
-        connect(body, second + ".to." + first, second + ".out", first + ".in", 0.2);
+        connectMeridians(body, first, second, 0.2);
+        connectMeridians(body, second, first, 0.2);
+    }
+
+    private static void connectMeridians(BodyStructure.Builder body, String from, String to, double distanceMeters) {
+        // 自然扩散使用每路最多 0.5 元/秒，仍共享各经脉 1 元/秒的收发吞吐。
+        // 小批阈值保留微小余差，平衡后停止事件调度；肺器官出口仍由摄入流程主动发送。
+        body.addConnections(Connection.newBuilder().setId(from + ".to." + to)
+                .setFrom(from + ".out").setTo(to + ".in").setResistance(0).setDistance(distanceMeters)
+                .setPassiveQiFlow(PassiveQiFlow.newBuilder().setThroughputPerSecond(.5)
+                        .setMaximumBatchQi(.25).setMinimumBatchQi(.0001)));
     }
 
     private static String sideLabel(String side) {

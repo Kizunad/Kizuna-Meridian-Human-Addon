@@ -4,7 +4,23 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 
 /** 人体内容工具的错误集中定义；身体业务拒绝仍由框架协议表达。 */
 public final class HumanErrors {
+    public static final String DEBUG_PERMISSION = "真元调试需要管理员权限等级 2";
+    public static final String DIFFUSION_ENTRY_MISSING = "当前身体不存在指定经脉或有效摄入出口";
+
+    public static String debugRejected(FailureCode code) {
+        // 调试不能跳过容量预约和身体状态，保留失败码方便定位。
+        String reason = switch (code) {
+            case CAPACITY_EXCEEDED -> "注入超过当前可用容量（已扣除在途预约），请减小剂量";
+            case MODULE_NOT_FOUND -> DIFFUSION_ENTRY_MISSING;
+            case MODULE_UNAVAILABLE -> "目标经脉受损，无法注入";
+            case BODY_DEAD -> "身体已经死亡";
+            case ACCESS_DENIED -> DEBUG_PERMISSION;
+            default -> "真元调试未提交";
+        };
+        return reason + "（" + code + "）";
+    }
     public static final String TEMPLATE_REQUIRED = "需要已注册的人体模板";
+    public static final String INVALID_OPENING_POLICY = "人体开脉条件配置不完整或超出可计算范围";
     public static final String TEMPLATE_MISMATCH = "出生候选必须使用 human:adult 的第一版模板";
     public static final String EXPORT_DIRECTORY_REQUIRED = "需要唯一的内容导出目录参数";
     public static final String EXPORT_FAILED = "人体 Protobuf 内容导出失败";
@@ -14,6 +30,8 @@ public final class HumanErrors {
     public static final String TISSUE_MISSING = "当前人体不存在此组织";
     public static final String HOST_FAILED = "人体宿主结算失败，已暂停该身体";
     public static final String INVALID_GATHERING_RESPONSE = "吐纳核心返回了无法解码的响应";
+    public static final String ANIMATION_API_UNAVAILABLE = "动画模组未提供兼容的服务端播放接口，吐纳继续运行";
+    public static final String ANIMATION_FAILED = "打坐动画同步失败，身体结算继续运行";
 
     public static IllegalStateException invalidGatheringResponse(Exception cause) {
         // 保留真正的协议损坏原因，不把它伪装为玩家能力不足。
@@ -23,6 +41,21 @@ public final class HumanErrors {
     public static IllegalStateException hostRejected(FailureCode code) {
         // 保留协议失败码供宿主中止当前事件，避免失败后继续切换动作。
         return new IllegalStateException(HOST_FAILED + ": " + code);
+    }
+
+    public static String openingRejected(FailureCode code) {
+        // 公共失败码保留在消息末尾，玩家提示解释可调整的条件。
+        String reason = switch (code) {
+            case INSUFFICIENT_QI -> "全身内腔储量不足 80%，请继续吐纳";
+            case OPENING_BUSY -> "已有开脉任务，请先暂停当前目标";
+            case MERIDIAN_ALREADY_OPENED -> "这条经脉已经完成开拓";
+            case OPENING_NOT_ACTIVE -> "当前没有正在运行的开脉任务";
+            case OPENING_RULE_NOT_FOUND -> "没有对应经脉的开拓规则";
+            case OPENING_REQUIREMENTS_UNMET -> "经脉承受度、脑耐力或精力未满足开脉要求";
+            case MODULE_NOT_FOUND, MODULE_UNAVAILABLE, ROUTE_UNAVAILABLE -> "所需部位、器官或经脉不可用";
+            default -> "开脉请求未执行";
+        };
+        return reason + "（" + code + "）";
     }
 
     public static IllegalStateException invalidSave(Exception cause) {

@@ -13,6 +13,7 @@ import dev.kizuna.meridian.protocol.pb.BreathingMessages.*;
 import dev.kizuna.meridian.protocol.pb.EnvironmentMessages.*;
 import dev.kizuna.meridian.protocol.pb.GatheringMessages.*;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
+import dev.kizuna.meridian.protocol.pb.OpeningMessages.*;
 import dev.kizuna.meridian.server.InMemoryBodyStore;
 import org.junit.Test;
 
@@ -23,6 +24,90 @@ import static org.junit.Assert.*;
 
 /** 整体回归：Minecraft 运动编排走人体注册内容与框架权威命令链。 */
 public class HumanPlayerBodyTest {
+    @Test
+    public void debugInjectionUsesRealDiffusionAndFillPreservesOpeningState() {
+        // 调试直接增加入口真元，随后与普通摄入产物共享真实事件扩散。
+        HumanPlayerBody body = born();
+        double before = body.snapshot().totalQi();
+        String entry = body.diffusionEntry();
+        var inject = dev.kizuna.meridian.protocol.pb.MeridianMessages.DebugQi.newBuilder()
+                .setMode(dev.kizuna.meridian.protocol.pb.MeridianMessages.DebugQiMode.INJECT_FOR_DIFFUSION)
+                .setMeridianId(entry).setAmount(.2).build();
+        assertEquals(FailureCode.FAILURE_CODE_UNSPECIFIED, body.debugQi(0, inject));
+        assertEquals(before + .2, body.snapshot().totalQi(), 1e-12);
+        body.observe(0, HumanPlayerBody.Motion.IDLE);
+        assertFalse(body.snapshot().transits().isEmpty());
+        body.settle(120_000);
+        assertEquals(before + .2, body.snapshot().totalQi(), 1e-12);
+        assertTrue(body.snapshot().meridianStates().stream().allMatch(state ->
+                state.opening().stage() == dev.kizuna.meridian.core.MeridianOpening.Stage.UNOPENED));
+        assertNull(body.snapshot().openingTask());
+        assertEquals(FailureCode.FAILURE_CODE_UNSPECIFIED, body.debugQi(120_000,
+                inject.toBuilder().setMode(dev.kizuna.meridian.protocol.pb.MeridianMessages.DebugQiMode.FILL_LUMENS)
+                        .clearMeridianId().clearAmount().build()));
+        assertEquals(20, body.snapshot().lumenQiTotal(), 1e-9);
+        assertNull(body.snapshot().openingTask());
+    }
+    @Test
+    public void openingCommandsRejectWithoutLockingHostAndDisconnectReleasesTheirAction() {
+        // 准备不足属于玩家可调整的业务拒绝，拒绝后运动和时间结算仍能继续。
+        HumanPlayerBody initial = born();
+        MeridianOpeningRequest initialRequest = openingRequest(initial, "initial-opening");
+        assertEquals(FailureCode.INSUFFICIENT_QI, initial.open(0, initialRequest).getFailure().getCode());
+        assertNull(initial.snapshot().openingTask());
+        initial.observe(1000, HumanPlayerBody.Motion.WALK);
+        initial.observe(1000, HumanPlayerBody.Motion.IDLE);
+
+        // 可信存档预置满储量以隔离操作接线；运行仍走真实命令与通路。
+        var message = BodyProtobuf.toMessage(initial.snapshot()).toBuilder();
+        for (int index = 0; index < message.getMeridianStatesCount(); index++) {
+            var state = message.getMeridianStates(index);
+            double capacity = message.getStructure().getMeridiansList().stream()
+                    .filter(meridian -> meridian.getId().equals(state.getId())).findFirst().orElseThrow().getLumenCapacity();
+            message.setMeridianStates(index, state.toBuilder().setLumenQi(BodyMessages.QiInventory.newBuilder()
+                    .addEntries(BodyMessages.Qi.newBuilder().setPhase(BodyMessages.QiPhase.FREE)
+                            .setAttribute("meridian:none").setAmount(capacity))));
+        }
+        HumanPlayerBody body = new HumanPlayerBody(BodyProtobuf.fromMessage(message.build()), List.of(), QiInventory.empty());
+        double initialQi = body.snapshot().totalQi();
+        body.observe(1000, HumanPlayerBody.Motion.WALK);
+        MeridianOpeningRequest request = openingRequest(body, "start-opening");
+        var started = body.open(1500, request);
+        assertFalse(started.hasFailure());
+        assertEquals(1500, body.snapshot().settledAt().elapsedMillis());
+
+        // 同连接重试不重复结时或扣费，过期版本也不能借宿主刷新版本后生效。
+        var afterStart = body.snapshot();
+        assertEquals(started, body.open(1600, request));
+        assertEquals(afterStart, body.snapshot());
+        MeridianOpeningRequest stalePause = request.toBuilder().setRequestId("stale-pause")
+                .setPause(PauseMeridianOpening.newBuilder().setMeridianId("left_lung_meridian")).build();
+        assertEquals(FailureCode.REVISION_CONFLICT, body.open(1600, stalePause).getFailure().getCode());
+        assertEquals(afterStart, body.snapshot());
+
+        // 开脉会先结身体时钟，运动仍按自己的已计费边界补齐整个行走区间。
+        body.observe(2000, HumanPlayerBody.Motion.IDLE);
+        assertEquals(1.0 / 3, fatigue(body, "left_rectus_femoris"), 1e-9);
+        double brainFatigue = body.snapshot().organStates().stream()
+                .filter(organ -> organ.id().value().equals("brain")).findFirst().orElseThrow().fatigueJoules();
+        assertEquals(0.5, brainFatigue, 1e-9);
+        assertTrue(body.snapshot().openingTask().active());
+        assertTrue(HumanOpeningNumbers.summary(body.snapshot()).contains("开"));
+        body.disconnectGathering(2000);
+        assertEquals(dev.kizuna.meridian.core.OpeningTask.Status.PAUSED, body.snapshot().openingTask().status());
+        assertTrue(body.snapshot().actions().isEmpty());
+        assertEquals(initialQi, body.snapshot().totalQi() + body.releasedQi().totalQi(), 1e-9);
+        assertEquals(FailureCode.OPENING_NOT_ACTIVE, body.pauseOpening(2000));
+    }
+
+    private static MeridianOpeningRequest openingRequest(HumanPlayerBody body, String requestId) {
+        // 使用界面同一契约，客户端只选规则并携带看到的身体版本。
+        return MeridianOpeningRequest.newBuilder().setProtocolVersion(1).setRequestId(requestId)
+                .setBodyId(body.snapshot().id().value()).setExpectedRevision(body.snapshot().revision())
+                .setStart(StartMeridianOpening.newBuilder().setRuleId("human:open/left_lung_meridian")
+                        .setRuleVersion(dev.kizuna.meridian.human.server.HumanOpening.RULE_VERSION)).build();
+    }
+
     @Test
     public void playerBreathingSharesMovementEnvironmentAndSavedRecovery() {
         // 真实玩家会话与运动使用同一身体和区域；合法动作更新不能使加工误报版本冲突。
@@ -57,10 +142,19 @@ public class HumanPlayerBodyTest {
             assertTrue(response.hasView());
             view = response.getView();
             assertNotEquals(GatheringStage.FAILED, view.getProgress().getStage());
-            assertEquals(FailureCode.FAILURE_CODE_UNSPECIFIED, view.getBreathing().getFailure());
+            // 配送暂时占满吞吐或存储时仍保持吐纳；身份、环境和内部错误不能混作正常等待。
+            assertTrue(view.getBreathing().getActive());
+            FailureCode feedback = view.getBreathing().getFailure();
+            assertTrue(feedback.toString(), feedback == FailureCode.FAILURE_CODE_UNSPECIFIED
+                    || feedback == FailureCode.THROUGHPUT_EXCEEDED || feedback == FailureCode.CAPACITY_EXCEEDED);
         }
         assertTrue(view.getBreathing().getAbsorbedQi() > 0);
         assertTrue(body.snapshot().lumenQiTotal() > initialLumen);
+        // 原料与产物分别统计；只有实际到货才累计纳入真元，不能把五倍原料显示成余额。
+        assertTrue(view.getBreathing().getStoredQi() > 0);
+        assertTrue(view.getBreathing().getStoredQi() <= view.getBreathing().getAbsorbedQi() * .2 + 1e-9);
+        double pendingBodyQi = body.snapshot().totalQi() - initialLumen - view.getBreathing().getStoredQi();
+        assertTrue(pendingBodyQi >= -1e-9);
         assertTrue(fatigue(body, "diaphragm") > 0);
         assertTrue(fatigue(body, "attention_network") > 0);
         assertTrue(fatigue(body, "left_rectus_femoris") > 0);

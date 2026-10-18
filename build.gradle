@@ -1,6 +1,7 @@
 plugins {
     id 'base'
     id 'fabric-loom' version '1.6-SNAPSHOT' apply false
+    id 'com.google.protobuf' version '0.9.6' apply false
 }
 
 allprojects {

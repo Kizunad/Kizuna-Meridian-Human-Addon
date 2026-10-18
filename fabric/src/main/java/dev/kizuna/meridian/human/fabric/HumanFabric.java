@@ -7,8 +7,15 @@ import dev.kizuna.meridian.protocol.pb.PresentationMessages.BodyViewUpdate;
 import dev.kizuna.meridian.protocol.pb.GatheringMessages.*;
 import dev.kizuna.meridian.protocol.GatheringProtobuf;
 import dev.kizuna.meridian.protocol.MeridianProtocol;
+import dev.kizuna.meridian.protocol.OpeningProtobuf;
+import dev.kizuna.meridian.protocol.pb.OpeningMessages.MeridianOpeningRequest;
+import dev.kizuna.meridian.protocol.pb.PresentationMessages.MeridianOpeningOptions;
+import dev.kizuna.meridian.human.server.HumanContent;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.entity.event.v1.ServerEntityWorldChangeEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
@@ -36,11 +43,14 @@ public final class HumanFabric implements ModInitializer {
     private static final Identifier BODY_VIEW = new Identifier("meridian", "body_view");
     private static final Identifier GATHERING_REQUEST = new Identifier("meridian", "gathering_request");
     private static final Identifier GATHERING_RESPONSE = new Identifier("meridian", "gathering_response");
+    private static final Identifier OPENING_REQUEST = new Identifier("meridian", "opening_request");
+    private static final Identifier OPENING_RESPONSE = new Identifier("meridian", "opening_response");
     private final Map<UUID, Integer> gatheringPackets = new HashMap<>();
     private final Map<UUID, HumanMovementObserver> observers = new HashMap<>();
     private final Map<UUID, Long> sentRevisions = new HashMap<>();
     private final Set<UUID> watching = new HashSet<>();
     private final Set<UUID> failed = new HashSet<>();
+    private final HumanMeditationAnimation meditation = new HumanMeditationAnimation();
     private HumanWorldState state;
 
     @Override
@@ -61,7 +71,45 @@ public final class HumanFabric implements ModInitializer {
         });
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> join(handler.player, server));
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> leave(handler.player, server));
+        ServerEntityWorldChangeEvents.AFTER_PLAYER_CHANGE_WORLD.register((player, origin, destination) -> resetGathering(player));
+        ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> resetGathering(newPlayer));
         ServerTickEvents.END_SERVER_TICK.register(this::tick);
+        ServerPlayNetworking.registerGlobalReceiver(OPENING_REQUEST, (server, player, handler, buffer, sender) -> {
+            // 与吐纳共享连接限流；网络线程只复制有界输入，不读取或修改身体。
+            if (buffer.readableBytes() == 0 || buffer.readableBytes() > MeridianProtocol.MAX_PAYLOAD_BYTES) {
+                return;
+            }
+            byte[] payload = new byte[buffer.readableBytes()];
+            buffer.readBytes(payload);
+            server.execute(() -> {
+                if (!handler.isConnectionOpen() || player.networkHandler != handler || state == null
+                        || failed.contains(player.getUuid())
+                        || gatheringPackets.merge(player.getUuid(), 1, Integer::sum) > 40) {
+                    return;
+                }
+                MeridianOpeningRequest request;
+                try {
+                    request = OpeningProtobuf.decodeRequest(payload);
+                } catch (IllegalArgumentException invalid) {
+                    return;
+                }
+                try {
+                    HumanPlayerBody body = state.find(player.getUuid());
+                    if (body == null) {
+                        return;
+                    }
+                    var response = body.open(millis(server), request);
+                    state.markDirty();
+                    if (ServerPlayNetworking.canSend(player, OPENING_RESPONSE)) {
+                        var output = PacketByteBufs.create();
+                        output.writeBytes(response.toByteArray());
+                        ServerPlayNetworking.send(player, OPENING_RESPONSE, output);
+                    }
+                } catch (RuntimeException failure) {
+                    fail(player, failure);
+                }
+            });
+        });
         ServerPlayNetworking.registerGlobalReceiver(GATHERING_REQUEST, (server, player, handler, buffer, sender) -> {
             // 网络线程只复制有界 Protobuf；身体归属、限流和结算在服务端线程执行。
             if (buffer.readableBytes() == 0 || buffer.readableBytes() > MeridianProtocol.MAX_PAYLOAD_BYTES) {
@@ -106,9 +154,18 @@ public final class HumanFabric implements ModInitializer {
             watching.clear();
             failed.clear();
             gatheringPackets.clear();
+            meditation.clear();
             state = null;
         });
         registerCommands();
+        CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) ->
+                HumanQiCommands.register(dispatcher,
+                        player -> state == null || failed.contains(player.getUuid()) ? null : state.find(player.getUuid()),
+                        player -> {
+                            // 命令提交和身体推送沿用唯一世界存档，下一 tick 的版本推送会刷新全部页面。
+                            state.markDirty();
+                            state.find(player.getUuid()).publishGathering();
+                        }));
     }
 
     private void join(ServerPlayerEntity player, MinecraftServer server) {
@@ -146,6 +203,27 @@ public final class HumanFabric implements ModInitializer {
         sentRevisions.remove(player.getUuid());
         watching.remove(player.getUuid());
         gatheringPackets.remove(player.getUuid());
+        meditation.stop(player);
+    }
+
+    private void resetGathering(ServerPlayerEntity player) {
+        // 换维度和重生时结束旧场景；新会话必须由玩家重新开始，不能沿用旧动画或吸气输入。
+        meditation.stop(player);
+        HumanPlayerBody body = state == null ? null : state.find(player.getUuid());
+        if (body == null || failed.contains(player.getUuid())) {
+            return;
+        }
+        try {
+            long nowMillis = millis(player.getServer());
+            body.connectGathering(nowMillis, response -> sendGathering(player, response));
+            body.observe(nowMillis, HumanPlayerBody.Motion.IDLE);
+            observers.put(player.getUuid(), new HumanMovementObserver());
+            state.selectEnvironment(player, nowMillis);
+            body.publishGathering();
+            state.markDirty();
+        } catch (RuntimeException failure) {
+            fail(player, failure);
+        }
     }
 
     private void tick(MinecraftServer server) {
@@ -180,9 +258,17 @@ public final class HumanFabric implements ModInitializer {
                         && sentRevisions.getOrDefault(id, -1L) != body.snapshot().revision()) {
                     var update = BodyViewUpdate.newBuilder().setProtocolVersion(1)
                             .setBody(BodyProtobuf.toMessage(body.snapshot()))
-                            .setPresentationResource("meridian_human:meridian/adult.pb").build();
+                            .setPresentationResource("meridian_human:meridian/adult.pb");
+                    // 人体门槛和进度条由本包随同一版本发布，UI 不解释人体规则。
+                    update.addOperations(dev.kizuna.meridian.human.server.HumanOpeningViews.update(
+                            update.getBody(), HumanContent.bundle().getOpeningRulesList()));
+                    if (!sentRevisions.containsKey(id)) {
+                        // 内容选项只在本连接首次推送；数值刷新无需重复发送整套规则。
+                        update.setOpening(MeridianOpeningOptions.newBuilder()
+                                .addAllRules(HumanContent.bundle().getOpeningRulesList()));
+                    }
                     var buffer = PacketByteBufs.create();
-                    buffer.writeBytes(update.toByteArray());
+                    buffer.writeBytes(update.build().toByteArray());
                     ServerPlayNetworking.send(player, BODY_VIEW, buffer);
                     sentRevisions.put(id, body.snapshot().revision());
                 }
@@ -197,6 +283,10 @@ public final class HumanFabric implements ModInitializer {
     }
 
     private void sendGathering(ServerPlayerEntity player, GatheringResponse response) {
+        // 动画读取服务端确认的吐纳状态，独立于 UI 接收器；客户端播放回执不改变身体。
+        if (response.hasView() && response.getView().hasBreathing()) {
+            meditation.synchronize(player, response.getView().getBreathing().getActive());
+        }
         // 只发给当前玩家已注册的接收器，客户端提交的 body ID 不能决定响应接收人。
         if (player.networkHandler.isConnectionOpen() && ServerPlayNetworking.canSend(player, GATHERING_RESPONSE)) {
             var buffer = PacketByteBufs.create();
@@ -210,6 +300,24 @@ public final class HumanFabric implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) -> dispatcher.register(
                 CommandManager.literal("meridian")
                         .then(CommandManager.literal("status").executes(context -> inspect(context.getSource().getPlayerOrThrow(), null)))
+                        .then(CommandManager.literal("opening")
+                                .executes(context -> opening(context.getSource().getPlayerOrThrow(), "status", null))
+                                .then(CommandManager.literal("pause")
+                                        .executes(context -> opening(context.getSource().getPlayerOrThrow(), "pause", null)))
+                                .then(CommandManager.literal("start").then(CommandManager.argument("meridian", StringArgumentType.word())
+                                        .suggests((context, builder) -> {
+                                            // 补全来自当前身体，经脉替换后不会继续显示不存在的目标。
+                                            HumanPlayerBody body = state == null ? null : state.find(context.getSource().getPlayerOrThrow().getUuid());
+                                            if (body != null) {
+                                                for (var meridian : body.snapshot().structure().meridians()) {
+                                                    if (meridian.id().value().startsWith(builder.getRemaining())) {
+                                                        builder.suggest(meridian.id().value());
+                                                    }
+                                                }
+                                            }
+                                            return builder.buildFuture();
+                                        }).executes(context -> opening(context.getSource().getPlayerOrThrow(), "start",
+                                                StringArgumentType.getString(context, "meridian"))))))
                         .then(CommandManager.literal("tissue").then(CommandManager.argument("id", StringArgumentType.word())
                                 .suggests((context, builder) -> {
                                     // 用实际身体组织 ID 提供补全，未来改造后自动反映新的构型。
@@ -248,6 +356,36 @@ public final class HumanFabric implements ModInitializer {
         }
     }
 
+    private int opening(ServerPlayerEntity player, String operation, String meridianId) {
+        // 玩家入口只选择规则和目标，所有资源与条件都由 Framework 权威检查。
+        HumanPlayerBody body = state == null ? null : state.find(player.getUuid());
+        if (body == null || failed.contains(player.getUuid())) {
+            player.sendMessage(Text.literal(HumanErrors.BODY_MISSING), false);
+            return 0;
+        }
+        try {
+            long now = millis(player.getServer());
+            FailureCode failure = FailureCode.FAILURE_CODE_UNSPECIFIED;
+            if (operation.equals("start")) {
+                failure = body.startOpening(now, meridianId);
+            } else if (operation.equals("pause")) {
+                failure = body.pauseOpening(now);
+            } else {
+                body.settle(now);
+            }
+            state.markDirty();
+            if (failure != FailureCode.FAILURE_CODE_UNSPECIFIED) {
+                player.sendMessage(Text.literal(HumanErrors.openingRejected(failure)), false);
+                return 0;
+            }
+            player.sendMessage(Text.literal(HumanOpeningNumbers.summary(body.snapshot())), false);
+            return 1;
+        } catch (RuntimeException failure) {
+            fail(player, failure);
+            return 0;
+        }
+    }
+
     private int watch(ServerPlayerEntity player, boolean enabled) {
         // 实时观察仅选择输出，不触发额外做功或建立另一份玩家状态。
         if (enabled) {
@@ -262,6 +400,7 @@ public final class HumanFabric implements ModInitializer {
 
     private void fail(ServerPlayerEntity player, RuntimeException failure) {
         // 单个身体失败后保留现场并暂停，避免逐 tick 重复扣费、刷屏或自动重置存档。
+        meditation.stop(player);
         if (failed.add(player.getUuid())) {
             LOG.error(HumanErrors.HOST_FAILED + ": " + player.getUuid(), failure);
             player.sendMessage(Text.literal(HumanErrors.HOST_FAILED), false);

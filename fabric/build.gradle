@@ -41,12 +41,13 @@ if (providers.gradleProperty('withBodyUi').getOrElse('false').toBoolean()) {
         modRuntimeOnly 'io.wispforest:owo-lib:0.11.2+1.20'
     }
 
-    // 显式提供动画 checkout 时一起装配，UI 的盘坐预览复用其资源而非另造动画。
-    if (providers.gradleProperty('playerAnimationDir').isPresent()) {
-        def animationDirectory = rootProject.file(providers.gradleProperty('playerAnimationDir').get())
-        dependencies {
-            modRuntimeOnly files(new File(animationDirectory, 'build/libs/kizuna-players-animation-0.1.0-SNAPSHOT.jar'))
-        }
+}
+
+// 服务端打坐同步独立于 UI，可选装配只使用动画仓库自己的构建产物。
+if (providers.gradleProperty('playerAnimationDir').isPresent()) {
+    def animationDirectory = rootProject.file(providers.gradleProperty('playerAnimationDir').get())
+    dependencies {
+        modRuntimeOnly files(new File(animationDirectory, 'build/libs/kizuna-players-animation-0.1.0-SNAPSHOT.jar'))
     }
 }
 

@@ -1,4 +1,5 @@
 schema_version: 1
+default_layer_id: "surface"
 breathing {
   surface_layer: "surface"
   animation_provider: "kizuna_players_animation"
@@ -21,7 +22,7 @@ maximum {
 }
 layers {
   id: "surface"
-  display_name: "表层"
+  display_name: "体表"
 }
 layers {
   id: "skeleton"

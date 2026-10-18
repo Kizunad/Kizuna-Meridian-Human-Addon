@@ -1,4 +1,10 @@
+apply plugin: 'com.google.protobuf'
+
 description = '人体内容、可信出生候选与框架接入验证。'
+
+protobuf {
+    protoc { artifact = 'com.google.protobuf:protoc:4.36.2' }
+}
 
 dependencies {
     api 'local.meridian:server'

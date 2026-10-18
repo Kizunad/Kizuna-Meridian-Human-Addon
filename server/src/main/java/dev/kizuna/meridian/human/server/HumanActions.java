@@ -26,6 +26,9 @@ final class HumanActions {
         ActionDefinition breathing = ActionDefinition.newBuilder().setId("human:breathing").setVersion(1).setDisplayName("吐纳")
                 .addTissueIds("diaphragm").addTissueIds("attention_network")
                 .addOrganIds("left_lung").addOrganIds("right_lung").build();
-        return List.of(walk, run, breathing);
+        ActionDefinition opening = ActionDefinition.newBuilder().setId(HumanOpening.ACTION_ID).setVersion(1)
+                .setDisplayName("开脉引导").addTissueIds("attention_network")
+                .addOrganIds("brain").addOrganIds("left_lung").addOrganIds("right_lung").build();
+        return List.of(walk, run, breathing, opening);
     }
 }

@@ -9,6 +9,8 @@ import dev.kizuna.meridian.core.TissueCapabilities;
 import dev.kizuna.meridian.human.server.HumanBirth;
 import dev.kizuna.meridian.human.server.HumanContent;
 import dev.kizuna.meridian.human.server.HumanErrors;
+import dev.kizuna.meridian.human.server.HumanOpening;
+import dev.kizuna.meridian.protocol.pb.OpeningMessages;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.MeridianProtocol;
 import dev.kizuna.meridian.protocol.pb.AddonMessages.*;
@@ -20,6 +22,7 @@ import dev.kizuna.meridian.server.BodyCommandHandler;
 import dev.kizuna.meridian.server.InMemoryBodyStore;
 import dev.kizuna.meridian.server.GatheringSession;
 import dev.kizuna.meridian.server.BodyTimeSource;
+import dev.kizuna.meridian.server.OpeningSession;
 
 import java.util.List;
 import java.util.Optional;
@@ -58,8 +61,10 @@ final class HumanPlayerBody {
     private TimeAdvanceMode timeMode = TimeAdvanceMode.ACTIVE;
     private String sourceId;
     private GatheringSession<String> gathering;
+    private OpeningSession<String> openingSession;
     private Consumer<GatheringResponse> gatheringOutput;
     private final Set<String> breathingActions = new HashSet<>();
+    private boolean debugAuthorized;
 
     HumanPlayerBody(BodySnapshot saved, List<CommandReceipt> receipts, QiInventory releasedQi) {
         // 同时恢复身体、成功回执及释放账，不能在登录时重建疲劳或重发历史释放。
@@ -84,7 +89,8 @@ final class HumanPlayerBody {
             return Optional.empty();
         }, (caller, command, body) -> true, clock,
                 store, (caller, receipt, before, after) -> { /* 保存由宿主在事件完成后统一标脏。 */ },
-                CONTENT.recipes(), (caller, body, plan) -> Optional.ofNullable(sourceId), CONTENT.actions());
+                CONTENT.recipes(), (caller, body, plan) -> Optional.ofNullable(sourceId), CONTENT.actions(), CONTENT.openings(),
+                caller -> debugAuthorized && caller.equals(id.value()));
     }
 
     static HumanPlayerBody born(UUID playerId, String epoch, long millis) {
@@ -260,6 +266,7 @@ final class HumanPlayerBody {
 
     void disconnectGathering(long millis) {
         // 先解除旧会话占用再清掉连接；已经进入器官或在途的真元留在权威身体中。
+        openingSession = null;
         targetMillis = millis;
         if (gathering != null) {
             gathering.close();
@@ -268,6 +275,75 @@ final class HumanPlayerBody {
             breathingActions.clear();
             scheduleNextBoundary();
         }
+        // 关闭场景、换维度和断线结束连续尝试，动画与身体动作各按自己的来源清理。
+        if (snapshot().openingTask() != null && snapshot().openingTask().active()) {
+            pauseOpening(millis);
+        }
+    }
+
+    FailureCode startOpening(long millis, String meridianId) {
+        // 服务端绑定当前玩家，先结清时间再提交选择规则的 Protobuf 意图。
+        settle(millis);
+        return submitCommand(BodyCommand.newBuilder().setStartMeridianOpening(OpeningMessages.StartMeridianOpening.newBuilder()
+                .setRuleId(HumanOpening.ruleId(meridianId)).setRuleVersion(HumanOpening.RULE_VERSION)));
+    }
+
+    FailureCode debugQi(long millis, DebugQi request) {
+        // 仅由已检查管理员权限的宿主命令调用；临时授权不会泄漏到普通网络处理器。
+        settle(millis);
+        debugAuthorized = true;
+        try {
+            return submitCommand(BodyCommand.newBuilder().setDebugQi(request));
+        } finally {
+            debugAuthorized = false;
+        }
+    }
+
+    String diffusionEntry() {
+        // 默认注入肺出口实际连接的经脉，依据人体内容寻址，不向 Framework 写入人类特例。
+        BodySnapshot body = snapshot();
+        var organs = HumanContent.breathing().getOrgansList().stream().map(organ -> organ.getOrganId()).toList();
+        var ports = body.structure().organs().stream().filter(organ -> organs.contains(organ.id().value()))
+                .flatMap(organ -> organ.ports().stream()).map(Anatomy.Port::id).toList();
+        var targets = body.structure().connections().stream().filter(route -> ports.contains(route.from()))
+                .map(Anatomy.Connection::to).toList();
+        return body.structure().meridians().stream()
+                .filter(meridian -> meridian.ports().stream().anyMatch(port -> targets.contains(port.id())))
+                .map(meridian -> meridian.id().value()).findFirst().orElse("");
+    }
+
+    FailureCode pauseOpening(long millis) {
+        // 暂停基于权威任务目标，客户端不能指定另一具身体或自报余额。
+        settle(millis);
+        var task = snapshot().openingTask();
+        if (task == null || !task.active()) {
+            return FailureCode.OPENING_NOT_ACTIVE;
+        }
+        return submitCommand(BodyCommand.newBuilder().setPauseMeridianOpening(OpeningMessages.PauseMeridianOpening.newBuilder()
+                .setMeridianId(task.rule().targetMeridianId().value())));
+    }
+
+    private FailureCode submitCommand(BodyCommand.Builder command) {
+        // 业务拒绝供玩家调整储量或资源，不应把整个人体标记为宿主故障。
+        var request = RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId(UUID.randomUUID().toString())
+                .setBodyCommand(command.setBodyId(id.value()).setExpectedRevision(snapshot().revision())).build();
+        ResponseEnvelope response = MeridianProtocol.decodeResponse(commands.handle(id.value(), request.toByteArray()));
+        scheduleNextBoundary();
+        publishGathering();
+        return response.hasFailure() ? response.getFailure().getCode() : FailureCode.FAILURE_CODE_UNSPECIFIED;
+    }
+
+    ResponseEnvelope open(long millis, OpeningMessages.MeridianOpeningRequest request) {
+        // 连接内的意图使用框架编排；不把客户端版本替换成当前版本来绕过冲突检查。
+        targetMillis = millis;
+        if (openingSession == null) {
+            openingSession = new OpeningSession<>(id.value(), id, commands, store,
+                    (caller, requested) -> caller.equals(id.value()) && requested.equals(id));
+        }
+        ResponseEnvelope response = openingSession.handle(request);
+        scheduleNextBoundary();
+        publishGathering();
+        return response;
     }
 
     Set<String> breathingActions() {
@@ -305,9 +381,18 @@ final class HumanPlayerBody {
     }
 
     private void advanceTime() {
-        // 死体和同毫秒无需提交；冻结恢复与正常推进都经过同一核心时间契约。
+        // 同毫秒的新资源变化也可能启动被动扩散；只有确有事件时才额外结算。
         BodySnapshot body = snapshot();
-        if (!body.vitality().dead() && targetMillis != body.settledAt().elapsedMillis()) {
+        if (body.vitality().dead()) {
+            return;
+        }
+        BodyTimeAdvancement.Mode mode = BodyTimeAdvancement.Mode.ACTIVE;
+        if (timeMode == TimeAdvanceMode.LIFESPAN_ONLY) {
+            mode = BodyTimeAdvancement.Mode.LIFESPAN_ONLY;
+        }
+        boolean eventDue = BodyTimeAdvancement.nextEventBoundary(body, 1, mode)
+                .map(boundary -> boundary.elapsedMillis() <= targetMillis).orElse(false);
+        if (targetMillis != body.settledAt().elapsedMillis() || eventDue) {
             execute(BodyCommand.newBuilder().setAdvanceTime(AdvanceTime.getDefaultInstance()));
         }
     }
@@ -331,7 +416,8 @@ final class HumanPlayerBody {
         }
         long existingEvent = BodyTimeAdvancement.nextEventBoundary(body, 1, BodyTimeAdvancement.Mode.ACTIVE)
                 .map(boundary -> boundary.elapsedMillis()).orElse(Long.MAX_VALUE);
-        boolean hasFatigue = body.tissueStates().stream().anyMatch(tissue -> tissue.fatigue() > 0);
+        boolean hasFatigue = body.tissueStates().stream().anyMatch(tissue -> tissue.fatigue() > 0)
+                || body.organStates().stream().anyMatch(organ -> organ.fatigueJoules() > 0);
         nextBoundaryMillis = existingEvent;
         if (motion != Motion.IDLE || hasFatigue) {
             nextBoundaryMillis = Math.min(existingEvent, accountedMillis + 1000);
@@ -343,7 +429,9 @@ final class HumanPlayerBody {
         var host = AddonHostProfile.newBuilder().setHostId("meridian:fabric").setApiVersion(1)
                 .addCapabilities(AddonRegistry.BODY_TEMPLATES).addCapabilities(AddonRegistry.ORGAN_RECIPES)
                 .addCapabilities(AddonRegistry.ORGAN_INTAKE).addCapabilities(AddonRegistry.ACTIONS)
-                .addCapabilities(AddonRegistry.TISSUE_RECOVERY);
+                .addCapabilities(AddonRegistry.TISSUE_RECOVERY).addCapabilities(AddonRegistry.PASSIVE_QI_FLOW)
+                .addCapabilities(AddonRegistry.OPENING_DEFINITIONS).addCapabilities(AddonRegistry.OPENING_RUNTIME)
+                .addCapabilities(AddonRegistry.ORGAN_ENDURANCE);
         return AddonRegistry.load(AddonRegistration.newBuilder().setProtocolVersion(1).setHost(host)
                 .addBundles(HumanContent.bundle()).build());
     }

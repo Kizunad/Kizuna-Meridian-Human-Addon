@@ -36,7 +36,9 @@ public final class GatheringDemo {
         var profile = AddonHostProfile.newBuilder().setHostId("meridian:java_reference").setApiVersion(1)
                 .addCapabilities(AddonRegistry.BODY_TEMPLATES).addCapabilities(AddonRegistry.ORGAN_RECIPES)
                 .addCapabilities(AddonRegistry.ORGAN_INTAKE).addCapabilities(AddonRegistry.ACTIONS)
-                .addCapabilities(AddonRegistry.TISSUE_RECOVERY);
+                .addCapabilities(AddonRegistry.TISSUE_RECOVERY).addCapabilities(AddonRegistry.PASSIVE_QI_FLOW)
+                .addCapabilities(AddonRegistry.OPENING_DEFINITIONS).addCapabilities(AddonRegistry.OPENING_RUNTIME)
+                .addCapabilities(AddonRegistry.ORGAN_ENDURANCE);
         var registration = AddonRegistration.newBuilder().setProtocolVersion(1).setHost(profile)
                 .addBundles(AddonProtobuf.decodeBundle(HumanContent.payload())).build();
         AddonRegistry registry = AddonRegistry.load(registration);
@@ -65,7 +67,7 @@ public final class GatheringDemo {
                 store, (caller, receipt, before, after) -> { /* 审计不承担资源转移。 */ },
                 registry.recipes(), (caller, body, plan) -> Optional.of("demo-region"), registry.actions());
 
-        // 一轮由五个显式请求组成；等待时间取权威事件，不创建逐帧轮询或额外运行账本。
+        // 等待时间取权威事件；肺经接收后再展示全身自然扩散的结果。
         show("出生", store);
         clock.millis = 1000;
         submit(handler, GatheringRequests.intake(message(store), "intake", "left_lung", recipe.getInput()));
@@ -78,10 +80,15 @@ public final class GatheringDemo {
         show("炼化完成", store);
         submit(handler, GatheringRequests.store(message(store), "store", "left_lung.to.meridian", recipe.getOutput(), 1));
         show("运往左肺经", store);
-        clock.millis = message(store).getTransits(0).getArrivalMillis();
+        clock.millis = message(store).getTransitsList().stream()
+                .filter(transit -> transit.getConnectionId().equals("left_lung.to.meridian"))
+                .findFirst().orElseThrow().getArrivalMillis();
         submit(handler, GatheringRequests.settle(message(store), "arrive"));
-        show("到达并储存", store);
-        System.out.println("肺经仍未开拓；本轮仅聚气和储存。环境释放账尚待真实宿主按位置归入区域。");
+        show("到达肺经并开始扩散", store);
+        clock.millis = 120000;
+        submit(handler, GatheringRequests.settle(message(store), "diffuse"));
+        show("全身自然储存", store);
+        System.out.println("经脉仍未开拓；本轮完成聚气、炼化与自然储存。环境释放账尚待宿主按位置归入区域。");
     }
 
     private static BodyMessages.TimeCursor time(long millis) {
@@ -108,10 +115,13 @@ public final class GatheringDemo {
         var lungChannel = body.meridianStates().stream()
                 .filter(meridian -> meridian.id().value().equals("left_lung_meridian")).findFirst().orElseThrow();
         double environmentQi = BodyProtobuf.fromInventory(store.environmentSource("demo-region").orElseThrow().getInventory()).totalQi();
+        double lumenQi = body.meridianStates().stream().mapToDouble(meridian -> meridian.lumenQi().totalQi()).sum();
+        long nourishedMeridians = body.meridianStates().stream()
+                .filter(meridian -> meridian.lumenQi().totalQi() > 0.01).count();
         System.out.printf(Locale.ROOT,
-                "%s | t=%.1fs | 环境 %.2f | 器官含加工 %.2f | 在途 %.2f | 左肺经 %.2f | 环境释放 %.2f%n",
+                "%s | t=%.1fs | 环境 %.2f | 器官含加工 %.2f | 在途 %.2f | 左肺经 %.4f | 全身内腔 %.2f | 高于初值 %d 条 | 环境释放 %.2f%n",
                 stage, body.settledAt().elapsedMillis() / 1000.0, environmentQi, body.organQiTotal(),
-                body.transitQiTotal(), lungChannel.lumenQi().totalQi(), store.environmentQi().totalQi());
+                body.transitQiTotal(), lungChannel.lumenQi().totalQi(), lumenQi, nourishedMeridians, store.environmentQi().totalQi());
     }
 
     private static final class DemoClock {
