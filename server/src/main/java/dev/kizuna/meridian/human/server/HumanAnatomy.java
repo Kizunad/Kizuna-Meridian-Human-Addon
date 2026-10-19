@@ -51,6 +51,26 @@ final class HumanAnatomy {
                     .setCapacity(TissueCapacity.newBuilder().setStrengthNewtons(0).setBurstWatts(0).setEnduranceJoules(0)));
         }
 
+        // 骨架按当前模型的骨组独立记血；同部位的颅骨、下颌等不共用损伤账户。
+        addBone(body, "skull", "颅骨", "head");
+        addBone(body, "jaw", "下颌骨", "head");
+        addBone(body, "cervical", "颈椎", "neck");
+        addBone(body, "thoracic", "胸椎", "chest");
+        addBone(body, "sternum", "胸骨", "chest");
+        addBone(body, "lumbar", "腰椎", "abdomen");
+        addBone(body, "pelvis", "骨盆", "pelvis");
+        for (String side : List.of("left", "right")) {
+            String label = sideLabel(side);
+            addBone(body, side + "_ribs", label + "肋骨", "chest");
+            addBone(body, side + "_shoulder", label + "锁骨与肩胛骨", "chest");
+            addBone(body, side + "_humerus", label + "肱骨", side + "_upper_arm");
+            addBone(body, side + "_forearm", label + "桡骨与尺骨", side + "_forearm");
+            addBone(body, side + "_hand", label + "腕骨、掌骨与指骨", side + "_hand");
+            addBone(body, side + "_femur", label + "股骨", side + "_thigh");
+            addBone(body, side + "_lower_leg", label + "髌骨、胫骨与腓骨", side + "_lower_leg");
+            addBone(body, side + "_foot", label + "跗骨、跖骨与趾骨", side + "_foot");
+        }
+
         // 大脑有独立耐力，和注意组织的精力各自扣费、各自恢复。
         body.addOrgans(OrganDefinition.newBuilder().setId("brain").setDisplayName("脑").setKind("human:brain")
                 .setPartId("head").setMaxHp(20).setQiCapacity(1).setThroughputPerSecond(1)
@@ -75,6 +95,15 @@ final class HumanAnatomy {
 
         addMeridians(body);
         return body.build();
+    }
+
+    private static void addBone(BodyStructure.Builder body, String id, String name, String partId) {
+        // 首轮沿用所属部位的 HP 上限作为骨组初值，但运行状态与部位完全分离。
+        PartDefinition part = body.getPartsList().stream().filter(value -> value.getId().equals(partId))
+                .findFirst().orElseThrow();
+        body.addTissues(TissueDefinition.newBuilder().setId("bone_" + id).setDisplayName(name)
+                .setKind("human:bone").setPartId(partId).setMaxHp(part.getMaxHp()).setFatigueCapacity(100)
+                .setCapacity(TissueCapacity.newBuilder().setStrengthNewtons(0).setBurstWatts(0).setEnduranceJoules(0)));
     }
 
     private static void addPart(BodyStructure.Builder body, String id, String name, double hp) {

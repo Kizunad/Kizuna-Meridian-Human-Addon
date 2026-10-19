@@ -761,7 +761,12 @@ public class HumanGatheringTest {
                     }
                 }
                 assertEquals(17, presentation.getVisualsList().stream().filter(BodyVisual::hasPlayerSkin).count());
-                assertEquals(19, presentation.getVisualsList().stream().filter(node -> node.getTargetKind() == BodyTargetKind.TISSUE).count());
+                // 皮肤、骨组与肌肉均绑定独立组织，不能退回共用部位 HP。
+                assertEquals(59, presentation.getVisualsList().stream().filter(node -> node.getTargetKind() == BodyTargetKind.TISSUE).count());
+                assertEquals(23, presentation.getVisualsList().stream().filter(node -> node.getLayerId().equals("skeleton")
+                        && node.getTargetKind() == BodyTargetKind.TISSUE && node.getTargetId().startsWith("bone_")).count());
+                assertEquals(17, presentation.getVisualsList().stream().filter(node -> node.getLayerId().equals("surface")
+                        && node.getTargetKind() == BodyTargetKind.TISSUE && node.getTargetId().endsWith("_skin")).count());
                 assertEquals(15, presentation.getVisualsList().stream().filter(node -> node.getTargetKind() == BodyTargetKind.ORGAN).count());
                 assertTrue(presentation.getVisualsList().stream().anyMatch(node -> node.getTargetId().equals("left_eye")));
                 assertTrue(presentation.getVisualsList().stream().anyMatch(node -> node.getTargetId().equals("right_eye")));

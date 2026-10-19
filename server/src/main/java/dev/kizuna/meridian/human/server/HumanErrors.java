@@ -4,6 +4,7 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 
 /** 人体内容工具的错误集中定义；身体业务拒绝仍由框架协议表达。 */
 public final class HumanErrors {
+    public static final String INVALID_DAMAGE_KIND = "人体伤害需要已知的致伤机制";
     public static final String DEBUG_PERMISSION = "真元调试需要管理员权限等级 2";
     public static final String DIFFUSION_ENTRY_MISSING = "当前身体不存在指定经脉或有效摄入出口";
 

@@ -21,7 +21,11 @@ final class PlayerSkinSurface {
             SkinBox reference = reference(visual.getTargetId());
             BodyVisual wide = mesh(visual, reference, false);
             BodyVisual slim = mesh(visual, reference, true);
-            result.addVisuals(wide.toBuilder().setPlayerSkin(PlayerSkinAppearance.newBuilder()
+            // 皮肤布局按部位生成后，选择目标切换到独立皮肤组织，避免显示成所属部位的 HP。
+            result.addVisuals(wide.toBuilder().setTargetKind(BodyTargetKind.TISSUE)
+                    .setTargetId(visual.getTargetId() + "_skin")
+                    .setDescription("身体最外侧的皮肤与选择区域；健康读取此处皮肤的独立 HP。")
+                    .setPlayerSkin(PlayerSkinAppearance.newBuilder()
                     .addAllSlimVertices(slim.getVerticesList()).addAllSlimTextureUv(slim.getTextureUvList())));
         }
         return result.build();

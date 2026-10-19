@@ -22,6 +22,13 @@ public final class ExportPresentation {
             if (visual.getTargetKind() == BodyTargetKind.MERIDIAN) {
                 visual = visual.toBuilder().setMinimumRealm(HumanOpening.minimumRealm(visual.getTargetId())).build();
             }
+            if (visual.getLayerId().equals("skeleton")) {
+                // 模型骨组与权威骨组织一一绑定，几何和附着节点仍保留原来的稳定 ID。
+                String boneId = "bone_" + visual.getId().substring("skeleton.".length());
+                visual = visual.toBuilder().setTargetKind(BodyTargetKind.TISSUE).setTargetId(boneId)
+                        .setDescription("支撑并保护所属部位，作为软组织的附着基础；健康读取此骨组的独立 HP。")
+                        .build();
+            }
             presentation.addVisuals(visual);
         }
         var model = new BlockbenchModel(source.resolve("human.bbmodel"));
