@@ -344,6 +344,12 @@ final class HumanPlayerBody {
         return response;
     }
 
+    dev.kizuna.meridian.protocol.pb.HealthMessages.HealthResult healthReceipt(String requestId) {
+        // 从同一身体的幂等索引读取固定事实，避免扫描全世界回执或重新执行伤害策略。
+        return store.transact(id, transaction -> transaction.receipt(id.value(), requestId)
+                .orElseThrow().getHealth());
+    }
+
     ResponseEnvelope open(long millis, OpeningMessages.MeridianOpeningRequest request) {
         // 连接内的意图使用框架编排；不把客户端版本替换成当前版本来绕过冲突检查。
         targetMillis = millis;

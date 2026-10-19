@@ -234,6 +234,7 @@ public final class HumanFabric implements ModInitializer {
                 if (result.hasFailure()) {
                     return healthFailure(response, result.getFailure().getCode());
                 }
+                response.setHealth(body.healthReceipt(request.getRequestId()));
                 if (body.snapshot().vitality().dead()) {
                     meditation.stop(player);
                 }

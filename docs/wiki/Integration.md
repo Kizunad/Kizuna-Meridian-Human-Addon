@@ -89,11 +89,13 @@ var initialBody = BodyProtobuf.decodeSnapshot(candidate);
 
 Java 宿主将 `HumanDamage` 装配为框架 `BodyDamageHandler`；可选 Fabric 宿主已完成该装配。处理器接收 `DamageContext` 的 Protobuf 字节，返回 `DamageResolution`，按八类致伤机制计算局部分配与人体死亡结果，不写身体或存档。未提供命中点时复用框架的存活部位随机选择；精确组织/器官与 `CUSTOM` 分类只扣指定账户。框架固定该结果用于事务复核与幂等重试，统一保存局部 HP 和死亡释放。
 
-宿主确认效果来源、身份和时间后，通过 `BodyCommandHandler.handleHealthEffect` 提交 `DamageBody`、`HealBody`、`RestoreFatigue` 或 `ConfirmBodyDeath`。普通网络命令入口拒绝这些效果，客户端不能自行报告伤害、治疗或恢复成功。治疗和恢复剂量由实际物品或能力附属提供，Human 不新增第二套算子。经脉结构伤势修复与扣物品联合事务仍待实现。
+宿主确认效果来源、身份和时间后，通过 `BodyCommandHandler.handleHealthEffect` 提交 `DamageBody`、`HealBody`、`RestoreFatigue`、`ConfirmBodyDeath` 或 `SetPartHealthLimits`。普通网络命令入口拒绝这些效果，客户端不能自行报告伤害、治疗或恢复成功。治疗和恢复剂量由实际物品或能力附属提供，Human 不新增第二套算子。经脉结构伤势修复与扣物品联合事务仍待实现。
 
-可选 Fabric 宿主通过 `meridian_health_host` entrypoint 提供 Framework `BodyHealthHost`：交换 `HealthHostRequest` / `HealthHostResponse` Protobuf 字节，只允许服务端主线程操作在线且实际绑定的玩家。查询先结算可信模拟时间，效果保留调用方请求 ID 和预期 revision；宿主暂停或拒绝时返回原失败码，不能转由另一套账本处理。身体、回执与释放账户仍保存于同一个世界状态。
+可选 Fabric 宿主通过 `meridian_health_host` entrypoint 提供 Framework `BodyHealthHost`：交换 `HealthHostRequest` / `HealthHostResponse` Protobuf 字节，只允许服务端主线程操作在线且实际绑定的玩家。查询先结算可信模拟时间，效果保留调用方请求 ID 和预期 revision；成功效果附带由同一请求回执读取的 `HealthResult`，供效果附属核验保命事实，查询不附带。幂等重试返回当前身体与原始固定事实；宿主暂停或拒绝时返回原失败码，不能转由另一套账本处理。身体、回执与释放账户仍保存于同一个世界状态。
 
 Minecraft 原版事件由独立 Meridian Vanilla Damage Addon 接线：护甲阶段先固定命中部位，用 TOML 覆盖关系与单件护甲/韧性公式取代全局护甲，随后保留原版抗性、全身保护附魔与吸收生命，再将完整结算剂量映射到身体。身体因伤判死时同步实体死亡，原版死亡以 `ConfirmBodyDeath` 确认。Human 只提供人体处理器和上述宿主入口，不直接监听原版伤害或保存装备覆盖规则。死亡确认保留局部伤势；原版重生不自动治疗、补真元或创建新身体，复活规则另定。具体人体分配见[人体定义](Human-Definition.md)。已有身体加载时保持原构型，新增骨组需要显式迁移。
+
+同时安装 Vanilla Healing Addon 时，原版治疗通过上述宿主均分到部位 HP，原版血条只显示身体比例；全局吸收改为各部位独立黄心。图腾通过可信 `DamageBody.death_protection` 在死亡清账前提供保命下限，不需要 Human 内置图腾逻辑，也不复活已经死亡的身体。普通治疗不清除独立组织、器官损伤；生命提升的可选上限增量也由 Healing 附属声明并撤销。
 
 ## 整体验证
 
