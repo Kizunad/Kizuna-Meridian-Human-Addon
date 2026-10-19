@@ -12,7 +12,12 @@ import dev.kizuna.meridian.protocol.pb.BodyMessages;
 import dev.kizuna.meridian.protocol.pb.BreathingMessages.*;
 import dev.kizuna.meridian.protocol.pb.EnvironmentMessages.*;
 import dev.kizuna.meridian.protocol.pb.GatheringMessages.*;
+import dev.kizuna.meridian.protocol.pb.HealthMessages.ConfirmBodyDeath;
+import dev.kizuna.meridian.protocol.pb.HealthMessages.DamageBody;
+import dev.kizuna.meridian.protocol.pb.HealthMessages.DamageKind;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.BodyCommand;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.RequestEnvelope;
 import dev.kizuna.meridian.protocol.pb.OpeningMessages.*;
 import dev.kizuna.meridian.server.InMemoryBodyStore;
 import org.junit.Test;
@@ -24,6 +29,46 @@ import static org.junit.Assert.*;
 
 /** 整体回归：Minecraft 运动编排走人体注册内容与框架权威命令链。 */
 public class HumanPlayerBodyTest {
+    @Test
+    public void trustedDamageUsesCurrentRevisionAndDeathRetainsInjuriesAfterReload() {
+        // 伤害附属先查询后提交，宿主保持原请求身份，重试不会重复损伤或释放。
+        HumanPlayerBody body = born();
+        body.settle(0);
+        var original = body.snapshot();
+        var effect = RequestEnvelope.newBuilder()
+                .setProtocolVersion(1).setRequestId("vanilla-hit")
+                .setBodyCommand(BodyCommand.newBuilder()
+                        .setBodyId(original.id().value()).setExpectedRevision(original.revision())
+                        .setDamageBody(DamageBody.newBuilder()
+                                .setSourceId("sample:vanilla").setDamageType("minecraft:arrow")
+                                .setKind(DamageKind.PIERCING)
+                                .setDamageHp(2).setHit(BodyMessages.HealthTarget.newBuilder().setPartId("head")))).build();
+        var result = body.applyHealth(0, effect);
+        assertTrue(result.toString(), result.hasCommandCommitted());
+        var hurt = body.snapshot();
+        double originalHeadHp = original.partStates().stream()
+                .filter(part -> part.id().value().equals("head")).findFirst().orElseThrow().hp();
+        double hurtHeadHp = hurt.partStates().stream()
+                .filter(part -> part.id().value().equals("head")).findFirst().orElseThrow().hp();
+        assertEquals(originalHeadHp - 2, hurtHeadHp, 0);
+        assertTrue(body.applyHealth(0, effect).hasCommandCommitted());
+        assertEquals(hurt, body.snapshot());
+
+        var death = effect.toBuilder().setRequestId("vanilla-death")
+                .setBodyCommand(effect.getBodyCommand().toBuilder().setExpectedRevision(hurt.revision())
+                        .setConfirmBodyDeath(ConfirmBodyDeath.newBuilder()
+                                .setSourceId("sample:vanilla"))).build();
+        assertTrue(body.applyHealth(0, death).hasCommandCommitted());
+        assertTrue(body.snapshot().vitality().dead());
+        assertEquals(hurt.partStates(), body.snapshot().partStates());
+        assertEquals(hurt.tissueStates(), body.snapshot().tissueStates());
+        var restored = new HumanPlayerBody(body.snapshot(), body.receipts(), body.releasedQi());
+        assertTrue(restored.applyHealth(0, death).hasCommandCommitted());
+        assertEquals(body.snapshot(), restored.snapshot());
+        assertEquals(body.releasedQi(), restored.releasedQi());
+        assertTrue(restored.applyHealth(0, effect.toBuilder().setRequestId("stale-hit").build()).hasFailure());
+    }
+
     @Test
     public void debugInjectionUsesRealDiffusionAndFillPreservesOpeningState() {
         // 调试直接增加入口真元，随后与普通摄入产物共享真实事件扩散。

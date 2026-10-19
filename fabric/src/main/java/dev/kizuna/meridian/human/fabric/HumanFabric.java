@@ -7,11 +7,14 @@ import dev.kizuna.meridian.protocol.pb.PresentationMessages.BodyViewUpdate;
 import dev.kizuna.meridian.protocol.pb.GatheringMessages.*;
 import dev.kizuna.meridian.protocol.GatheringProtobuf;
 import dev.kizuna.meridian.protocol.MeridianProtocol;
+import dev.kizuna.meridian.protocol.HealthHostProtobuf;
+import dev.kizuna.meridian.protocol.pb.HealthHostMessages.HealthHostResponse;
 import dev.kizuna.meridian.protocol.OpeningProtobuf;
 import dev.kizuna.meridian.protocol.pb.OpeningMessages.MeridianOpeningRequest;
 import dev.kizuna.meridian.protocol.pb.PresentationMessages.MeridianOpeningOptions;
 import dev.kizuna.meridian.human.server.HumanContent;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.RequestFailure;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerEntityWorldChangeEvents;
@@ -52,11 +55,14 @@ public final class HumanFabric implements ModInitializer {
     private final Set<UUID> failed = new HashSet<>();
     private final HumanMeditationAnimation meditation = new HumanMeditationAnimation();
     private HumanWorldState state;
+    private MinecraftServer activeServer;
 
     @Override
     public void onInitialize() {
         // 宿主生命周期独立于客户端窗口，关掉 UI 后玩家移动仍正常记入同一身体。
+        HumanHealthHost.bind(this::health);
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            activeServer = server;
             // 原版加载失败会返回 null，不能用 getOrCreate 把损坏存档覆盖为新身体。
             var persistence = server.getOverworld().getPersistentStateManager();
             if (Files.exists(server.getSavePath(WorldSavePath.ROOT).resolve("data/meridian_human.dat"))) {
@@ -156,6 +162,7 @@ public final class HumanFabric implements ModInitializer {
             gatheringPackets.clear();
             meditation.clear();
             state = null;
+            activeServer = null;
         });
         registerCommands();
         CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) ->
@@ -184,6 +191,67 @@ public final class HumanFabric implements ModInitializer {
         } catch (RuntimeException failure) {
             fail(player, failure);
         }
+    }
+
+    private byte[] health(byte[] payload) {
+        // 此进程内接口只供可信附属使用；实际玩家仍须在线并由当前宿主唯一管理。
+        var request = HealthHostProtobuf.decodeRequest(payload);
+        var response = HealthHostResponse.newBuilder().setProtocolVersion(1).setRequestId(request.getRequestId());
+        if (activeServer == null) {
+            return HealthHostProtobuf.encodeResponse(response.setUnbound(true).build());
+        }
+        if (!activeServer.isOnThread()) {
+            return healthFailure(response, FailureCode.ACCESS_DENIED);
+        }
+        UUID subjectId;
+        try {
+            subjectId = UUID.fromString(request.getSubjectId());
+        } catch (IllegalArgumentException invalid) {
+            return HealthHostProtobuf.encodeResponse(response.setUnbound(true).build());
+        }
+        ServerPlayerEntity player = activeServer.getPlayerManager().getPlayer(subjectId);
+        if (player == null) {
+            return HealthHostProtobuf.encodeResponse(response.setUnbound(true).build());
+        }
+        if (state == null || failed.contains(subjectId)) {
+            return healthFailure(response, FailureCode.INTERNAL_ERROR);
+        }
+        HumanPlayerBody body = state.find(subjectId);
+        if (body == null) {
+            return HealthHostProtobuf.encodeResponse(response.setUnbound(true).build());
+        }
+
+        // 已绑定身份只能操作其实际身体；不能利用可信入口读取或伤害另一名玩家。
+        if (request.hasEffect() && !request.getEffect().getBodyCommand().getBodyId().equals(body.snapshot().id().value())) {
+            return healthFailure(response, FailureCode.ACCESS_DENIED);
+        }
+        try {
+            long nowMillis = millis(activeServer);
+            if (request.hasInspect()) {
+                body.settle(nowMillis);
+            } else {
+                var result = body.applyHealth(nowMillis, request.getEffect());
+                if (result.hasFailure()) {
+                    return healthFailure(response, result.getFailure().getCode());
+                }
+                if (body.snapshot().vitality().dead()) {
+                    meditation.stop(player);
+                }
+            }
+            return HealthHostProtobuf.encodeResponse(response.setBody(BodyProtobuf.toMessage(body.snapshot())).build());
+        } catch (RuntimeException failure) {
+            fail(player, failure);
+            return healthFailure(response, FailureCode.INTERNAL_ERROR);
+        } finally {
+            // 时间结算也可能产生持久化变化；业务拒绝不能丢掉已经推进的权威游标。
+            state.markDirty();
+        }
+    }
+
+    private static byte[] healthFailure(HealthHostResponse.Builder response, FailureCode code) {
+        // 保留公共失败码，调用方可区分未绑定与已认领后被拒绝。
+        return HealthHostProtobuf.encodeResponse(response.setFailure(
+                RequestFailure.newBuilder().setCode(code)).build());
     }
 
     private void leave(ServerPlayerEntity player, MinecraftServer server) {

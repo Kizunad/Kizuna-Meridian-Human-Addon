@@ -7,7 +7,10 @@
   "authors": ["Kizunad"],
   "license": "PolyForm-Noncommercial-1.0.0",
   "environment": "*",
-  "entrypoints": {"main": ["dev.kizuna.meridian.human.fabric.HumanFabric"]},
+  "entrypoints": {
+    "main": ["dev.kizuna.meridian.human.fabric.HumanFabric"],
+    "meridian_health_host": ["dev.kizuna.meridian.human.fabric.HumanHealthHost"]
+  },
   "depends": {"java": ">=17", "minecraft": "1.20.1", "fabricloader": ">=0.16.10", "fabric-api": "*"},
   "suggests": {"kizuna_players_animation": "*"}
 }

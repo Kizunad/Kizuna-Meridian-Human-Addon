@@ -8,6 +8,7 @@ import dev.kizuna.meridian.core.QiInventory;
 import dev.kizuna.meridian.core.TissueCapabilities;
 import dev.kizuna.meridian.human.server.HumanBirth;
 import dev.kizuna.meridian.human.server.HumanContent;
+import dev.kizuna.meridian.human.server.HumanDamage;
 import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.human.server.HumanOpening;
 import dev.kizuna.meridian.protocol.pb.OpeningMessages;
@@ -90,7 +91,7 @@ final class HumanPlayerBody {
         }, (caller, command, body) -> true, clock,
                 store, (caller, receipt, before, after) -> { /* 保存由宿主在事件完成后统一标脏。 */ },
                 CONTENT.recipes(), (caller, body, plan) -> Optional.ofNullable(sourceId), CONTENT.actions(), CONTENT.openings(),
-                caller -> debugAuthorized && caller.equals(id.value()));
+                caller -> debugAuthorized && caller.equals(id.value()), new HumanDamage());
     }
 
     static HumanPlayerBody born(UUID playerId, String epoch, long millis) {
@@ -331,6 +332,16 @@ final class HumanPlayerBody {
         scheduleNextBoundary();
         publishGathering();
         return response.hasFailure() ? response.getFailure().getCode() : FailureCode.FAILURE_CODE_UNSPECIFIED;
+    }
+
+    ResponseEnvelope applyHealth(long millis, RequestEnvelope request) {
+        // 独立伤害附属保留自己的事件身份与读取版本，宿主不能替它刷新版本绕过并发校验。
+        settle(millis);
+        ResponseEnvelope response = MeridianProtocol.decodeResponse(
+                commands.handleHealthEffect(id.value(), MeridianProtocol.encodeRequest(request)));
+        scheduleNextBoundary();
+        publishGathering();
+        return response;
     }
 
     ResponseEnvelope open(long millis, OpeningMessages.MeridianOpeningRequest request) {

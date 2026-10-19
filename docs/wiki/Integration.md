@@ -85,9 +85,21 @@ var initialBody = BodyProtobuf.decodeSnapshot(candidate);
 
 宿主根据真实行走/跑步状态提交 `start_action` / `stop_action`，每次切换前先结算至该事件时刻；玩家不能自己报告停止跑步以骗取恢复。吐纳会话已经管理 `human:breathing` 实例，关闭会话须在撤销权限前执行；清理失败交给可信宿主重试。动画播放请求与身体动作实例分别管理，播放成功不等于动作已登记或费用已支付。
 
+## 可信伤害与恢复
+
+Java 宿主将 `HumanDamage` 装配为框架 `BodyDamageHandler`；可选 Fabric 宿主已完成该装配。处理器接收 `DamageContext` 的 Protobuf 字节，返回 `DamageResolution`，按八类致伤机制计算局部分配与人体死亡结果，不写身体或存档。未提供命中点时复用框架的存活部位随机选择；精确组织/器官与 `CUSTOM` 分类只扣指定账户。框架固定该结果用于事务复核与幂等重试，统一保存局部 HP 和死亡释放。
+
+宿主确认效果来源、身份和时间后，通过 `BodyCommandHandler.handleHealthEffect` 提交 `DamageBody`、`HealBody`、`RestoreFatigue` 或 `ConfirmBodyDeath`。普通网络命令入口拒绝这些效果，客户端不能自行报告伤害、治疗或恢复成功。治疗和恢复剂量由实际物品或能力附属提供，Human 不新增第二套算子。经脉结构伤势修复与扣物品联合事务仍待实现。
+
+可选 Fabric 宿主通过 `meridian_health_host` entrypoint 提供 Framework `BodyHealthHost`：交换 `HealthHostRequest` / `HealthHostResponse` Protobuf 字节，只允许服务端主线程操作在线且实际绑定的玩家。查询先结算可信模拟时间，效果保留调用方请求 ID 和预期 revision；宿主暂停或拒绝时返回原失败码，不能转由另一套账本处理。身体、回执与释放账户仍保存于同一个世界状态。
+
+Minecraft 原版事件由独立 Meridian Vanilla Damage Addon 接线：护甲阶段先固定命中部位，用 TOML 覆盖关系与单件护甲/韧性公式取代全局护甲，随后保留原版抗性、全身保护附魔与吸收生命，再将完整结算剂量映射到身体。身体因伤判死时同步实体死亡，原版死亡以 `ConfirmBodyDeath` 确认。Human 只提供人体处理器和上述宿主入口，不直接监听原版伤害或保存装备覆盖规则。死亡确认保留局部伤势；原版重生不自动治疗、补真元或创建新身体，复活规则另定。具体人体分配见[人体定义](Human-Definition.md)。已有身体加载时保持原构型，新增骨组需要显式迁移。
+
 ## 整体验证
 
 `HumanGatheringTest` 保留交付 JAR/依赖关系、五行及左右肺聚气与守恒、36 脉自然储元与连续聚气、全身满载及授权/容量失败、加工/在途保存恢复、幂等重试与手动吐纳整体回归。动作覆盖行走和吐纳并存、停气释放、指数恢复以及外部版本变化后的占用清理；框架内部算法测试不在人体仓库逐项复制。
+
+`HumanHealthTest` 保护实际人体模板出生后的独立皮肤、骨骼、肌肉、器官和部位 HP，八类机制的局部反应与缺层处理，随机命中接入，以及头部归零、总体严格低于 20% 的人体判死边界。展示回归核对模型绑定的独立组织均存在于实际模板。
 
 新增自定义宿主、改变模板或配方后，应重跑 `build` 与 `demo`。`HumanPlayerBodyTest` 保护运动切换结算、局部占用、指数恢复、并发动作保留、存档重载与耗尽。专服多人和 Bong 的独立部署验收仍需分别完成。
 
@@ -113,7 +125,7 @@ var initialBody = BodyProtobuf.decodeSnapshot(candidate);
 
 `data/meridian_human.dat` 同时保存 Protobuf 身体、成功回执和释放账户。重连只推进离线世界模拟时间对应的寿命，疲劳冻结；停止残留移动实例，但保留其他附属动作。存档加载失败暂停人体功能并保留文件，不自动新建覆盖。当前复用框架内存参考 Store，回执没有 TTL，长期大服须另接具有保留策略的持久化 Store。
 
-本轮绑定实际肌肉消耗、恢复及只读观察；尚未用疲劳调整原版移速、饥饿条或 MC 生命值。原版死亡/重生不重建框架身体，后续生命映射需独立规则。
+运动绑定实际肌肉消耗、恢复及只读观察；尚未用疲劳调整原版移速或饥饿条。原版生命映射通过可选 Vanilla Damage Addon 接入，死亡/重生不重建框架身体，复活规则另定。
 
 ## Minecraft 真实玩家吐纳
 
