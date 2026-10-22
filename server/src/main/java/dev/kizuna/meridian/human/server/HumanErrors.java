@@ -4,6 +4,9 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 
 /** 人体内容工具的错误集中定义；身体业务拒绝仍由框架协议表达。 */
 public final class HumanErrors {
+    public static final String MIDDLE_JIAO_LOCKED = "请先读完《炁脉札记》和中焦残卷，再打开中焦。";
+    public static final String INVALID_CULTIVATION = "周天进度或人体模块配置无效";
+    public static final String INVALID_PROGRESS = "身体内的修炼进度类型或版本无效";
     public static final String INVALID_DAMAGE_KIND = "人体伤害需要已知的致伤机制";
     public static final String DEBUG_PERMISSION = "真元调试需要管理员权限等级 2";
     public static final String DIFFUSION_ENTRY_MISSING = "当前身体不存在指定经脉或有效摄入出口";
@@ -31,8 +34,7 @@ public final class HumanErrors {
     public static final String TISSUE_MISSING = "当前人体不存在此组织";
     public static final String HOST_FAILED = "人体宿主结算失败，已暂停该身体";
     public static final String INVALID_GATHERING_RESPONSE = "吐纳核心返回了无法解码的响应";
-    public static final String ANIMATION_API_UNAVAILABLE = "动画模组未提供兼容的服务端播放接口，吐纳继续运行";
-    public static final String ANIMATION_FAILED = "打坐动画同步失败，身体结算继续运行";
+    public static final String UI_CHANNEL_MISSING = "客户端缺少必需的 Meridian UI 接收通道";
 
     public static IllegalStateException invalidGatheringResponse(Exception cause) {
         // 保留真正的协议损坏原因，不把它伪装为玩家能力不足。

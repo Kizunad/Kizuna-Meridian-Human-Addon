@@ -1,11 +1,12 @@
 # 仓库协作约定
 
 - 这是独立的 Kizuna's Meridian Human Addon，依赖 Kizuna's Meridian Mod Framework；人体定义只能放在本仓库，不向框架添加人体特例。
+- Meridian 的 Framework、Human、UI、Items、Vanilla-Damage、Vanilla-Healing、Human-UI、Progression 和 Kizuna-Players-Animation 在各自适用端均为整套必装模块；拆仓仅用于代码管理与职责划分。不得添加缺少某个 Addon 时的替代路径、降级、可选依赖判断或对应测试/smoke；缺少必需接线应明确报错。运行时必装不意味着跨越客户端/服务端边界或让底层源码依赖具体人体实现。
 - 简体中文沟通、文档和函数内注释；公开标识符使用英文。可读性优先，按读取、校验、计算、请求、结果的业务顺序写代码，简单查找可使用 Stream。
 - 新增或修改方法、构造器必须有内部中文意图注释；避免重复命名已表达的内容与无关的未实现说明。
 - `client/` 提供人体展示资源与操作意图，不依赖权威计算；`server/` 提供人体内容与可信初始化候选，不保存或修改独立身体账本。
-- `fabric/` 是可选 Minecraft 宿主适配，管理玩家识别、模拟时钟、环境来源、吐纳请求、世界持久化和数值推送；复用框架唯一权威 Store 与命令处理器，不向 `server/` 内容库引入 Minecraft 类型。
-- 人体剪影、骨架、肌肉、器官模型和经脉路径归本包，使用框架 Protobuf 展示契约绑定实际身体 ID。UI 附属只实现通用展示，人体内容不反向依赖 UI；模型本身不增加身体状态或生命值。
+- `fabric/` 是 Minecraft 宿主适配，管理玩家识别、模拟时钟、环境来源、吐纳请求、世界持久化和数值推送；复用框架唯一权威 Store 与命令处理器，不向 `server/` 内容库引入 Minecraft 类型。
+- 人体剪影、骨架、肌肉、器官模型和单脉几何归本包，使用框架 Protobuf 展示契约绑定实际身体 ID。人体周天光迹与专属客户端表现归 Human-UI；UI 附属只实现通用展示，人体内容源码不反向依赖 UI；模型本身不增加身体状态或生命值。
 - 对外通信复用框架 `.proto` 的 protoc 生成消息，依赖通过 Gradle composite build 接入。不复制框架源码、协议或生成类，不另建 JSON 通信。
 - 新通信语义确有需要时先设计 Protobuf 契约；通用算子归框架，人体数值、构型和固有配方归本仓库，功法学习与 3D 内景不混入人体附属。
 - 运行时异常和文案集中在 `server/src/main/java/dev/kizuna/meridian/human/server/HumanErrors.java`；框架拒绝保持其原始 Protobuf 失败码。

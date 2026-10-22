@@ -73,7 +73,7 @@ final class HumanAnatomy {
 
         // 大脑有独立耐力，和注意组织的精力各自扣费、各自恢复。
         body.addOrgans(OrganDefinition.newBuilder().setId("brain").setDisplayName("脑").setKind("human:brain")
-                .setPartId("head").setMaxHp(20).setQiCapacity(1).setThroughputPerSecond(1)
+                .setPartId("head").setMaxHp(20).setVolumeCapacity(100).setThroughputPerSecond(1)
                 .setEndurance(OrganEndurance.newBuilder().setEnduranceJoules(600).setMaximumWatts(20)
                         .setRecoveryHalfLifeSeconds(30))
                 .addPorts(port("brain.in", PortDirection.INPUT)).addPorts(port("brain.out", PortDirection.OUTPUT)));
@@ -86,6 +86,11 @@ final class HumanAnatomy {
         addOrgan(body, "liver", "肝脏", "abdomen", 20);
         addOrgan(body, "gallbladder", "胆囊", "abdomen", 8);
         addOrgan(body, "spleen", "脾脏", "abdomen", 12);
+        // 脾的主动动员使用独立耐力，不借用经脉容量或脑疲劳。
+        int spleenIndex = body.getOrgansCount() - 1;
+        body.setOrgans(spleenIndex, body.getOrgans(spleenIndex).toBuilder()
+                .setEndurance(OrganEndurance.newBuilder().setEnduranceJoules(600).setMaximumWatts(20)
+                        .setRecoveryHalfLifeSeconds(30)));
         addOrgan(body, "stomach", "胃", "abdomen", 15);
         addOrgan(body, "small_intestine", "小肠", "abdomen", 15);
         addOrgan(body, "large_intestine", "大肠", "abdomen", 15);
@@ -123,18 +128,18 @@ final class HumanAnatomy {
     }
 
     private static void addOrgan(BodyStructure.Builder body, String id, String name, String part, double hp) {
-        // 器官具有独立端口和小型加工缓存，类型身份由本内容包登记。
+        // 器官缓存以体积计；游离态基准密度下 100 体积对应 1 元。
         body.addOrgans(OrganDefinition.newBuilder().setId(id).setDisplayName(name).setKind("human:" + id)
-                .setPartId(part).setMaxHp(hp).setQiCapacity(1).setThroughputPerSecond(1)
+                .setPartId(part).setMaxHp(hp).setVolumeCapacity(100).setThroughputPerSecond(1)
                 .addPorts(port(id + ".in", PortDirection.INPUT))
                 .addPorts(port(id + ".out", PortDirection.OUTPUT)));
     }
 
     private static void addLung(BodyStructure.Builder body, String side, String name) {
-        // 两肺分别摄入、受伤和加工，共用同一肺类型配方；总供给仍受环境共享预算限制。
+        // 两肺分别摄入、受伤和加工；每侧 200 体积沿用游离态下 2 元的原始容量。
         String id = side + "_lung";
         body.addOrgans(OrganDefinition.newBuilder().setId(id).setDisplayName(name).setKind("human:lung")
-                .setPartId("chest").setMaxHp(15).setQiCapacity(2).setThroughputPerSecond(1)
+                .setPartId("chest").setMaxHp(15).setVolumeCapacity(200).setThroughputPerSecond(1)
                 .setIntake(OrganIntakeCapability.newBuilder().setMaxQiPerSecond(1))
                 .addPorts(port(id + ".in", PortDirection.INPUT))
                 .addPorts(port(id + ".out", PortDirection.OUTPUT)));
@@ -161,8 +166,15 @@ final class HumanAnatomy {
             for (int index = 0; index < regularIds.size(); index++) {
                 String from = side + "_" + regularIds.get(index) + "_meridian";
                 String to = side + "_" + regularIds.get((index + 1) % regularIds.size()) + "_meridian";
+                if (regularIds.get(index).equals("large_intestine")) {
+                    // 手阳明大肠经“交人中，左之右，右之左”，接到对侧胃经；距离仍取游戏近似 0.3 米。
+                    String oppositeSide = side.equals("left") ? "right" : "left";
+                    to = oppositeSide + "_stomach_meridian";
+                }
                 connectMeridians(body, from, to, 0.3);
             }
+            // 手太阴肺经“起于中焦”：同侧脾经回肺，八条入门经脉即可组成中焦周天。
+            connectMeridians(body, side + "_spleen_meridian", side + "_lung_meridian", 0.3);
             String lung = side + "_lung";
             String channel = lung + "_meridian";
             connect(body, lung + ".to.meridian", lung + ".out", channel + ".in", 0.1);
@@ -195,11 +207,10 @@ final class HumanAnatomy {
         link(body, "chong", "dai");
     }
 
-    private static void addMeridian(BodyStructure.Builder body, String id, String name, List<String> parts, double capacity) {
-        // 所有模块按同一比例配置：总内腔 20 元、外壁 20 元，液态参照各 2000 元。
+    private static void addMeridian(BodyStructure.Builder body, String id, String name, List<String> parts, double volume) {
+        // 普通经脉为 50 体积、中轴经脉为 100 体积；游离态容量初值合计 20 元。
         body.addMeridians(MeridianDefinition.newBuilder().setId(id).setDisplayName(name).addAllPartIds(parts)
-                .setLumenCapacity(capacity).setWallCapacity(capacity)
-                .setLumenLiquidReference(capacity * 100).setWallLiquidReference(capacity * 100)
+                .setLumenVolume(volume * 100).setWallVolume(volume * 100)
                 .setThroughputPerSecond(1).setResilience(1).setFatigueCapacity(100)
                 .addPorts(port(id + ".in", PortDirection.INPUT))
                 .addPorts(port(id + ".out", PortDirection.OUTPUT)));

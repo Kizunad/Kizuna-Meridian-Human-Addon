@@ -24,7 +24,7 @@ public final class HumanBirth {
             throw HumanErrors.invalid(HumanErrors.TEMPLATE_MISMATCH);
         }
         BodyProtobuf.fromMessage(installedTemplate);
-        var body = BodySnapshot.newBuilder().setSchemaVersion(2).setId(bodyId).setTemplate(reference)
+        var body = BodySnapshot.newBuilder().setSchemaVersion(3).setId(bodyId).setTemplate(reference)
                 .setStructure(installedTemplate.getStructure()).setRealm(Realm.WANDERING_QI).setRevision(0)
                 .setSettledAt(initialTime)
                 .setVitality(VitalityState.newBuilder().setAgeSeconds(INITIAL_AGE_YEARS * SECONDS_PER_YEAR)
@@ -42,7 +42,7 @@ public final class HumanBirth {
             body.addOrganStates(OrganState.newBuilder().setId(organ.getId()).setHp(organ.getMaxHp())
                     .setBuffer(QiInventory.getDefaultInstance()));
         }
-        QiInventory naturalQi = QiInventory.newBuilder().addEntries(Qi.newBuilder().setPhase(QiPhase.FREE)
+        QiInventory naturalQi = QiInventory.newBuilder().addEntries(Qi.newBuilder().setDensity(.01)
                 .setAttribute("meridian:none").setAmount(INITIAL_QI_PER_MERIDIAN)).build();
         for (MeridianDefinition meridian : installedTemplate.getStructure().getMeridiansList()) {
             body.addMeridianStates(MeridianState.newBuilder().setId(meridian.getId()).setLumenQi(naturalQi)

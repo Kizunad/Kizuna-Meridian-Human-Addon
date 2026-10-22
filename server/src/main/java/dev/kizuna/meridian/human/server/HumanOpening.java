@@ -11,9 +11,8 @@ import java.util.List;
 public final class HumanOpening {
     public static final String ACTION_ID = "human:open_meridian";
     public static final String POLICY_ID = "human:meridian_opening";
-    public static final int RULE_VERSION = 5;
-    public static final double CAPACITY_GAIN = 16.25;
-    public static final double PRESSURE_QI = 22;
+    public static final int RULE_VERSION = 6;
+    public static final double LUMEN_VOLUME_GAIN = 1625;
 
     private HumanOpening() {
         // 内容生成不读取或修改任何玩家状态。
@@ -48,30 +47,24 @@ public final class HumanOpening {
     }
 
     public static List<MeridianOpeningRule> definitions(BodyStructure structure) {
-        // 首条组合储量为 22 元；后续每条增加 16.75＋已开条数，稳定容量仍各增加 16.25 元。
-        var conditions = HumanOpeningConditions.newBuilder().setAdditionalMillisPerOpened(10000)
-                .setMinimumResilience(1).setBaseDurationMillis(10000).setMinimumBodyLumenFraction(.8)
-                .setStrictLumenThreshold(false)
-                .setGroupPressureGrowth(GroupPressureGrowth.newBuilder().setBaseIncrementQi(16.75).setStepIncrementQi(1))
+        // 目标脉按当前稳定体积的占用比例检查；第 N 条的连续时长为 10 + 5N 秒。
+        var conditions = HumanOpeningConditions.newBuilder().setAdditionalMillisPerOpened(5000)
+                .setMinimumResilience(1).setBaseDurationMillis(15000)
+                .setBodyStartFraction(.8).setTargetStartFraction(.8)
+                .setBodyHoldFraction(.6).setTargetHoldFraction(.6)
                 .addIntakes(IntakeRequirement.newBuilder().addOrganIds("left_lung").addOrganIds("right_lung")
                         .setMinimumQiPerSecond(.005).setWindowMillis(10000));
-        for (MeridianDefinition meridian : structure.getMeridiansList()) {
-            conditions.addThresholds(PressureThreshold.newBuilder()
-                    .setMeridianId(meridian.getId()).setQi(PRESSURE_QI));
-        }
         var rules = new ArrayList<MeridianOpeningRule>();
         for (MeridianDefinition meridian : structure.getMeridiansList()) {
             rules.add(MeridianOpeningRule.newBuilder().setId(ruleId(meridian.getId())).setVersion(RULE_VERSION)
                     .setDisplayName("开拓" + meridian.getDisplayName()).setTargetMeridianId(meridian.getId())
-                    .setMinimumLumenQi(QiInventory.newBuilder().addEntries(Qi.newBuilder()
-                            .setPhase(QiPhase.FREE).setAttribute("meridian:none").setAmount(PRESSURE_QI)))
                     .setActionId(ACTION_ID).setActionVersion(1)
                     .setPolicyId(POLICY_ID).setPolicyConfig(Any.pack(conditions.clone()
                             .setMinimumRealm(minimumRealm(meridian.getId())).build()))
-                    .setContinuousHold(true).setLumenCapacityGain(CAPACITY_GAIN)
+                    .setContinuousHold(true).setLumenVolumeGain(LUMEN_VOLUME_GAIN)
                     .setGuidanceQiPerSecond(1).setGuidanceBatchQi(.25)
-                    // 凝聚需要持续供给；目标补到门槛上方 0.2 元，适应期间每秒耗散 0.1 元。
-                    .setHoldQiPerSecond(.1).setGuidanceBufferQi(.2)
+                    // 维持费用按全身内腔实际占用体积分摊，不能制造临时容量。
+                    .setHoldQiPerSecond(.1)
                     // 开脉独立付出脑耐力和精力，吐纳的膈肌与注意费用照常由其自身负载结算。
                     .addEfforts(OpeningEffort.newBuilder().setOrganId("brain").setWatts(1))
                     .addEfforts(OpeningEffort.newBuilder().setTissueId("attention_network").setWatts(.25)).build());

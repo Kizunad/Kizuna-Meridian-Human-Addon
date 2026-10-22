@@ -89,6 +89,10 @@ public final class HumanContent {
         var profile = BreathingProfile.newBuilder().setRespiratoryTissueId("diaphragm")
                 .setAttentionTissueId("attention_network").setRespiratoryWatts(30).setAttentionWatts(4)
                 .setBodyAction(BreathingActionReference.newBuilder().setId("human:breathing").setVersion(1))
+                .setAutomatic(dev.kizuna.meridian.protocol.pb.BreathingMessages.AutomaticBreathing.newBuilder()
+                        .setMinimumStaminaRatio(HumanBreathingNumbers.AUTOMATIC_MIN_STAMINA_RATIO)
+                        .setCaptureEfficiency(HumanBreathingNumbers.AUTOMATIC_CAPTURE_EFFICIENCY)
+                        .setBodyAction(BreathingActionReference.newBuilder().setId("human:automatic_breathing").setVersion(1)))
                 .setParticleVolumeBlocks(1);
         for (String side : List.of("left", "right")) {
             profile.addOrgans(BreathingOrgan.newBuilder().setOrganId(side + "_lung")
@@ -102,7 +106,7 @@ public final class HumanContent {
 
     private static QiInventory inventory(String attribute, double amount) {
         // 起步配方只处理游离态；高阶相态不能通过低阶配方悄悄降级或凭空转化。
-        return QiInventory.newBuilder().addEntries(Qi.newBuilder().setPhase(QiPhase.FREE)
+        return QiInventory.newBuilder().addEntries(Qi.newBuilder().setDensity(.01)
                 .setAttribute(attribute).setAmount(amount)).build();
     }
 }

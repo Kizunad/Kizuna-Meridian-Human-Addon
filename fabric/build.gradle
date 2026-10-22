@@ -14,11 +14,17 @@ dependencies {
     mappings 'net.fabricmc:yarn:1.20.1+build.10:v2'
     modImplementation 'net.fabricmc:fabric-loader:0.16.10'
     modImplementation 'net.fabricmc.fabric-api:fabric-api:0.92.3+1.20.1'
+    modImplementation files('../../Kizuna-Players-Animation/build/libs/kizuna-players-animation-0.1.0-SNAPSHOT.jar')
+    modImplementation files('../../Kizuna-Meridian-Progression-Addon/fabric/build/libs/kizuna-meridian-progression-addon-fabric-0.1.0-SNAPSHOT.jar')
+    modImplementation files('../../Kizuna-Inventory-UI-Framework/server/build/libs/kizuna-inventory-ui-framework-server-0.1.0-SNAPSHOT.jar')
+    implementation files('../../Kizuna-Meridian-Progression-Addon/shared/build/libs/kizuna-meridian-progression-addon-shared-0.1.0-SNAPSHOT.jar',
+            '../../Kizuna-Meridian-Progression-Addon/server/build/libs/kizuna-meridian-progression-addon-server-0.1.0-SNAPSHOT.jar')
     implementation project(':server')
     // 人体资源包的编译期协议已由下方服务端库提供，避免 Loom 再解析一份客户端协议副本。
     modImplementation(project(':client')) { transitive = false }
     // 独立安装产物携带其实际运行依赖；源码与 Protobuf 仍只从各自仓库构建。
     include project(':server')
+    include project(':shared')
     include project(':client')
     include implementation('local.meridian:server')
     include implementation('com.google.protobuf:protobuf-java:4.36.2')
@@ -33,25 +39,12 @@ processResources {
     filesMatching('fabric.mod.json') { expand version: project.version }
 }
 
-// 身体 UI 为可选运行依赖，人体绑定与查询命令在没有 UI 时仍可使用。
-if (providers.gradleProperty('withBodyUi').getOrElse('false').toBoolean()) {
-    dependencies {
-        modRuntimeOnly files('../../Kizuna-Meridian-UI-Addon/client/build/libs/kizuna-meridian-ui-addon-client-0.1.0-SNAPSHOT.jar')
-        modRuntimeOnly files('../../Kizuna-Inventory-UI-Framework/build/libs/kizuna-inventory-ui-framework-0.1.0-SNAPSHOT.jar')
-        modRuntimeOnly 'io.wispforest:owo-lib:0.11.2+1.20'
-    }
-
-}
-
-// 服务端打坐同步独立于 UI，可选装配只使用动画仓库自己的构建产物。
-if (providers.gradleProperty('playerAnimationDir').isPresent()) {
-    def animationDirectory = rootProject.file(providers.gradleProperty('playerAnimationDir').get())
-    dependencies {
-        modRuntimeOnly files(new File(animationDirectory, 'build/libs/kizuna-players-animation-0.1.0-SNAPSHOT.jar'))
-    }
-}
+apply from: '../../Kizuna-Meridian-Mod-Framework/scripts/full-assembly.gradle'
 
 loom {
+    mods {
+        meridian_human { sourceSet sourceSets.main }
+    }
     runs {
         client {
             runDir 'build/playtest'
@@ -59,6 +52,29 @@ loom {
         }
         server {
             runDir 'build/server'
+        }
+    }
+}
+
+// 在真实 Minecraft 服务端运行玩家身体宿主；测试入口不进入发布产物。
+sourceSets {
+    gametest {
+        compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
+        runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
+    }
+}
+loom {
+    mods {
+        meridian_human_test { sourceSet sourceSets.gametest }
+    }
+    runs {
+        gametest {
+            server()
+            name 'Human GameTest'
+            source sourceSets.gametest
+            runDir 'build/gametest'
+            vmArg '-Dfabric-api.gametest'
+            vmArg '-Dfabric-api.gametest.report-file=build/gametest-results.xml'
         }
     }
 }

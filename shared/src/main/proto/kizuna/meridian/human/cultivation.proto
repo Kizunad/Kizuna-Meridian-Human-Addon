@@ -1,0 +1,56 @@
+syntax = "proto3";
+package kizuna.meridian.human;
+option java_package = "dev.kizuna.meridian.human.pb";
+option java_outer_classname = "CultivationMessages";
+
+// 客户端只发控制边沿和按键 tick，时间与资源结果由服务端计算。
+message CultivationInput {
+  int64 sequence = 1;
+  enum Operation {
+    UNSPECIFIED = 0;
+    START_MANUAL = 1;
+    START_AUTOMATIC = 2;
+    STOP = 3;
+    PUSH_ON = 4;
+    PUSH_OFF = 5;
+    STRIKE_GATE = 6;
+    MOBILIZE_ON = 7;
+    MOBILIZE_OFF = 8;
+    START_BREAKTHROUGH = 9;
+  }
+  Operation operation = 2;
+  int64 key_tick = 3; // 客户端所见最近服务端模拟 tick，不能用于回拨权威判定。
+}
+
+// 附属进度随唯一 BodySnapshot 保存，不另存任何资源余额。
+message CultivationState {
+  int32 schema_version = 1;
+  bool running = 2;
+  bool automatic = 3;
+  bool pushing = 4;
+  bool mobilizing = 5;
+  double thrust = 6;
+  int64 last_millis = 7;
+  int64 last_sequence = 8;
+  int32 gate_index = 9;
+  int32 gate_hits = 10;
+  int32 practiced_gates = 11;
+  int32 laps = 12;
+  int64 gate_retry_until = 13;
+  double breakthrough_seconds = 14;
+  bool breakthrough = 15;
+  double fuel_seconds = 16;
+  string reason = 17;
+  int64 feedback_until = 18;
+  bool gate_success = 19;
+  bool exhaling = 20;
+  double density_gain = 21;
+  bool reserve_processing = 22;
+  int64 gate_window_millis = 23; // 服务端命中半窗口，供红绿提示插值。
+  double brain_stamina_ratio = 24; // 当前有效脑耐力比例，含器官和部位健康折减。
+  double automatic_minimum_stamina_ratio = 25; // 自动周天停止线，由人体占位参数声明。
+  double automatic_efficiency = 26; // 自动周天提纯系数，服务端权威值。
+  int64 breath_cycle_millis = 27; // 自然呼吸完整周期，供客户端展示吸呼阶段。
+  int64 exhale_start_millis = 28; // 周期内进入呼气阶段的偏移。
+  int64 gate_retry_millis = 29; // 关口指示圈收缩到目标的展示时长。
+}

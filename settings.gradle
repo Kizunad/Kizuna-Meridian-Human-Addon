@@ -7,7 +7,7 @@ pluginManagement {
 }
 
 rootProject.name = 'kizuna-meridian-human-addon'
-include 'client', 'server', 'fabric'
+include 'shared', 'client', 'server', 'fabric'
 
 // 框架尚未发布 Maven 产物；开发时显式从独立仓库构建，不复制它的源码或协议。
 def frameworkDirectory = providers.gradleProperty('meridianFrameworkDir')

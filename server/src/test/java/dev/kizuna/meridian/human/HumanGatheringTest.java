@@ -47,6 +47,77 @@ import static dev.kizuna.meridian.protocol.pb.OperationUiMessages.OperationMeter
 /** 整体回归：独立附属内容经过公开协议安装，并用真实权威处理器完成聚气。 */
 public class HumanGatheringTest {
     @Test
+    public void eightWanderingQiMeridiansFormMiddleJiaoCycleAndRegularCycleCrossesBothSides() {
+        // 只保留游炁八脉之间的连接，仍须完整成环；不能借心经或奇经绕路。
+        List<String> cycle = List.of("left_lung_meridian", "left_large_intestine_meridian",
+                "right_stomach_meridian", "right_spleen_meridian", "right_lung_meridian",
+                "right_large_intestine_meridian", "left_stomach_meridian", "left_spleen_meridian");
+        var initial = new Host(source(100), null).message();
+        var structure = initial.getStructure();
+        assertEquals(36, structure.getMeridiansCount());
+        assertEquals(62, structure.getConnectionsCount());
+        var unlocked = HumanContent.bundle().getOpeningRulesList().stream()
+                .filter(rule -> HumanOpening.minimumRealm(rule.getTargetMeridianId()) == BodyMessages.Realm.WANDERING_QI)
+                .map(BodyMessages.MeridianOpeningRule::getTargetMeridianId).collect(Collectors.toSet());
+        assertEquals(Set.copyOf(cycle), unlocked);
+        Set<String> inputs = cycle.stream().map(id -> id + ".in").collect(Collectors.toSet());
+        Set<String> outputs = cycle.stream().map(id -> id + ".out").collect(Collectors.toSet());
+        var edges = structure.getConnectionsList().stream()
+                .filter(edge -> outputs.contains(edge.getFrom()) && inputs.contains(edge.getTo())).toList();
+        assertEquals(8, edges.size());
+        for (int index = 0; index < cycle.size(); index++) {
+            String from = cycle.get(index);
+            String to = cycle.get((index + 1) % cycle.size());
+            var edge = edges.stream().filter(item -> item.getFrom().equals(from + ".out")).findFirst().orElseThrow();
+            assertEquals(to + ".in", edge.getTo());
+            assertEquals(.3, edge.getDistance(), 0);
+            assertEquals(0, edge.getResistance(), 0);
+            assertEquals(.5, edge.getPassiveQiFlow().getThroughputPerSecond(), 0);
+            assertEquals(.25, edge.getPassiveQiFlow().getMaximumBatchQi(), 0);
+            assertEquals(.0001, edge.getPassiveQiFlow().getMinimumBatchQi(), 0);
+
+            // 对八个方向逐一制造压差，真实事件扩散必须使用对应连接；未开脉不妨碍被动流动。
+            var seed = initial.toBuilder().setStructure(structure.toBuilder().clearConnections().addAllConnections(edges));
+            for (int stateIndex = 0; stateIndex < seed.getMeridianStatesCount(); stateIndex++) {
+                if (seed.getMeridianStates(stateIndex).getId().equals(from)) {
+                    seed.setMeridianStates(stateIndex, seed.getMeridianStates(stateIndex).toBuilder()
+                            .setLumenQi(inventory("meridian:none", .4)));
+                }
+            }
+            var host = new Host(source(100), seed.build());
+            double total = host.body().totalQi();
+            host.now = 1;
+            host.commit(GatheringRequests.settle(host.message(), "cycle-start"));
+            assertTrue(edge.getId(), host.body().transits().stream()
+                    .anyMatch(transit -> transit.connectionId().value().equals(edge.getId())));
+            host.now = 120_000;
+            host.commit(GatheringRequests.settle(host.message(), "cycle-finish"));
+            assertEquals(total, host.body().totalQi(), 1e-12);
+            assertTrue(host.body().meridianStates().stream().filter(state -> unlocked.contains(state.id().value()))
+                    .allMatch(state -> state.lumenQi().totalQi() > HumanBirth.INITIAL_QI_PER_MERIDIAN));
+            assertTrue(host.body().meridianStates().stream()
+                    .allMatch(state -> state.opening().stage() == dev.kizuna.meridian.core.MeridianOpening.Stage.UNOPENED));
+        }
+
+        // 脾到心的主干保留；排除新增回肺支路后，正经主环恰好经过左右共二十四条。
+        Set<String> regularIds = structure.getMeridiansList().stream().map(BodyMessages.MeridianDefinition::getId)
+                .filter(id -> id.endsWith("_meridian")).collect(Collectors.toSet());
+        Set<String> visited = new java.util.HashSet<>();
+        String current = "left_lung_meridian";
+        while (visited.add(current)) {
+            String output = current + ".out";
+            var main = structure.getConnectionsList().stream().filter(edge -> edge.getFrom().equals(output))
+                    .filter(edge -> regularIds.contains(edge.getTo().replace(".in", "")))
+                    .filter(edge -> !edge.getId().matches("(left|right)_spleen_meridian.to.(left|right)_lung_meridian"))
+                    .toList();
+            assertEquals(1, main.size());
+            current = main.get(0).getTo().replace(".in", "");
+        }
+        assertEquals("left_lung_meridian", current);
+        assertEquals(24, visited.size());
+    }
+
+    @Test
     public void realmLayersProtectRequestsAndShareTheHumanCapacityBudget() {
         // 绕过界面直接请求尚未解锁的正经，必须原子拒绝，不能只靠模型隐藏保护。
         var seed = new Host(source(100), null);
@@ -77,7 +148,7 @@ public class HumanGatheringTest {
             throw new AssertionError(invalid);
         }
 
-        // 每个阶段都是累计层级；游炁的八条增量加上全身出生容量，恰好为 150 元。
+        // 每个阶段都是累计层级；出生 2000 体积加八条各 1625 体积，合计 15000 体积。
         var rules = HumanContent.bundle().getOpeningRulesList();
         int[] expectedCounts = {8, 16, 24, 32, 36, 36};
         for (int realm = 1; realm <= expectedCounts.length; realm++) {
@@ -86,14 +157,13 @@ public class HumanGatheringTest {
                     dev.kizuna.meridian.human.server.HumanOpeningPolicy.conditions(item).getMinimumRealmValue() <= stage).count());
         }
         double initialCapacity = initial.getStructure().getMeridiansList().stream()
-                .mapToDouble(BodyMessages.MeridianDefinition::getLumenCapacity).sum();
+                .mapToDouble(BodyMessages.MeridianDefinition::getLumenVolume).sum();
         double wanderingQiGain = rules.stream().filter(item ->
                         HumanOpening.minimumRealm(item.getTargetMeridianId()) == BodyMessages.Realm.WANDERING_QI)
-                .mapToDouble(BodyMessages.MeridianOpeningRule::getLumenCapacityGain).sum();
-        assertEquals(150, initialCapacity + wanderingQiGain, 0);
+                .mapToDouble(BodyMessages.MeridianOpeningRule::getLumenVolumeGain).sum();
+        assertEquals(15000, initialCapacity + wanderingQiGain, 0);
 
-        // 各条都通过真实启动请求固定要求，保护递增公式、临时额度与展示使用同一份计划。
-        double[] expectedGroupQi = {22, 39.75, 58.5, 78.25, 99, 120.75, 143.5, 167.25};
+        // 各条都通过真实启动请求固定时长与目标体积，保护递增规则和稳定容量边界。
         var wanderingQiRules = rules.stream().filter(item ->
                 HumanOpening.minimumRealm(item.getTargetMeridianId()) == BodyMessages.Realm.WANDERING_QI).toList();
 
@@ -122,11 +192,12 @@ public class HumanGatheringTest {
                                     .setRuleId(openingRule.getId()).setRuleVersion(HumanOpening.RULE_VERSION)))
                     .build().toByteArray());
             var task = attempt.body().openingTask();
-            assertEquals(expectedGroupQi[index], task.participants().stream().mapToDouble(item -> item.qi()).sum(), 1e-9);
-            assertEquals(10000L * (index + 1), task.requiredMillis());
-            assertEquals(22, task.participants().stream()
-                    .filter(item -> item.meridianId().value().equals(openingRule.getTargetMeridianId()))
-                    .findFirst().orElseThrow().qi(), 0);
+            assertEquals(openingRule.getTargetMeridianId(), task.participants().get(0).meridianId().value());
+            assertEquals(15000L + 5000L * index, task.requiredMillis());
+            double targetCapacity = attempt.body().structure().meridians().stream()
+                    .filter(meridian -> meridian.id().value().equals(openingRule.getTargetMeridianId()))
+                    .findFirst().orElseThrow().lumenVolume();
+            assertEquals(targetCapacity * .8, task.participants().get(0).volume(), 1e-9);
 
             // 下一轮初值声明此前目标已完成及相应容量成长；完成过程由下方真实肺加工回归保护。
             for (int meridianIndex = 0; meridianIndex < progressedBody.getMeridianStatesCount(); meridianIndex++) {
@@ -141,7 +212,7 @@ public class HumanGatheringTest {
                 var meridian = structure.getMeridians(meridianIndex);
                 if (meridian.getId().equals(openingRule.getTargetMeridianId())) {
                     structure.setMeridians(meridianIndex, meridian.toBuilder()
-                            .setLumenCapacity(meridian.getLumenCapacity() + openingRule.getLumenCapacityGain()));
+                            .setLumenVolume(meridian.getLumenVolume() + openingRule.getLumenVolumeGain()));
                 }
             }
         }
@@ -156,26 +227,12 @@ public class HumanGatheringTest {
         double initialTotal = host.body().totalQi() + host.sourceTotal();
         var rule = host.registry.openings().find("human:open/left_lung_meridian", HumanOpening.RULE_VERSION).orElseThrow();
         assertEquals(36, HumanContent.bundle().getOpeningRulesCount());
-        assertEquals(22, rule.getMinimumLumenQi().getEntries(0).getAmount(), 0);
         var conditions = dev.kizuna.meridian.human.server.HumanOpeningPolicy.conditions(rule);
-        assertFalse(conditions.getStrictLumenThreshold());
-        assertEquals(.8, conditions.getMinimumBodyLumenFraction(), 0);
-        assertEquals(16.75, conditions.getGroupPressureGrowth().getBaseIncrementQi(), 0);
-        assertEquals(1, conditions.getGroupPressureGrowth().getStepIncrementQi(), 0);
-        for (GroupPressureGrowth invalid : List.of(
-                GroupPressureGrowth.newBuilder().setBaseIncrementQi(16.75).setStepIncrementQi(-1).build(),
-                GroupPressureGrowth.newBuilder().setBaseIncrementQi(Double.MAX_VALUE).setStepIncrementQi(1).build())) {
-            // 非法递增与最大全组溢出在条件解码时拒绝，不能进入任务或产生临时容量。
-            var malformed = rule.toBuilder().setPolicyConfig(com.google.protobuf.Any.pack(
-                    conditions.toBuilder().setGroupPressureGrowth(invalid).build())).build();
-            assertThrows(IllegalArgumentException.class, () -> HumanOpeningPolicy.conditions(malformed));
-        }
         var initialCards = dev.kizuna.meridian.human.server.HumanOpeningViews.update(host.message(), HumanContent.bundle().getOpeningRulesList());
         assertEquals(host.body().revision(), initialCards.getBodyRevision());
         assertEquals(36, initialCards.getOperationsCount());
         assertEquals(8, initialCards.getOperationsList().stream().filter(card -> card.getEnabled()).count());
         assertEquals(.1, rule.getHoldQiPerSecond(), 0);
-        assertEquals(.2, rule.getGuidanceBufferQi(), 0);
         host.commit(RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId("opening-start")
                 .setBodyCommand(BodyCommand.newBuilder().setBodyId("test-human").setExpectedRevision(host.body().revision())
                         .setStartMeridianOpening(dev.kizuna.meridian.protocol.pb.OpeningMessages.StartMeridianOpening.newBuilder()
@@ -205,13 +262,18 @@ public class HumanGatheringTest {
                             .findFirst().orElseThrow();
                     var connection = new dev.kizuna.meridian.core.Anatomy.ConnectionId(choice.getConnectionId());
                     double rate = dev.kizuna.meridian.core.QiTransport.availableThroughputPerSecond(host.body(), connection);
-                    if (rate <= 0 || choice.getTargetRemainingQi() < organ.buffer().totalQi()) {
+                    if (rate <= 0 || choice.getTargetRemainingVolume() <= 0) {
+                        continue;
+                    }
+                    var sourceBuffer = organ.buffer();
+                    var cargo = sourceBuffer.take(rate, choice.getTargetRemainingVolume());
+                    if (cargo.totalQi() <= 0) {
                         continue;
                     }
                     host.commit(RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId("opening-send-" + round + organId)
                             .setBodyCommand(BodyCommand.newBuilder().setBodyId("test-human").setExpectedRevision(host.body().revision())
                                     .setTransportQi(TransportQi.newBuilder().setConnectionId(choice.getConnectionId())
-                                            .setCargo(BodyProtobuf.toInventory(organ.buffer())).setThroughputPerSecond(rate)))
+                                            .setCargo(BodyProtobuf.toInventory(cargo)).setThroughputPerSecond(rate)))
                             .build().toByteArray());
                 }
                 // 可信宿主按当前浓度采样一元原料；比例损耗回归同一环境来源，不能再重复启动固定批次。
@@ -224,23 +286,28 @@ public class HumanGatheringTest {
                         .build().toByteArray());
             }
             if (round == 0) {
-                // 新摄入已经满足，但目标尚未汇满；适应条必须等待，不能把准备误画成计时。
+                // 首次摄入收据建立后进入维持态；当前模拟时刻尚未推进，所以计时仍为零。
                 var card = HumanOpeningViews.update(host.message(), List.of(rule)).getOperations(0);
-                assertEquals(dev.kizuna.meridian.core.OpeningTask.Status.PREPARING, host.body().openingTask().status());
+                assertEquals(dev.kizuna.meridian.core.OpeningTask.Status.HOLDING, host.body().openingTask().status());
                 assertEquals(0, host.body().openingTask().heldMillis());
                 assertEquals(METER_READY, card.getMetersList().stream()
                         .filter(meter -> meter.getId().equals("intake")).findFirst().orElseThrow().getState());
-                assertEquals(METER_WAITING, card.getMetersList().stream()
+                assertEquals(METER_READY, card.getMetersList().stream()
                         .filter(meter -> meter.getId().equals("target")).findFirst().orElseThrow().getState());
-                assertEquals(METER_WAITING, card.getMetersList().stream()
+                assertEquals(METER_RUNNING, card.getMetersList().stream()
                         .filter(meter -> meter.getId().equals("hold")).findFirst().orElseThrow().getState());
 
-                // 只给策略提供边界候选，不提交账户变更；恰好 22 元应满足新的凝聚门槛。
+                // 只给策略提供边界候选，不提交账户变更；目标处于 80% 启动线时策略仍可继续维持。
                 var boundaryBody = host.message().toBuilder();
                 for (int index = 0; index < boundaryBody.getMeridianStatesCount(); index++) {
                     var meridian = boundaryBody.getMeridianStates(index);
                     if (meridian.getId().equals(rule.getTargetMeridianId())) {
-                        boundaryBody.setMeridianStates(index, meridian.toBuilder().setLumenQi(rule.getMinimumLumenQi()));
+                        double targetVolume = boundaryBody.getStructure().getMeridiansList().stream()
+                                .filter(definition -> definition.getId().equals(rule.getTargetMeridianId()))
+                                .findFirst().orElseThrow().getLumenVolume();
+                        boundaryBody.setMeridianStates(index, meridian.toBuilder().setLumenQi(
+                                BodyMessages.QiInventory.newBuilder().addEntries(BodyMessages.Qi.newBuilder()
+                                        .setDensity(.01).setAttribute("meridian:none").setAmount(targetVolume * .8 * .01))));
                     }
                 }
                 var decision = OpeningPolicyDecision.parseFrom(new HumanOpeningPolicy().evaluate(
@@ -270,12 +337,12 @@ public class HumanGatheringTest {
         var completedCard = HumanOpeningViews.update(host.message(), List.of(rule)).getOperations(0);
         assertEquals(METER_READY, completedCard.getMetersList().stream()
                 .filter(meter -> meter.getId().equals("hold")).findFirst().orElseThrow().getState());
-        assertEquals(36.25, host.body().structure().meridians().stream().mapToDouble(item -> item.lumenCapacity()).sum(), 0);
+        assertEquals(2000 + 1625, host.body().structure().meridians().stream().mapToDouble(item -> item.lumenVolume()).sum(), 0);
         assertEquals(1, host.body().meridianStates().stream()
                 .filter(item -> item.opening().stage() == dev.kizuna.meridian.core.MeridianOpening.Stage.OPENED).count());
         assertEquals(initialTotal, host.body().totalQi() + host.sourceTotal() + host.store.environmentQi().totalQi(), 1e-8);
 
-        // 第二条比首条增加 16.75＋1 元，已开脉保留 17.75 元，目标维持 22 元。
+        // 第二条仍按目标经脉当前稳定容量的 80% 汇聚，时长随已开脉数量递增。
         var readyForSecond = new Host(environment, fullMeridians(host.message()));
         readyForSecond.now = host.now;
         readyForSecond.commit(RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId("opening-second")
@@ -284,35 +351,17 @@ public class HumanGatheringTest {
                                 .setRuleId("human:open/right_lung_meridian").setRuleVersion(HumanOpening.RULE_VERSION))).build().toByteArray());
         var second = readyForSecond.body().openingTask();
         assertEquals(20000, second.requiredMillis());
-        assertEquals(39.75, second.participants().stream().mapToDouble(item -> item.qi()).sum(), 0);
-        assertEquals(22, second.rule().minimumLumenQi().totalQi(), 0);
-        assertEquals(17.75, second.participants().stream()
-                .filter(item -> item.meridianId().value().equals("left_lung_meridian")).findFirst().orElseThrow().qi(), 0);
+        assertEquals(40, second.participants().get(0).volume(), 0);
         readyForSecond.restore();
         assertEquals(second, readyForSecond.body().openingTask());
         var cards = dev.kizuna.meridian.human.server.HumanOpeningViews.update(readyForSecond.message(), HumanContent.bundle().getOpeningRulesList());
         var card = cards.getOperationsList().stream().filter(item -> item.getMeridianId().equals("right_lung_meridian")).findFirst().orElseThrow();
         assertEquals("pause", card.getActionId());
-        double actualGroupQi = readyForSecond.body().meridianStates().stream()
-                .filter(state -> second.participants().stream().anyMatch(item -> item.meridianId().equals(state.id())))
-                .mapToDouble(state -> state.lumenQi().totalQi()).sum();
-        assertEquals(actualGroupQi / 39.75, card.getMetersList().stream()
-                .filter(meter -> meter.getId().equals("group")).findFirst().orElseThrow().getFraction(), 1e-9);
-
-        // 旧规则的 Any 未声明递增，重新读取时仍使用逐脉固定阈值。
-        var secondRule = HumanContent.bundle().getOpeningRulesList().stream()
-                .filter(item -> item.getTargetMeridianId().equals("right_lung_meridian")).findFirst().orElseThrow();
-        var legacyRule = secondRule.toBuilder().setVersion(3).setPolicyConfig(com.google.protobuf.Any.pack(
-                HumanOpeningPolicy.conditions(secondRule).toBuilder().clearGroupPressureGrowth().build())).build();
-        var legacyPlan = OpeningPolicyDecision.parseFrom(new HumanOpeningPolicy().evaluate(
-                OpeningPolicyRequest.newBuilder().setProtocolVersion(1).setPhase(OpeningPolicyPhase.PREPARE_OPENING)
-                        .setBody(readyForSecond.message()).setRule(legacyRule).build().toByteArray()));
-        assertEquals(44, legacyPlan.getParticipantsList().stream().mapToDouble(BodyMessages.OpeningPressureLimit::getQi).sum(), 0);
     }
 
     @Test
     public void openingGuidanceLeavesThroughputForBufferedBreathingProducts() throws IOException {
-        // 复现满身真元后开拓大肠经：双肺已有产物，引导不能反复抢满肺经而饿死摄入。
+        // 肺缓存已有产物时按稳定内腔余量配送；开脉任务不能创造额外接收空间。
         var seed = new Host(source(100), null);
         var initial = fullMeridians(seed.message()).toBuilder();
         for (int index = 0; index < initial.getOrganStatesCount(); index++) {
@@ -321,25 +370,33 @@ public class HumanGatheringTest {
                 initial.setOrganStates(index, organ.toBuilder().setBuffer(inventory("meridian:none", 2)));
             }
         }
+        // 双肺经脉和目标大肠经都保留 20% 稳定空间，启动门槛仍满足 80%。
+        for (int index = 0; index < initial.getMeridianStatesCount(); index++) {
+            var meridian = initial.getMeridianStates(index);
+            if (Set.of("left_lung_meridian", "right_lung_meridian", "left_large_intestine_meridian")
+                    .contains(meridian.getId())) {
+                initial.setMeridianStates(index, meridian.toBuilder()
+                        .setLumenQi(inventory("meridian:none", .4)));
+            }
+        }
         var host = new Host(source(100).toBuilder().setValidUntil(time(600000)).build(), initial.build());
         double initialTotal = host.body().totalQi() + host.sourceTotal();
-        var session = host.session();
-        session.enableBreathing(HumanContent.breathing());
-        breath(session, 1, BreathAction.BEGIN_BREATHING, .5, .4);
-        session.advance();
-        assertTrue(session.view().getBreathing().getActive());
-        assertEquals(FailureCode.CAPACITY_EXCEEDED, session.view().getBreathing().getFailure());
-        assertEquals(0, session.view().getBreathing().getStoredQi(), 0);
-
-        // 经脉满载是合法等待；开拓腾出空间后，同一吐纳会话应自行恢复配送。
         host.commit(RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId("buffered-opening")
                 .setBodyCommand(BodyCommand.newBuilder().setBodyId("test-human").setExpectedRevision(host.body().revision())
                         .setStartMeridianOpening(dev.kizuna.meridian.protocol.pb.OpeningMessages.StartMeridianOpening.newBuilder()
                                 .setRuleId("human:open/left_large_intestine_meridian")
                                 .setRuleVersion(HumanOpening.RULE_VERSION))).build().toByteArray());
-        session.synchronizeBodyRevision();
+        var session = host.session();
+        session.enableBreathing(HumanContent.breathing());
+        var leftLungChoice = session.view().getChoicesList().stream()
+                .filter(choice -> choice.getTargetMeridianId().equals("left_lung_meridian"))
+                .findFirst().orElseThrow();
+        assertEquals(10, leftLungChoice.getTargetRemainingVolume(), 0);
+        breath(session, 1, BreathAction.BEGIN_BREATHING, .5, .4);
+        session.advance();
+        assertTrue(session.view().getBreathing().getActive());
 
-        // 不依赖随机粒子命中；只续租停气，让真实缓存、到货和引导竞争同一权威吞吐。
+        // 不依赖随机粒子命中；停气只续租输入，已有真元仍按实际余量和共享吞吐配送。
         for (int step = 0; step < 40; step++) {
             breath(session, step + 2, BreathAction.HOLD, .5, .4);
             host.now += 250;
@@ -356,7 +413,11 @@ public class HumanGatheringTest {
                         usedRate <= meridian.throughputPerSecond() + 1e-9);
             }
         }
-        assertTrue("肺部缓存必须能送进经脉", session.view().getBreathing().getStoredQi() > 0);
+        assertTrue("肺部缓存必须能送进经脉: stored=" + session.view().getBreathing().getStoredQi()
+                        + ", body=" + host.body().totalQi() + ", buffers=" + host.body().organStates().stream()
+                        .filter(organ -> organ.id().value().equals("left_lung") || organ.id().value().equals("right_lung"))
+                        .mapToDouble(organ -> organ.buffer().totalQi()).sum(),
+                session.view().getBreathing().getStoredQi() > 0);
         double remainingBuffer = host.body().organStates().stream()
                 .filter(organ -> organ.id().value().equals("left_lung") || organ.id().value().equals("right_lung"))
                 .mapToDouble(organ -> organ.buffer().totalQi()).sum();
@@ -379,10 +440,10 @@ public class HumanGatheringTest {
         // 肺出口能使用开脉的临时增压空间，避免断言依赖某个旧版本的压力数值。
         double stableLungCapacity = host.body().structure().meridians().stream()
                 .filter(meridian -> meridian.id().value().equals("left_lung_meridian"))
-                .findFirst().orElseThrow().lumenCapacity();
-        assertTrue(session.view().getChoicesList().stream()
+                .findFirst().orElseThrow().lumenVolume();
+        assertTrue("开脉期间不得临时扩容: " + session.view().getChoicesList(), session.view().getChoicesList().stream()
                 .anyMatch(choice -> choice.getTargetMeridianId().equals("left_lung_meridian")
-                        && choice.getTargetRemainingQi() > stableLungCapacity));
+                        && choice.getTargetRemainingVolume() <= stableLungCapacity));
         long sequence = 1;
         breath(session, sequence++, BreathAction.BEGIN_BREATHING, .5, .4);
         double breathingSeconds = 0;
@@ -407,6 +468,58 @@ public class HumanGatheringTest {
                 .findFirst().orElseThrow().fatigueJoules(), 1e-9);
         assertEquals(120, host.body().totalQi() + host.sourceTotal() + host.store.environmentQi().totalQi(), 1e-8);
         session.close();
+    }
+
+    @Test
+    public void automaticBreathingUsesRealContactsOnlyPaysRespirationAndStopsAtThreshold() throws IOException {
+        // 自动输入不带剂量或摄入证据；整个会话继续使用真实环境、接触、炼化和运输。
+        Host host = new Host(source(100), null);
+        var session = host.session();
+        session.enableBreathing(HumanContent.breathing());
+        var request = GatheringRequest.newBuilder().setProtocolVersion(1).setBodyId("test-human")
+                .setRequestId("automatic-start").setBreath(BreathControl.newBuilder().setSequence(1)
+                        .setAction(BreathAction.BEGIN_BREATHING).setAutomatic(true)).build();
+        assertTrue(GatheringResponse.parseFrom(session.handle(request.toByteArray())).hasView());
+        assertTrue(session.view().getBreathing().getAutomatic());
+        assertEquals(0, session.view().getBreathing().getAbsorbedQi(), 0);
+        assertEquals(HumanContent.breathing().getAutomatic().getMinimumStaminaRatio(),
+                session.view().getBreathing().getAutomaticMinimumStaminaRatio(), 0);
+        assertEquals(HumanContent.breathing().getAutomatic().getCaptureEfficiency(),
+                session.view().getBreathing().getAutomaticCaptureEfficiency(), 0);
+        assertTrue(host.body().actions().stream().noneMatch(action -> action.definition().tissueIds()
+                .contains(new dev.kizuna.meridian.core.Anatomy.TissueId("attention_network"))));
+        int contacts = 0;
+        for (int step = 0; step < 400 && session.view().getBreathing().getActive(); step++) {
+            BreathingView before = session.view().getBreathing();
+            host.now += 250;
+            session.advance();
+            BreathingView after = session.view().getBreathing();
+            int newContacts = 0;
+            for (BreathParticle particle : after.getParticlesList()) {
+                BreathParticle old = before.getParticlesList().stream().filter(item -> item.getId() == particle.getId()).findFirst().orElseThrow();
+                newContacts += particle.getGeneration() - old.getGeneration();
+            }
+            contacts += newContacts;
+            double absorbed = after.getAbsorbedQi() - before.getAbsorbedQi();
+            if (newContacts == 0) {
+                assertEquals("没有真实接触不能伪造摄入", 0, absorbed, 0);
+            } else {
+                // 环境初始每格1元，之后只会下降；每次自动接触最多采样半格。
+                assertTrue(absorbed > 0);
+                assertTrue(absorbed <= newContacts * .5 + 1e-8);
+            }
+            assertEquals(1, after.getAttentionRatio(), 1e-10);
+        }
+        BreathingView stopped = session.view().getBreathing();
+        assertTrue(contacts > 0);
+        assertFalse(stopped.getActive());
+        assertTrue(stopped.getStaminaRatio() < .8 && stopped.getStaminaRatio() > .79);
+        assertTrue(host.body().actions().isEmpty());
+        assertEquals(100.36, host.body().totalQi() + host.sourceTotal() + host.store.environmentQi().totalQi(), 1e-7);
+        var retry = request.toBuilder().setRequestId("automatic-retry")
+                .setBreath(request.getBreath().toBuilder().setSequence(2)).build();
+        assertEquals(FailureCode.MODULE_UNAVAILABLE, GatheringResponse.parseFrom(session.handle(retry.toByteArray())).getFailure().getCode());
+        assertTrue(HumanContent.breathing().getAutomatic().getCaptureEfficiency() < 1);
     }
 
     @Test
@@ -680,9 +793,9 @@ public class HumanGatheringTest {
         assertEquals(17, template.getStructure().getPartsCount());
         assertEquals(15, template.getStructure().getOrgansCount());
         assertEquals(36, template.getStructure().getMeridiansCount());
-        assertEquals(20, template.getStructure().getMeridiansList().stream().mapToDouble(BodyMessages.MeridianDefinition::getLumenCapacity).sum(), 0);
-        assertEquals(20, template.getStructure().getMeridiansList().stream().mapToDouble(BodyMessages.MeridianDefinition::getWallCapacity).sum(), 0);
-        assertEquals(0.01, BodyProtobuf.fromMessage(template).structure().capacityRatio(), 0);
+        assertEquals(2000, template.getStructure().getMeridiansList().stream().mapToDouble(BodyMessages.MeridianDefinition::getLumenVolume).sum(), 0);
+        assertEquals(2000, template.getStructure().getMeridiansList().stream().mapToDouble(BodyMessages.MeridianDefinition::getWallVolume).sum(), 0);
+        assertEquals(2000, BodyProtobuf.fromMessage(template).structure().lumenVolume(), 0);
         try (var jar = new ZipFile(System.getProperty("human.serverJar"))) {
             var resource = jar.getEntry(HumanContent.BUNDLE_RESOURCE);
             assertNotNull(resource);
@@ -819,13 +932,18 @@ public class HumanGatheringTest {
                 host.now = 2000;
                 host.commit(GatheringRequests.settle(host.message(), "complete"));
                 assertEquals(0.8, host.store.environmentQi().totalQi(), 1e-12);
-                host.commit(GatheringRequests.store(host.message(), "store", side + "_lung.to.meridian", recipe.getOutput(), 1));
+                // 回流与肺出口共享经脉吞吐，显式批次按此刻空闲速率发运。
+                double availableRate = dev.kizuna.meridian.core.QiTransport.availableThroughputPerSecond(host.body(),
+                        new dev.kizuna.meridian.core.Anatomy.ConnectionId(side + "_lung.to.meridian"));
+                assertTrue(availableRate > 0);
+                host.commit(GatheringRequests.store(host.message(), "store", side + "_lung.to.meridian", recipe.getOutput(), availableRate));
                 assertEquals(initialTotal + .2, host.body().lumenQiTotal() + host.body().transitQiTotal(), 1e-12);
                 var lungTransit = host.body().transits().stream()
                         .filter(transit -> transit.connectionId().value().equals(side + "_lung.to.meridian"))
                         .findFirst().orElseThrow();
-                assertEquals(2300, lungTransit.arrivalMillis());
-                host.now = 2300;
+                long arrivalMillis = lungTransit.arrivalMillis();
+                assertTrue(arrivalMillis > host.now);
+                host.now = arrivalMillis;
                 host.commit(GatheringRequests.settle(host.message(), "arrive"));
 
                 assertEquals(0, host.body().organQiTotal(), 0);
@@ -835,12 +953,14 @@ public class HumanGatheringTest {
                         .filter(meridian -> meridian.getId().equals(side + "_lung_meridian")).findFirst().orElseThrow();
                 assertTrue(channel.getLumenQi().getEntries(0).getAmount() < .21);
                 assertEquals("meridian:none", channel.getLumenQi().getEntries(0).getAttribute());
-                assertEquals(BodyMessages.QiPhase.FREE, channel.getLumenQi().getEntries(0).getPhase());
+                assertEquals(BodyMessages.QiPhase.FREE,
+                        dev.kizuna.meridian.protocol.QiDensity.phase(channel.getLumenQi().getEntries(0).getDensity()));
                 assertTrue(host.message().getMeridianStatesList().stream().allMatch(meridian ->
                         meridian.getOpening().getStage() == BodyMessages.MeridianOpeningStage.UNOPENED
                                 && meridian.getOpening().getProgress() == 0));
                 assertEquals(initialTotal + 100, host.body().totalQi() + host.sourceTotal() + host.store.environmentQi().totalQi(), 1e-12);
-                assertEquals(HumanBirth.INITIAL_AGE_YEARS * HumanBirth.SECONDS_PER_YEAR + 2.3, host.body().vitality().ageSeconds(), 1e-6);
+                assertEquals(HumanBirth.INITIAL_AGE_YEARS * HumanBirth.SECONDS_PER_YEAR + arrivalMillis / 1000.0,
+                        host.body().vitality().ageSeconds(), 1e-6);
                 assertEquals(BodyProtobuf.decodeSnapshot(BodyProtobuf.encodeSnapshot(host.body())), host.body());
 
                 // 后续无需主动指令，按同一事件算子自然经过全身通路；开拓状态保持独立。
@@ -948,12 +1068,18 @@ public class HumanGatheringTest {
         assertEquals(2, host.body().revision());
         host.now = 2000;
         host.commit(GatheringRequests.settle(host.message(), "complete"));
-        byte[] transport = GatheringRequests.store(host.message(), "store", "left_lung.to.meridian", recipe.getOutput(), 1);
+        // 共享吞吐已被自然扩散部分预约，存档测试按实际可用速率发运。
+        double availableRate = dev.kizuna.meridian.core.QiTransport.availableThroughputPerSecond(host.body(),
+                new dev.kizuna.meridian.core.Anatomy.ConnectionId("left_lung.to.meridian"));
+        byte[] transport = GatheringRequests.store(host.message(), "store", "left_lung.to.meridian", recipe.getOutput(), availableRate);
         host.commit(transport);
+        long arrivalMillis = host.body().transits().stream()
+                .filter(transit -> transit.connectionId().value().equals("left_lung.to.meridian"))
+                .findFirst().orElseThrow().arrivalMillis();
         host.restore();
         host.commit(transport);
         assertEquals(4, host.body().revision());
-        host.now = 2300;
+        host.now = arrivalMillis;
         host.commit(GatheringRequests.settle(host.message(), "arrive"));
         assertEquals(0.56, host.body().totalQi(), 1e-12);
         assertEquals(0.8, host.store.environmentQi().totalQi(), 1e-12);
@@ -987,7 +1113,7 @@ public class HumanGatheringTest {
     private static BodyMessages.QiInventory inventory(String attribute, double amount) {
         // 构造明确的原始相态与属性，用于验证服务端从未把五行当作无属性入账。
         return BodyMessages.QiInventory.newBuilder().addEntries(BodyMessages.Qi.newBuilder()
-                .setPhase(BodyMessages.QiPhase.FREE).setAttribute(attribute).setAmount(amount)).build();
+                .setDensity(.01).setAttribute(attribute).setAmount(amount)).build();
     }
 
     private static BodyMessages.BodySnapshot fullMeridians(BodyMessages.BodySnapshot original) {
@@ -996,9 +1122,9 @@ public class HumanGatheringTest {
         for (int index = 0; index < original.getMeridianStatesCount(); index++) {
             String id = original.getMeridianStates(index).getId();
             double capacity = original.getStructure().getMeridiansList().stream()
-                    .filter(meridian -> meridian.getId().equals(id)).findFirst().orElseThrow().getLumenCapacity();
+                    .filter(meridian -> meridian.getId().equals(id)).findFirst().orElseThrow().getLumenVolume();
             result.setMeridianStates(index, original.getMeridianStates(index).toBuilder()
-                    .setLumenQi(inventory("meridian:none", capacity)));
+                    .setLumenQi(inventory("meridian:none", capacity * .01)));
         }
         return result.build();
     }
@@ -1023,7 +1149,7 @@ public class HumanGatheringTest {
         private boolean readable = true;
 
         private GatheringSession<String> session() {
-            // 模拟可信宿主把同一时钟、权限、来源和核心交给可选操作编排。
+            // 模拟可信宿主把同一时钟、权限、来源和核心交给聚气编排。
             return new GatheringSession<>("owner", new BodyId("test-human"), handler(), store,
                     (context, id) -> readable && context.equals("owner") && id.value().equals("test-human"),
                     (context, body) -> TimeAdvancePlan.newBuilder().setTarget(time(now))

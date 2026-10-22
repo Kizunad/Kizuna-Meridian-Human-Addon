@@ -11,12 +11,17 @@ import dev.kizuna.meridian.human.server.HumanContent;
 import dev.kizuna.meridian.human.server.HumanDamage;
 import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.human.server.HumanOpening;
+import dev.kizuna.meridian.human.server.HumanCultivation;
+import dev.kizuna.meridian.human.server.HumanCultivationNumbers;
+import dev.kizuna.meridian.human.pb.CultivationMessages.CultivationInput;
+import dev.kizuna.meridian.protocol.pb.ActivityMessages;
 import dev.kizuna.meridian.protocol.pb.OpeningMessages;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.MeridianProtocol;
 import dev.kizuna.meridian.protocol.pb.AddonMessages.*;
 import dev.kizuna.meridian.protocol.pb.BodyMessages;
 import dev.kizuna.meridian.protocol.pb.GatheringMessages.*;
+import dev.kizuna.meridian.protocol.pb.BreathingMessages.*;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.*;
 import dev.kizuna.meridian.server.AddonRegistry;
 import dev.kizuna.meridian.server.BodyCommandHandler;
@@ -24,6 +29,8 @@ import dev.kizuna.meridian.server.InMemoryBodyStore;
 import dev.kizuna.meridian.server.GatheringSession;
 import dev.kizuna.meridian.server.BodyTimeSource;
 import dev.kizuna.meridian.server.OpeningSession;
+import dev.kizuna.meridian.progression.ProgressionProtocol;
+import dev.kizuna.meridian.progression.pb.ProgressionMessages.PlayerProgress;
 
 import java.util.List;
 import java.util.Optional;
@@ -66,6 +73,7 @@ final class HumanPlayerBody {
     private Consumer<GatheringResponse> gatheringOutput;
     private final Set<String> breathingActions = new HashSet<>();
     private boolean debugAuthorized;
+    private BreathingView lastBreathing = BreathingView.getDefaultInstance();
 
     HumanPlayerBody(BodySnapshot saved, List<CommandReceipt> receipts, QiInventory releasedQi) {
         // 同时恢复身体、成功回执及释放账，不能在登录时重建疲劳或重发历史释放。
@@ -92,6 +100,52 @@ final class HumanPlayerBody {
                 store, (caller, receipt, before, after) -> { /* 保存由宿主在事件完成后统一标脏。 */ },
                 CONTENT.recipes(), (caller, body, plan) -> Optional.ofNullable(sourceId), CONTENT.actions(), CONTENT.openings(),
                 caller -> debugAuthorized && caller.equals(id.value()), new HumanDamage());
+        if (!saved.addonProgress().containsKey(ProgressionProtocol.PROGRESS_KEY)) {
+            // 新身体与尚无进度字段的存档都从未读开始，并写入同一身体事务。
+            writeProgress(PlayerProgress.newBuilder().setSchemaVersion(ProgressionProtocol.PROGRESS_SCHEMA).build());
+        }
+    }
+
+    PlayerProgress progress() {
+        // 只读取身体内的唯一事实；未知类型或版本不能被解释成已解锁。
+        try {
+            PlayerProgress progress = snapshot().addonProgress().get(ProgressionProtocol.PROGRESS_KEY)
+                    .unpack(PlayerProgress.class);
+            if (progress.getSchemaVersion() != ProgressionProtocol.PROGRESS_SCHEMA) {
+                throw HumanErrors.invalid(HumanErrors.INVALID_PROGRESS);
+            }
+            return progress;
+        } catch (com.google.protobuf.InvalidProtocolBufferException invalid) {
+            throw HumanErrors.invalid(HumanErrors.INVALID_PROGRESS);
+        }
+    }
+
+    boolean canIntrospect(String bodyId) {
+        // 内观订阅同时校验身体归属和已读事实，客户端隐藏入口不能代替服务端授权。
+        return id.value().equals(bodyId) && progress().getQiNotesRead();
+    }
+
+    void writeProgress(PlayerProgress progress) {
+        // 重置先终止会话与占用；同一服务器线程随后提交进度，不允许旧输入继续执行。
+        if (progress.getSchemaVersion() != ProgressionProtocol.PROGRESS_SCHEMA) {
+            throw HumanErrors.invalid(HumanErrors.INVALID_PROGRESS);
+        }
+        PlayerProgress previous = snapshot().addonProgress().containsKey(ProgressionProtocol.PROGRESS_KEY)
+                ? progress() : PlayerProgress.getDefaultInstance();
+        if (previous.getQiNotesRead() && !progress.getQiNotesRead()
+                || previous.getGatheringScrollRead() && !progress.getGatheringScrollRead()
+                || previous.getMiddleJiaoScrollRead() && !progress.getMiddleJiaoScrollRead()) {
+            // 只在撤权时结束旧活动；阅读新卷不会断开已经接好的吐纳会话。
+            disconnectGathering(targetMillis);
+        }
+        var request = RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId(UUID.randomUUID().toString())
+                .setBodyCommand(BodyCommand.newBuilder().setBodyId(id.value()).setExpectedRevision(snapshot().revision())
+                        .setSetAddonProgress(SetAddonProgress.newBuilder().setId(ProgressionProtocol.PROGRESS_KEY)
+                                .setProgress(com.google.protobuf.Any.pack(progress)))).build();
+        ResponseEnvelope response = MeridianProtocol.decodeResponse(commands.handleAddonProgress(id.value(), request.toByteArray()));
+        if (response.hasFailure()) {
+            throw HumanErrors.hostRejected(response.getFailure().getCode());
+        }
     }
 
     static HumanPlayerBody born(UUID playerId, String epoch, long millis) {
@@ -118,6 +172,10 @@ final class HumanPlayerBody {
         advanceTime();
         timeMode = TimeAdvanceMode.ACTIVE;
         accountedMillis = millis;
+        if (!snapshot().vitality().dead() && (HumanCultivation.state(snapshot()).getRunning()
+                || HumanCultivation.state(snapshot()).getMobilizing())) {
+            applyActivity(HumanCultivation.cancel(snapshot()));
+        }
         for (String instance : Set.copyOf(breathingActions)) {
             // 世界保存可能发生在按住吸气时；重连只清理本宿主记下的旧会话占用。
             if (snapshot().actions().stream().anyMatch(action -> action.instanceId().equals(instance))) {
@@ -134,8 +192,25 @@ final class HumanPlayerBody {
     }
 
     boolean observe(long millis, Motion observed) {
+        // 非 Minecraft 调用方沿用动作变化作为移动信号。
+        return observe(millis, observed, observed != Motion.IDLE);
+    }
+
+    boolean observe(long millis, Motion observed, boolean moved) {
         // 每 tick 只比较动作和下一边界；持续做功及空闲恢复最多每秒结算一次。
-        if (observed == motion && millis < nextBoundaryMillis) {
+        boolean stoppedBreathing = moved && lastBreathing.getActive();
+        if (stoppedBreathing) {
+            // 与界面结束按钮使用同一个 END_BREATHING 意图，先结清气流并解除呼吸占用。
+            GatheringResponse stopped = gather(millis, GatheringRequest.newBuilder().setProtocolVersion(1)
+                    .setRequestId(UUID.randomUUID().toString()).setBodyId(id.value())
+                    .setBreath(BreathControl.newBuilder().setAction(BreathAction.END_BREATHING)
+                            .setSequence(lastBreathing.getSequence() + 1)).build());
+            if (stopped.hasFailure()) {
+                throw HumanErrors.hostRejected(stopped.getFailure().getCode());
+            }
+            gatheringOutput.accept(stopped);
+        }
+        if (observed == motion && millis < nextBoundaryMillis && !stoppedBreathing) {
             return false;
         }
         settle(millis);
@@ -159,7 +234,22 @@ final class HumanPlayerBody {
         return true;
     }
 
+    boolean breathingActive() {
+        // 缓存只来自权威会话回执，避免每 tick 重建整个身体展示快照。
+        return lastBreathing.getActive();
+    }
+
     void settle(long millis) {
+        // 长区间按活动边界逐步结算，不能把60秒燃料一次检查或在结束后补扣疲劳。
+        while (HumanCultivation.needsAdvance(snapshot()) && !snapshot().vitality().dead()
+                && Math.max(accountedMillis, snapshot().settledAt().elapsedMillis()) + HumanCultivationNumbers.STEP_MILLIS < millis) {
+            // 吐纳或开脉会先推进身体游标，运动账尚未结清时也不能回拨身体时钟。
+            settleInterval(Math.max(accountedMillis, snapshot().settledAt().elapsedMillis()) + HumanCultivationNumbers.STEP_MILLIS);
+        }
+        settleInterval(millis);
+    }
+
+    private void settleInterval(long millis) {
         // 同一时刻的观察和查询不能重复扣费；时间来自服务端主世界累计 tick。
         if (millis < accountedMillis) {
             throw HumanErrors.invalid(HumanErrors.INVALID_MOVEMENT_TIME);
@@ -190,6 +280,12 @@ final class HumanPlayerBody {
             }
         }
         accountedMillis = millis;
+        boolean cultivationDue = !snapshot().addonProgress().containsKey(HumanCultivation.PROGRESS)
+                || HumanCultivation.state(snapshot()).getLastMillis() < snapshot().settledAt().elapsedMillis();
+        // 同tick的健康读取与提交必须看到同一版本；没有新的活动时间就不能空提交进度。
+        if (!snapshot().vitality().dead() && cultivationDue && HumanCultivation.needsAdvance(snapshot())) {
+            applyActivity(HumanCultivation.update(snapshot(), null));
+        }
         scheduleNextBoundary();
     }
 
@@ -227,11 +323,19 @@ final class HumanPlayerBody {
 
     GatheringResponse gather(long millis, GatheringRequest request) {
         // 请求只有输入方向与序号；玩家、时钟、环境和能力由当前宿主绑定。
+        if (!progress().getQiNotesRead() || !progress().getGatheringScrollRead()) {
+            return GatheringResponse.newBuilder().setProtocolVersion(1).setRequestId(request.getRequestId())
+                    .setFailure(RequestFailure.newBuilder().setCode(FailureCode.ACCESS_DENIED)).build();
+        }
         targetMillis = millis;
         gathering.synchronizeBodyRevision();
         Set<String> previous = actionIds();
         try {
-            return GatheringResponse.parseFrom(gathering.handle(request.toByteArray()));
+            GatheringResponse response = GatheringResponse.parseFrom(gathering.handle(request.toByteArray()));
+            if (response.hasView()) {
+                lastBreathing = response.getView().getBreathing();
+            }
+            return response;
         } catch (com.google.protobuf.InvalidProtocolBufferException failure) {
             throw HumanErrors.invalidGatheringResponse(failure);
         } finally {
@@ -259,9 +363,11 @@ final class HumanPlayerBody {
 
     void publishGathering() {
         // 恢复或气流改变后推送同一身体投影，使关闭吐纳后的余力也跟随实际恢复。
-        if (gathering != null && gatheringOutput != null) {
+        if (gathering != null && gatheringOutput != null && progress().getQiNotesRead()) {
+            GatheringView view = gathering.view();
+            lastBreathing = view.getBreathing();
             gatheringOutput.accept(GatheringResponse.newBuilder().setProtocolVersion(1)
-                    .setRequestId("state").setView(gathering.view()).build());
+                    .setRequestId("state").setView(view).build());
         }
     }
 
@@ -269,9 +375,15 @@ final class HumanPlayerBody {
         // 先解除旧会话占用再清掉连接；已经进入器官或在途的真元留在权威身体中。
         openingSession = null;
         targetMillis = millis;
+        if (!snapshot().vitality().dead() && (HumanCultivation.state(snapshot()).getRunning()
+                || HumanCultivation.state(snapshot()).getMobilizing())) {
+            settle(millis);
+            applyActivity(HumanCultivation.cancel(snapshot()));
+        }
         if (gathering != null) {
             gathering.close();
             gathering = null;
+            lastBreathing = BreathingView.getDefaultInstance();
             gatheringOutput = null;
             breathingActions.clear();
             scheduleNextBoundary();
@@ -284,6 +396,9 @@ final class HumanPlayerBody {
 
     FailureCode startOpening(long millis, String meridianId) {
         // 服务端绑定当前玩家，先结清时间再提交选择规则的 Protobuf 意图。
+        if (!progress().getQiNotesRead()) {
+            return FailureCode.ACCESS_DENIED;
+        }
         settle(millis);
         return submitCommand(BodyCommand.newBuilder().setStartMeridianOpening(OpeningMessages.StartMeridianOpening.newBuilder()
                 .setRuleId(HumanOpening.ruleId(meridianId)).setRuleVersion(HumanOpening.RULE_VERSION)));
@@ -297,6 +412,49 @@ final class HumanPlayerBody {
             return submitCommand(BodyCommand.newBuilder().setDebugQi(request));
         } finally {
             debugAuthorized = false;
+        }
+    }
+
+    FailureCode cultivate(long millis, CultivationInput input) {
+        // 所有普通操作都要求残卷授权；OP 资源命令通过独立权限入口执行。
+        if (!progress().getQiNotesRead() || !progress().getMiddleJiaoScrollRead()) {
+            return FailureCode.ACCESS_DENIED;
+        }
+        if (snapshot().vitality().dead()) {
+            return FailureCode.BODY_DEAD;
+        }
+        settle(millis);
+        applyActivity(HumanCultivation.update(snapshot(), input));
+        scheduleNextBoundary();
+        return FailureCode.FAILURE_CODE_UNSPECIFIED;
+    }
+
+    FailureCode completeOpening(long millis, String target) {
+        // 管理命令只给出目标；成长数值来自人体，Framework 共用正常完成与持久化路径。
+        settle(millis);
+        var plan = ActivityMessages.BodyActivity.newBuilder();
+        var targets = snapshot().structure().meridians().stream()
+                .filter(item -> target.equals("all") || item.id().value().equals(target)).toList();
+        if (targets.isEmpty()) {
+            return FailureCode.MODULE_NOT_FOUND;
+        }
+        for (var definition : targets) {
+            plan.addCompletions(ActivityMessages.CompleteMeridian.newBuilder().setMeridianId(definition.id().value())
+                    .setAddedVolume(HumanOpening.LUMEN_VOLUME_GAIN));
+        }
+        applyActivity(plan.build());
+        scheduleNextBoundary();
+        return FailureCode.FAILURE_CODE_UNSPECIFIED;
+    }
+
+    private void applyActivity(ActivityMessages.BodyActivity plan) {
+        // 可信人体只提交计划，Framework 再验守恒、容量、疲劳并原子保存环境损耗。
+        var request = RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId(UUID.randomUUID().toString())
+                .setBodyCommand(BodyCommand.newBuilder().setBodyId(id.value()).setExpectedRevision(snapshot().revision())
+                        .setExecuteActivity(plan)).build();
+        ResponseEnvelope response = MeridianProtocol.decodeResponse(commands.handleActivity(id.value(), request.toByteArray()));
+        if (response.hasFailure()) {
+            throw HumanErrors.hostRejected(response.getFailure().getCode());
         }
     }
 
@@ -352,10 +510,14 @@ final class HumanPlayerBody {
 
     ResponseEnvelope open(long millis, OpeningMessages.MeridianOpeningRequest request) {
         // 连接内的意图使用框架编排；不把客户端版本替换成当前版本来绕过冲突检查。
+        if (!progress().getQiNotesRead()) {
+            return ResponseEnvelope.newBuilder().setProtocolVersion(1).setRequestId(request.getRequestId())
+                    .setFailure(RequestFailure.newBuilder().setCode(FailureCode.ACCESS_DENIED)).build();
+        }
         targetMillis = millis;
         if (openingSession == null) {
             openingSession = new OpeningSession<>(id.value(), id, commands, store,
-                    (caller, requested) -> caller.equals(id.value()) && requested.equals(id));
+                    (caller, requested) -> caller.equals(id.value()) && requested.equals(id) && progress().getQiNotesRead());
         }
         ResponseEnvelope response = openingSession.handle(request);
         scheduleNextBoundary();
@@ -438,6 +600,9 @@ final class HumanPlayerBody {
         nextBoundaryMillis = existingEvent;
         if (motion != Motion.IDLE || hasFatigue) {
             nextBoundaryMillis = Math.min(existingEvent, accountedMillis + 1000);
+        }
+        if (HumanCultivation.needsAdvance(body)) {
+            nextBoundaryMillis = Math.min(nextBoundaryMillis, accountedMillis + HumanCultivationNumbers.STEP_MILLIS);
         }
     }
 

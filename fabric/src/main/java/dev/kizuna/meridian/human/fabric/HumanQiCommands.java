@@ -6,6 +6,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import dev.kizuna.meridian.core.Anatomy;
 import dev.kizuna.meridian.human.server.HumanErrors;
+import dev.kizuna.meridian.protocol.QiDensity;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.*;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
@@ -124,8 +125,10 @@ final class HumanQiCommands {
                 return 0;
             }
             var definition = body.snapshot().structure().meridians().stream().filter(item -> item.id().equals(state.id())).findFirst().orElseThrow();
+            double capacityQi = QiDensity.displayedCapacity(definition.lumenVolume(),
+                    dev.kizuna.meridian.protocol.BodyProtobuf.toInventory(state.lumenQi()));
             source.sendFeedback(() -> Text.literal(String.format(Locale.ROOT, "%s：内腔 %.4f / 稳定容量 %.4f 元，%s",
-                    definition.displayName(), state.lumenQi().totalQi(), definition.lumenCapacity(), state.opening().stage())), false);
+                    definition.displayName(), state.lumenQi().totalQi(), capacityQi, state.opening().stage())), false);
         } else {
             double transit = body.snapshot().transits().stream().mapToDouble(item -> item.cargo().totalQi()).sum();
             source.sendFeedback(() -> Text.literal(String.format(Locale.ROOT,

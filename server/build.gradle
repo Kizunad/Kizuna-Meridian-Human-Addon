@@ -7,6 +7,7 @@ protobuf {
 }
 
 dependencies {
+    api project(':shared')
     api 'local.meridian:server'
     testImplementation project(':client')
     testImplementation 'junit:junit:4.13.2'

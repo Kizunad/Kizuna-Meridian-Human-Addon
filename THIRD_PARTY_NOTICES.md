@@ -4,7 +4,7 @@ PolyForm Noncommercial 1.0.0 仅适用于本项目有权许可的原创部分。
 
 | 组件 | 版本 / 来源 | 许可与使用 |
 |---|---|---|
-| Kizuna's Meridian Mod Framework | 同级独立仓库，首片验证基线 `90d2205` | PolyForm Noncommercial 1.0.0；内容库使用外部依赖，可选 fabric 安装包嵌套原始服务端 JAR，保留许可 |
+| Kizuna's Meridian Mod Framework | 同级独立仓库，首片验证基线 `90d2205` | PolyForm Noncommercial 1.0.0；内容库使用外部依赖，fabric 安装包嵌套原始服务端 JAR，保留许可 |
 | Gradle Wrapper | 8.8，[来源](https://github.com/gradle/gradle/tree/v8.8.0) | Apache License 2.0；启动脚本及 Wrapper JAR 从经脉框架复制，保留版权头及 JAR 内 LICENSE；分发校验和沿用框架配置 |
 | Protocol Buffers | 4.36.2，由框架解析 | BSD 3-Clause；复用框架 protoc 消息；fabric 安装包嵌套原始运行库 JAR |
 | tomlj / ANTLR / Checker Qual | 1.1.1 / 4.11.1 / 3.21.2，由框架解析 | Apache License 2.0 / BSD 3-Clause / MIT；fabric 安装包携带 tomlj、ANTLR 原始 JAR，Checker Qual 为注解依赖 |

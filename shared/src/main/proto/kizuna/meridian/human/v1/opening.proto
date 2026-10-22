@@ -1,0 +1,29 @@
+syntax = "proto3";
+package kizuna.meridian.human.v1;
+option java_package = "dev.kizuna.meridian.human.protocol.pb";
+option java_outer_classname = "HumanOpeningMessages";
+
+import "kizuna/meridian/v1/body.proto";
+
+// 人体条件由 Human 裁定；Human-UI 只读维持阈值显示预警，Framework 用 Any 固定任务。
+message HumanOpeningConditions {
+  repeated string required_open_meridian_ids = 1;
+  double minimum_resilience = 2;
+  reserved 3, 6, 8, 10;
+  reserved "minimum_body_lumen_fraction", "thresholds", "strict_lumen_threshold", "group_pressure_growth";
+  int64 base_duration_millis = 4;
+  int64 additional_millis_per_opened = 5;
+  repeated IntakeRequirement intakes = 7;
+  kizuna.meridian.v1.Realm minimum_realm = 9;
+  // 启动时全身与目标经脉分别按实际体积占用比例检查。
+  double body_start_fraction = 11;
+  double target_start_fraction = 12;
+  // 维持时允许回落到较低比例；跌破任一比例会清零连续计时。
+  double body_hold_fraction = 13;
+  double target_hold_fraction = 14;
+}
+message IntakeRequirement {
+  repeated string organ_ids = 1;
+  double minimum_qi_per_second = 2;
+  int64 window_millis = 3;
+}

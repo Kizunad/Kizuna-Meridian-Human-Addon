@@ -29,6 +29,9 @@ final class HumanActions {
         ActionDefinition opening = ActionDefinition.newBuilder().setId(HumanOpening.ACTION_ID).setVersion(1)
                 .setDisplayName("开脉引导").addTissueIds("attention_network")
                 .addOrganIds("brain").addOrganIds("left_lung").addOrganIds("right_lung").build();
-        return List.of(walk, run, breathing, opening);
+        // 自动吐纳仍占用双肺和膈肌，释放注意组织以沿用正常精力恢复。
+        ActionDefinition automaticBreathing = breathing.toBuilder().setId("human:automatic_breathing")
+                .setDisplayName("自动吐纳").clearTissueIds().addTissueIds("diaphragm").build();
+        return List.of(walk, run, breathing, automaticBreathing, opening);
     }
 }

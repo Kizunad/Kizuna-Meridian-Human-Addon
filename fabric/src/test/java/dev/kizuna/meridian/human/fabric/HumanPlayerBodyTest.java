@@ -97,6 +97,7 @@ public class HumanPlayerBodyTest {
     public void openingCommandsRejectWithoutLockingHostAndDisconnectReleasesTheirAction() {
         // 准备不足属于玩家可调整的业务拒绝，拒绝后运动和时间结算仍能继续。
         HumanPlayerBody initial = born();
+        unlock(initial);
         MeridianOpeningRequest initialRequest = openingRequest(initial, "initial-opening");
         assertEquals(FailureCode.INSUFFICIENT_QI, initial.open(0, initialRequest).getFailure().getCode());
         assertNull(initial.snapshot().openingTask());
@@ -108,10 +109,10 @@ public class HumanPlayerBodyTest {
         for (int index = 0; index < message.getMeridianStatesCount(); index++) {
             var state = message.getMeridianStates(index);
             double capacity = message.getStructure().getMeridiansList().stream()
-                    .filter(meridian -> meridian.getId().equals(state.getId())).findFirst().orElseThrow().getLumenCapacity();
+                    .filter(meridian -> meridian.getId().equals(state.getId())).findFirst().orElseThrow().getLumenVolume();
             message.setMeridianStates(index, state.toBuilder().setLumenQi(BodyMessages.QiInventory.newBuilder()
-                    .addEntries(BodyMessages.Qi.newBuilder().setPhase(BodyMessages.QiPhase.FREE)
-                            .setAttribute("meridian:none").setAmount(capacity))));
+                    .addEntries(BodyMessages.Qi.newBuilder().setDensity(.01)
+                            .setAttribute("meridian:none").setAmount(capacity * .01))));
         }
         HumanPlayerBody body = new HumanPlayerBody(BodyProtobuf.fromMessage(message.build()), List.of(), QiInventory.empty());
         double initialQi = body.snapshot().totalQi();
@@ -154,16 +155,18 @@ public class HumanPlayerBodyTest {
     }
 
     @Test
-    public void playerBreathingSharesMovementEnvironmentAndSavedRecovery() {
-        // 真实玩家会话与运动使用同一身体和区域；合法动作更新不能使加工误报版本冲突。
+    public void playerBreathingSharesEnvironmentAndSavedRecovery() {
+        // 真实静坐会话使用共享身体和区域；周期结算不能使加工误报版本冲突。
         var store = new InMemoryBodyStore(List.of(), List.of(), QiInventory.empty());
         String epoch = UUID.randomUUID().toString();
         HumanPlayerBody body = HumanPlayerBody.born(UUID.randomUUID(), epoch, 0, store);
         HumanPlayerBody neighbor = HumanPlayerBody.born(UUID.randomUUID(), epoch, 0, store);
+        unlock(body);
+        unlock(neighbor);
         var origin = BodyProtobuf.toTime(body.snapshot().settledAt());
         var inventory = BodyMessages.QiInventory.newBuilder();
         for (String attribute : HumanContent.INPUT_ATTRIBUTES) {
-            inventory.addEntries(BodyMessages.Qi.newBuilder().setPhase(BodyMessages.QiPhase.FREE)
+            inventory.addEntries(BodyMessages.Qi.newBuilder().setDensity(.01)
                         .setAttribute(attribute).setAmount(20));
         }
         store.registerEnvironmentSource(EnvironmentAbsorption.initialize(EnvironmentSpace.newBuilder()
@@ -181,7 +184,7 @@ public class HumanPlayerBodyTest {
         for (int step = 0; step < 640; step++) {
             long millis = step * 50L;
             body.advanceGathering(millis);
-            body.observe(millis, HumanPlayerBody.Motion.WALK);
+            body.observe(millis, HumanPlayerBody.Motion.IDLE);
             BreathAction action = step % 160 < 80 ? BreathAction.INHALE : BreathAction.EXHALE;
             GatheringResponse response = breath(body, millis, step + 2, action);
             assertTrue(response.hasView());
@@ -202,7 +205,7 @@ public class HumanPlayerBodyTest {
         assertTrue(pendingBodyQi >= -1e-9);
         assertTrue(fatigue(body, "diaphragm") > 0);
         assertTrue(fatigue(body, "attention_network") > 0);
-        assertTrue(fatigue(body, "left_rectus_femoris") > 0);
+        assertEquals(0, fatigue(body, "left_rectus_femoris"), 0);
         assertEquals(0, fatigue(body, "left_biceps_brachii"), 0);
         var inspect = GatheringRequest.newBuilder().setProtocolVersion(1).setRequestId("neighbor-inspect")
                 .setBodyId(neighbor.snapshot().id().value()).setInspect(InspectGathering.getDefaultInstance());
@@ -225,6 +228,17 @@ public class HumanPlayerBodyTest {
         assertEquals(savedFatigue, fatigue(restored, "diaphragm"), 0);
         restored.observe(92_000, HumanPlayerBody.Motion.IDLE);
         assertEquals(savedFatigue / 2, fatigue(restored, "diaphragm"), 1e-9);
+
+        // 撤权终止当前吐纳，邻居的独立进度保持不变；旧控制意图不能继续执行。
+        var breathingInstances = body.breathingActions();
+        assertFalse(breathingInstances.isEmpty());
+        body.writeProgress(body.progress().toBuilder().setQiNotesRead(false).build());
+        assertTrue(body.snapshot().actions().stream()
+                .noneMatch(action -> breathingInstances.contains(action.instanceId())));
+        assertTrue(body.snapshot().actions().isEmpty());
+        assertTrue(neighbor.progress().getQiNotesRead());
+        assertEquals(FailureCode.ACCESS_DENIED,
+                breath(body, 31_950, 642, BreathAction.INHALE).getFailure().getCode());
     }
 
     private static GatheringResponse breath(HumanPlayerBody body, long millis, long sequence, BreathAction action) {
@@ -233,6 +247,38 @@ public class HumanPlayerBodyTest {
                 .setRequestId("breath-" + sequence).setBodyId(body.snapshot().id().value())
                 .setBreath(BreathControl.newBuilder().setSequence(sequence).setAction(action)
                         .setAimX(.5).setAimY(.4).setAimZ(.5)).build());
+    }
+
+    @Test
+    public void movementEndsBreathingThroughTheAuthoritativeControlPath() {
+        // 正式开始并占用膈肌；位置变化必须先结清旧输入，再交给运动动作。
+        HumanPlayerBody body = born();
+        unlock(body);
+        var responses = new java.util.ArrayList<GatheringResponse>();
+        body.connectGathering(0, responses::add);
+        assertTrue(breath(body, 0, 1, BreathAction.BEGIN_BREATHING).getView().getBreathing().getActive());
+        assertFalse(breath(body, 0, 2, BreathAction.INHALE).hasFailure());
+        var breathingInstances = body.breathingActions();
+        assertFalse(breathingInstances.isEmpty());
+        assertEquals("meditate", HumanPlayerAnimation.select(body.motion(), body.breathingActive()));
+
+        body.observe(100, HumanPlayerBody.Motion.WALK, true);
+        assertFalse(body.breathingActive());
+        assertEquals(BreathAction.END_BREATHING, responses.get(responses.size() - 1).getView().getBreathing().getAction());
+        assertTrue(body.snapshot().actions().stream().noneMatch(action -> breathingInstances.contains(action.instanceId())));
+        assertTrue(fatigue(body, "diaphragm") > 0);
+        assertEquals("walk", HumanPlayerAnimation.select(body.motion(), body.breathingActive()));
+        assertFalse(breath(body, 150, 4, BreathAction.INHALE).getView().getBreathing().getActive());
+        body.observe(200, HumanPlayerBody.Motion.SPRINT, true);
+        assertEquals("run", HumanPlayerAnimation.select(body.motion(), body.breathingActive()));
+        body.observe(250, HumanPlayerBody.Motion.IDLE, false);
+        assertEquals("", HumanPlayerAnimation.select(body.motion(), body.breathingActive()));
+
+        // 跳跃等非地面位移也结束静坐，但不伪造 walk 动作。
+        assertTrue(breath(body, 300, 5, BreathAction.BEGIN_BREATHING).getView().getBreathing().getActive());
+        body.observe(350, HumanPlayerBody.Motion.IDLE, true);
+        assertFalse(body.breathingActive());
+        assertEquals("", HumanPlayerAnimation.select(body.motion(), body.breathingActive()));
     }
 
     @Test
@@ -299,6 +345,75 @@ public class HumanPlayerBodyTest {
     private static HumanPlayerBody born() {
         // 每个用例隔离玩家身份和时钟，避免共享存档或执行顺序影响结果。
         return HumanPlayerBody.born(UUID.randomUUID(), UUID.randomUUID().toString(), 0);
+    }
+
+    private static void unlock(HumanPlayerBody body) {
+        // 行为回归显式建立已读条件，不能靠测试宿主绕过正式授权。
+        body.writeProgress(body.progress().toBuilder().setQiNotesRead(true)
+                .setGatheringScrollRead(true).setMiddleJiaoScrollRead(true).build());
+    }
+
+    @Test
+    public void threeScrollsGateSeparateServerOperationsAndSurviveSave() {
+        // 札记只授权修炼页，旧客户端直接发自动或手动意图仍被服务器拒绝。
+        HumanPlayerBody body = born();
+        body.writeProgress(body.progress().toBuilder().setQiNotesRead(true).build());
+        body.connectGathering(0, response -> {});
+        assertTrue(body.canIntrospect(body.snapshot().id().value()));
+        assertEquals(FailureCode.ACCESS_DENIED, breath(body, 0, 1, BreathAction.BEGIN_BREATHING).getFailure().getCode());
+        for (var operation : List.of(
+                dev.kizuna.meridian.human.pb.CultivationMessages.CultivationInput.Operation.START_MANUAL,
+                dev.kizuna.meridian.human.pb.CultivationMessages.CultivationInput.Operation.START_AUTOMATIC,
+                dev.kizuna.meridian.human.pb.CultivationMessages.CultivationInput.Operation.MOBILIZE_ON)) {
+            assertEquals(FailureCode.ACCESS_DENIED, body.cultivate(0,
+                    dev.kizuna.meridian.human.pb.CultivationMessages.CultivationInput.newBuilder()
+                            .setSequence(1).setOperation(operation).build()));
+        }
+        body.writeProgress(body.progress().toBuilder().setGatheringScrollRead(true).build());
+        assertTrue(breath(body, 0, 2, BreathAction.BEGIN_BREATHING).hasView());
+        assertFalse(body.progress().getMiddleJiaoScrollRead());
+        body.writeProgress(body.progress().toBuilder().setMiddleJiaoScrollRead(true).build());
+        assertEquals(FailureCode.FAILURE_CODE_UNSPECIFIED, body.cultivate(0,
+                dev.kizuna.meridian.human.pb.CultivationMessages.CultivationInput.newBuilder().setSequence(2)
+                        .setOperation(dev.kizuna.meridian.human.pb.CultivationMessages.CultivationInput.Operation.MOBILIZE_ON).build()));
+        body.writeProgress(body.progress().toBuilder().setGatheringScrollRead(false).build());
+        assertFalse(body.breathingActive());
+        var saved = new HumanPlayerBody(BodyProtobuf.decodeSnapshot(BodyProtobuf.encodeSnapshot(body.snapshot())),
+                body.receipts(), body.releasedQi());
+        assertTrue(saved.progress().getQiNotesRead());
+        assertFalse(saved.progress().getGatheringScrollRead());
+        assertTrue(saved.progress().getMiddleJiaoScrollRead());
+    }
+
+    @Test
+    public void unreadRequestsAreDeniedAndResetPreservesBodyFacts() {
+        // 未读仍正常出生与运动；吐纳、开脉必须由身体进度授权。
+        HumanPlayerBody body = born();
+        assertFalse(body.progress().getQiNotesRead());
+        assertFalse(body.canIntrospect(body.snapshot().id().value()));
+        assertEquals(.36, body.snapshot().totalQi(), 1e-9);
+        body.connectGathering(0, response -> { /* 不建立客户端影子账本。 */ });
+        assertEquals(FailureCode.ACCESS_DENIED, breath(body, 0, 1, BreathAction.BEGIN_BREATHING).getFailure().getCode());
+        assertEquals(FailureCode.ACCESS_DENIED, body.open(0, openingRequest(body, "locked")).getFailure().getCode());
+        assertEquals(FailureCode.ACCESS_DENIED, body.startOpening(0, "left_lung_meridian"));
+        unlock(body);
+        assertTrue(body.canIntrospect(body.snapshot().id().value()));
+        assertFalse(body.canIntrospect("another-player"));
+        body.observe(1000, HumanPlayerBody.Motion.WALK);
+        body.observe(2000, HumanPlayerBody.Motion.IDLE);
+        assertTrue(body.progress().getQiNotesRead());
+        var beforeReset = body.snapshot();
+        body.writeProgress(body.progress().toBuilder().setQiNotesRead(false).build());
+        assertFalse(body.canIntrospect(body.snapshot().id().value()));
+        assertEquals(beforeReset.totalQi(), body.snapshot().totalQi(), 0);
+        assertEquals(beforeReset.vitality(), body.snapshot().vitality());
+        assertEquals(beforeReset.tissueStates(), body.snapshot().tissueStates());
+        var restored = new HumanPlayerBody(BodyProtobuf.decodeSnapshot(BodyProtobuf.encodeSnapshot(body.snapshot())),
+                body.receipts(), body.releasedQi());
+        assertFalse(restored.progress().getQiNotesRead());
+        unlock(restored);
+        var saved = new HumanPlayerBody(restored.snapshot(), restored.receipts(), restored.releasedQi());
+        assertTrue(saved.progress().getQiNotesRead());
     }
 
     private static double fatigue(HumanPlayerBody body, String tissueId) {

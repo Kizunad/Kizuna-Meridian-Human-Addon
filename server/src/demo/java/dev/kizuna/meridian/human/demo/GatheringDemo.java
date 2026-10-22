@@ -48,7 +48,7 @@ public final class GatheringDemo {
 
         // 100 格空间、100 元木气，按框架浓度规则供给 1 元/秒；只创建一次真实库存。
         var rawQi = BodyMessages.QiInventory.newBuilder().addEntries(BodyMessages.Qi.newBuilder()
-                .setPhase(BodyMessages.QiPhase.FREE).setAttribute("meridian:wood").setAmount(100)).build();
+                .setDensity(.01).setAttribute("meridian:wood").setAmount(100)).build();
         var space = EnvironmentSpace.newBuilder().setProtocolVersion(1).setSourceId("demo-region")
                 .setKind(EnvironmentSpaceKind.REGION_BACKGROUND).setVolumeBlocks(100).build();
         var source = EnvironmentAbsorption.initialize(space, BodyProtobuf.fromInventory(rawQi), time(0), time(5000),
@@ -78,7 +78,11 @@ public final class GatheringDemo {
         clock.millis = lung.getProcess().getCompletionMillis();
         submit(handler, GatheringRequests.settle(message(store), "complete"));
         show("炼化完成", store);
-        submit(handler, GatheringRequests.store(message(store), "store", "left_lung.to.meridian", recipe.getOutput(), 1));
+        // 新回流也占用肺经吞吐；演示使用当前空闲额度，不与被动运输重复预约。
+        double availableRate = dev.kizuna.meridian.core.QiTransport.availableThroughputPerSecond(
+                store.find(new BodyId("demo-human")).orElseThrow(),
+                new dev.kizuna.meridian.core.Anatomy.ConnectionId("left_lung.to.meridian"));
+        submit(handler, GatheringRequests.store(message(store), "store", "left_lung.to.meridian", recipe.getOutput(), availableRate));
         show("运往左肺经", store);
         clock.millis = message(store).getTransitsList().stream()
                 .filter(transit -> transit.getConnectionId().equals("left_lung.to.meridian"))
