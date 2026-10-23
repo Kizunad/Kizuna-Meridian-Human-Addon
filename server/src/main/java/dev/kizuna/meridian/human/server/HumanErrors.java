@@ -4,7 +4,7 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 
 /** 人体内容工具的错误集中定义；身体业务拒绝仍由框架协议表达。 */
 public final class HumanErrors {
-    public static final String MIDDLE_JIAO_LOCKED = "请先读完《炁脉札记》和中焦残卷，再打开中焦。";
+    public static final String MIDDLE_JIAO_LOCKED = "请先右键使用《炁脉札记》和中焦残卷，再打开中焦，无须看完。";
     public static final String INVALID_CULTIVATION = "周天进度或人体模块配置无效";
     public static final String INVALID_PROGRESS = "身体内的修炼进度类型或版本无效";
     public static final String INVALID_DAMAGE_KIND = "人体伤害需要已知的致伤机制";
