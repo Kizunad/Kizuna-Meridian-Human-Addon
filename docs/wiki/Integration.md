@@ -1,10 +1,22 @@
 # 依赖、构建与宿主接入
 
+## 可信区域环境服务
+
+服务端附属通过 Fabric entrypoint `meridian_environment_host` 获取服务对象，再反射调用公开的 `exchange(byte[])`，返回值为 `byte[]`。Human 内部绑定使用 `java.util.function.Function<byte[], byte[]>`；调用方不依赖 Human Java 接口。该服务不注册客户端网络频道，所有操作必须在服务器主线程调用。
+
+线协议由 `shared/src/main/proto/kizuna/meridian/human/environment_host.proto` 生成，Protobuf 包为 `kizuna.meridian.human.v1`，Java 包为 `dev.kizuna.meridian.human.protocol.pb`，外部类为 `EnvironmentHostMessages`。请求版本固定为 1，`request_id` 不得为空白，必须选择一项 operation；响应回显请求 ID。操作编号固定为 `query=10`、`release=11`、`clock=12`。`clock` 必须为 true，通过 `now` 返回当前世界 epoch 和主世界累计 tick 对应的模拟时间。`RegionQuery` 使用 `dimension_id=1` 和方块坐标 `block_x=2`、`block_z=3`；维度 ID 必须为完整规范 ID，且维度实际存在。
+
+`RegionRelease` 字段为 `release_id=1`、`position=2`（`RegionQuery`）、`released_qi=3`（框架 `QiInventory`）。`RegionView` 直接提供 `source_id=1`、`volume_blocks=2`、`inventory=3`、`concentration=4`、`source_revision=5`。`ReleaseResult` 提供可选 `source_id=1` 和 `duplicate=2`；无区域来源时不设置来源 ID。响应结果编号固定为 `unbound=10`、`region=11`、`released=12`、`now=13`、`failure=14`。
+
+`release_id` 是释放事实的去重键，保留七个游戏日，仍在待入账队列中的记录不会过期；重试必须保留原 ID、位置与库存。调用方先持久化自己的待释放事实，成功返回 `released`（含 `duplicate=true`）后清除。受理只表示进入世界持久化队列，库存统一在 30 秒供给续窗时更新。接入顺序、存档边界与调用方重试约定见[区域环境服务](Environment-Host.md)。区域查询和释放通过同一 WorldState 与框架权威 Store 执行，不能另存一份环境账本。玩家进入使用 `join(ServerPlayerEntity, long)`，由 WorldState 在恢复身体前绑定该玩家的释放 sink。
+
+失败使用框架 `RequestFailure` 的原始失败码：无法解析、超限、空请求 ID、缺操作、`clock=false`、非法库存或非法维度格式为 `INVALID_REQUEST`；版本不符为 `UNSUPPORTED_VERSION`；非主线程调用为 `ACCESS_DENIED`；维度不存在为 `ENVIRONMENT_UNAVAILABLE`；相同释放 ID 对应不同内容为 `REQUEST_ID_CONFLICT`；宿主内部异常为 `INTERNAL_ERROR`。存在的非主世界没有区域，查询返回未设置 result 的成功响应，释放返回未设置 `source_id` 的 `released`。加载阶段服务尚未绑定或没有运行世界时返回 `unbound=true`，与业务拒绝分开处理；这不提供缺失必装模块的替代路径。
+
 开脉条件 `HumanOpeningConditions` 的唯一 protoc 源位于 `shared/src/main/proto/kizuna/meridian/human/v1/opening.proto`，由 Human 服务端裁定，Human-UI 读取已固定任务的维持阈值显示预警。协议字段与运行规则未改变；生成类从 server 移至 shared，客户端无需引用服务端实现。更新时同步构建 Human shared、client、server、fabric 及 Human-UI。
 
 ## 周天、外壁与相变接线
 
-规则和调试命令见[中焦周天](Middle-Jiao-Cultivation.md)。新增 `shared/` 子项目通过 protoc 生成 `CultivationInput` / `CultivationState`，client、server 与 Human-UI 共用；Fabric 安装包内嵌 shared，开发全装配脚本显式加载。网络频道 `meridian_human:cultivation` 只接操作边沿和按键tick，绑定真实玩家及服务端时钟，每秒共用40包输入上限。未读残卷拒绝，重置/断线/关窗取消主动周天与动员。
+规则和调试命令见[中焦周天](Middle-Jiao-Cultivation.md)。新增 `shared/` 子项目通过 protoc 生成 `CultivationInput` / `CultivationState`，client、server 与 Human-UI 共用；`CultivationState.automatic_waiting` 表示自动周天保留意图但暂停做功，服务端恢复到启动线后续跑。Fabric 安装包内嵌 shared，开发全装配脚本显式加载。网络频道 `meridian_human:cultivation` 只接操作边沿和按键tick，绑定真实玩家及服务端时钟，每秒共用40包输入上限。未读残卷拒绝，重置/断线/关窗取消主动周天与动员及自动等待。
 
 `HumanPlayerBody` 在250ms活动边界生成可信 Protobuf 计划，经 Framework `handleActivity` 原子执行；空闲且没有储备交换时不轮询。脾配方完成仍走 Framework 器官事件。所有模块在适用端必装，没有缺包分支。
 
@@ -158,15 +170,15 @@ python3 "scripts/check_docs.py"
 
 Fabric 宿主现在接收 `meridian:gathering_request`，返回 `meridian:gathering_response`，载荷分别为框架原有 `GatheringRequest` / `GatheringResponse`。身份只取连接玩家 UUID，时间取服务端模拟 tick；客户端只能上传公开的吸呼方向、瞄准和序号。网络入口限制消息大小及每模拟秒请求数；同一身体的摄入、行走、恢复与保存共用权威 Store。Human 源码不引用 UI 类，运行时 UI 仍是必装接线。
 
-主世界按 `config/meridian-environment.toml` 的区域尺度与默认地形配置首次生成库存，读取区域中心群系元数据，不扫描方块。相同区域内玩家共享来源和供给预算；换区先结清旧区间，30 秒续窗保留剩余库存。其他维度暂不提供环境摄入。身体、区域、释放账户和回执一起保存到 `meridian_human.dat`；当前接入未执行区域间扩散，释放仍保留在唯一释放账中。
+主世界按 `config/meridian-environment.toml` 的区域尺度与默认地形配置首次生成库存，读取区域中心群系元数据，不扫描方块。相同区域内玩家共享来源和供给预算；换区先结清旧区间，30 秒续窗保留剩余库存。其他维度暂不提供环境摄入。身体、区域、释放账户、待入账队列、释放 ID 和回执一起保存到 `meridian_human.dat`；玩家死亡、开脉中断和加工损耗按发生时位置排队，在区域续窗时从默认账户转回区域，非主世界留在默认账户。肺摄入回执的炼化损耗仍直接归还选定区域，不重复归位。当前接入未执行区域间扩散。
 
-进世界按 `I` → 吐纳：原三维交互直接操作当前玩家身体。有效吸呼占用膈肌与注意组织，停止后按实际空闲区间恢复。连接重建不补满身体；断线清理本宿主会话占用，异常保存留下的占用在重连时清理，其他附属动作保留。已摄入的原料和在途货物保存为现有事实。
+进世界按 `I` → 吐纳：原三维交互直接操作当前玩家身体。有效吸呼占用膈肌与注意组织，停止后按实际空闲区间恢复；自动吐纳低于80%时释放膈肌占用并保留自动意图，服务端在耐力恢复到启动线后续跑，等待期间不补算吸呼或摄入。连接重建不补满身体；断线清理本宿主会话占用和自动等待，异常保存留下的占用在重连时清理，其他附属动作保留。已摄入的原料和在途货物保存为现有事实。
 
 Kizuna Players Animation 为客户端和服务端必装依赖，先构建同级动画仓库，再构建 Human。开发运行固定装配其 JAR，打坐还要求动画资源包含 `meditate` 和模型。
 
 `HumanPlayerAnimation` 统一选择权威吐纳对应的 `meditate`、行走对应的 `walk` 和疾跑对应的 `run`，直接调用 `ServerPlayerAnimations.play/stop`。只在动作改变时停止旧动作、播放新动作，持续输入和数值推送不重新开始动画。只管理本宿主登记的动作，不停止其他附属动画。唯一同步契约为 Players-Animation 的 `player_animation.proto`（play/stop/result），请求 ID 返回值用于诊断；客户端回执不参与身体授权或开脉完成判定。
 
-服务端观察到实际位置变化时，先通过正式 `END_BREATHING` 请求结清旧呼吸区间、释放膈肌和注意组织占用、发布停止回执，然后切到行走或疾跑。跳跃、游泳等位移同样结束静坐；只转头不结束。停止移动不会自动开始吐纳。换维度和重生重建会话，必须重新开始；结束、失能和断线清理本宿主动作用。缺必需通道在正常协商期限之后明确报错。
+服务端观察到实际位置变化时，手动吐纳先通过正式 `END_BREATHING` 请求结清旧呼吸区间、释放膈肌和注意组织占用并发布停止回执；自动吐纳则继续由服务端推进，不依赖 UI 心跳。两种模式都按实际位置显示行走或疾跑步态；自动吐纳静止时显示打坐。只转头不改变吐纳状态。停止移动不会自动开始吐纳。换维度和重生重建会话，必须重新开始；明确结束、失能和断线清理本宿主动作用。缺必需通道在正常协商期限之后明确报错。
 
 动画 JAR 内含双体型模型和 `walk/run/meditate` 等资源，完整装配不再启用外置资源补丁。吐纳预览按实际玩家体型取样同一骨架，器官和开脉光迹随骨矩阵附着。以下 2026-10-14 记录属于历史 checkout；本轮整合的验证记录单独列出。
 

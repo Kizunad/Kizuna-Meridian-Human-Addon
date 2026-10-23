@@ -2,6 +2,10 @@ package dev.kizuna.meridian.human.fabric;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
 import dev.kizuna.meridian.human.server.HumanErrors;
+import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.EnvironmentHostRequest;
+import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.EnvironmentHostResponse;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.pb.PresentationMessages.BodyViewUpdate;
 import dev.kizuna.meridian.protocol.pb.PresentationMessages.BodyViewRequest;
@@ -61,12 +65,13 @@ public final class HumanFabric implements ModInitializer {
     private final Set<UUID> introspecting = new HashSet<>();
     private final HumanPlayerAnimation animations = new HumanPlayerAnimation();
     private HumanWorldState state;
-    private MinecraftServer activeServer;
+    private volatile MinecraftServer activeServer;
 
     @Override
     public void onInitialize() {
         // 宿主生命周期独立于客户端窗口，关掉 UI 后玩家移动仍正常记入同一身体。
         HumanHealthHost.bind(this::health);
+        HumanEnvironmentHost.bind(this::environment);
         ServerLifecycleEvents.SERVER_STARTING.register(server -> ProgressionFabric.installStore(server, new ProgressionStore() {
             @Override
             public PlayerProgress read(UUID playerId) {
@@ -287,7 +292,7 @@ public final class HumanFabric implements ModInitializer {
             if (state == null) {
                 throw HumanErrors.invalid(HumanErrors.INVALID_SAVED_BODY);
             }
-            HumanPlayerBody body = state.join(player.getUuid(), millis(server));
+            HumanPlayerBody body = state.join(player, millis(server));
             state.selectEnvironment(player, millis(server));
             body.connectGathering(millis(server), response -> sendGathering(player, response));
             observers.put(player.getUuid(), new HumanMovementObserver());
@@ -298,6 +303,85 @@ public final class HumanFabric implements ModInitializer {
         } catch (RuntimeException failure) {
             fail(player, failure);
         }
+    }
+
+    private byte[] environment(byte[] payload) {
+        // 先验证有界协议输入，再触碰当前服务器及唯一环境状态。
+        var response = EnvironmentHostResponse.newBuilder().setProtocolVersion(1);
+        if (payload == null || payload.length == 0 || payload.length > MeridianProtocol.MAX_PAYLOAD_BYTES) {
+            return environmentFailure(response, FailureCode.INVALID_REQUEST);
+        }
+        EnvironmentHostRequest request;
+        try {
+            request = EnvironmentHostRequest.parseFrom(payload);
+        } catch (com.google.protobuf.InvalidProtocolBufferException invalid) {
+            return environmentFailure(response, FailureCode.INVALID_REQUEST);
+        }
+        response.setRequestId(request.getRequestId());
+        if (request.getProtocolVersion() != 1) {
+            return environmentFailure(response, FailureCode.UNSUPPORTED_VERSION);
+        }
+        if (request.getRequestId().isBlank()
+                || request.getOperationCase() == EnvironmentHostRequest.OperationCase.OPERATION_NOT_SET
+                || (request.hasClock() && !request.getClock())) {
+            return environmentFailure(response, FailureCode.INVALID_REQUEST);
+        }
+        MinecraftServer server = activeServer;
+        if (server == null) {
+            return response.setUnbound(true).build().toByteArray();
+        }
+        if (!server.isOnThread()) {
+            return environmentFailure(response, FailureCode.ACCESS_DENIED);
+        }
+        if (state == null) {
+            return environmentFailure(response, FailureCode.INTERNAL_ERROR);
+        }
+        try {
+            long now = millis(server);
+            if (request.hasClock()) {
+                return response.setNow(state.time(now)).build().toByteArray();
+            }
+            String dimension = request.hasQuery() ? request.getQuery().getDimensionId()
+                    : request.getRelease().getPosition().getDimensionId();
+            Identifier id = Identifier.tryParse(dimension);
+            if (id == null || !id.toString().equals(dimension)) {
+                return environmentFailure(response, FailureCode.INVALID_REQUEST);
+            }
+            var world = server.getWorld(RegistryKey.of(RegistryKeys.WORLD, id));
+            if (world == null) {
+                return environmentFailure(response, FailureCode.ENVIRONMENT_UNAVAILABLE);
+            }
+            if (request.hasQuery()) {
+                var query = request.getQuery();
+                var region = state.query(world, query.getBlockX(), query.getBlockZ(), now);
+                if (region != null) {
+                    response.setRegion(region);
+                }
+                return response.build().toByteArray();
+            }
+            if (request.getRelease().getReleaseId().isBlank() || !request.getRelease().hasPosition()
+                    || !request.getRelease().hasReleasedQi()) {
+                return environmentFailure(response, FailureCode.INVALID_REQUEST);
+            }
+            BodyProtobuf.fromInventory(request.getRelease().getReleasedQi());
+            return response.setReleased(state.release(request.getRelease(), world, now)).build().toByteArray();
+        } catch (HumanErrors.HostRejected rejected) {
+            return environmentFailure(response, rejected.code());
+        } catch (dev.kizuna.meridian.error.MeridianErrors.IntakeRejected rejected) {
+            return environmentFailure(response, rejected.code());
+        } catch (dev.kizuna.meridian.error.MeridianErrors.GatheringRejected rejected) {
+            return environmentFailure(response, rejected.code());
+        } catch (IllegalArgumentException invalid) {
+            return environmentFailure(response, FailureCode.INVALID_REQUEST);
+        } catch (RuntimeException failure) {
+            LOG.error(HumanErrors.ENVIRONMENT_HOST_FAILED, failure);
+            return environmentFailure(response, FailureCode.INTERNAL_ERROR);
+        }
+    }
+
+    private static byte[] environmentFailure(EnvironmentHostResponse.Builder response, FailureCode code) {
+        // 统一返回框架真实失败码，调用方无需解析异常文案。
+        return response.setFailure(RequestFailure.newBuilder().setCode(code)).build().toByteArray();
     }
 
     private byte[] health(byte[] payload) {
@@ -401,6 +485,7 @@ public final class HumanFabric implements ModInitializer {
         }
         try {
             long nowMillis = millis(player.getServer());
+            state.bindReleaseSink(player);
             body.connectGathering(nowMillis, response -> sendGathering(player, response));
             body.observe(nowMillis, HumanPlayerBody.Motion.IDLE);
             observers.put(player.getUuid(), new HumanMovementObserver());
@@ -438,7 +523,7 @@ public final class HumanFabric implements ModInitializer {
                 HumanPlayerBody.Motion motion = observer.sample(player);
                 boolean changed = body.observe(millis, motion, observer.moved());
                 if (changed || breathingChanged) {
-                    animations.synchronize(player, body.motion(), body.breathingActive());
+                    animations.synchronize(player, body.motion(), body.breathingActive(), body.breathingAutomatic());
                 }
                 if (changed && !breathingChanged) {
                     body.publishGathering();
@@ -481,7 +566,8 @@ public final class HumanFabric implements ModInitializer {
         // 动画读取服务端确认的吐纳状态，独立于 UI 接收器；客户端播放回执不改变身体。
         if (response.hasView() && response.getView().hasBreathing()) {
             HumanPlayerBody body = state.find(player.getUuid());
-            animations.synchronize(player, body.motion(), response.getView().getBreathing().getActive());
+            animations.synchronize(player, body.motion(), response.getView().getBreathing().getActive(),
+                    response.getView().getBreathing().getAutomatic());
         }
         // 关闭连接无需发送；已连接却缺少必装 UI 通道必须报告错误。
         if (player.networkHandler.isConnectionOpen()) {

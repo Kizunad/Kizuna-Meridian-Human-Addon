@@ -471,7 +471,7 @@ public class HumanGatheringTest {
     }
 
     @Test
-    public void automaticBreathingUsesRealContactsOnlyPaysRespirationAndStopsAtThreshold() throws IOException {
+    public void automaticBreathingUsesRealContactsAndWaitsForStaminaRecovery() throws IOException {
         // 自动输入不带剂量或摄入证据；整个会话继续使用真实环境、接触、炼化和运输。
         Host host = new Host(source(100), null);
         var session = host.session();
@@ -513,13 +513,49 @@ public class HumanGatheringTest {
         BreathingView stopped = session.view().getBreathing();
         assertTrue(contacts > 0);
         assertFalse(stopped.getActive());
+        assertTrue(stopped.getAutomatic());
         assertTrue(stopped.getStaminaRatio() < .8 && stopped.getStaminaRatio() > .79);
+        assertTrue(session.nextBoundaryMillis() > host.now);
         assertTrue(host.body().actions().isEmpty());
         assertEquals(100.36, host.body().totalQi() + host.sourceTotal() + host.store.environmentQi().totalQi(), 1e-7);
         var retry = request.toBuilder().setRequestId("automatic-retry")
                 .setBreath(request.getBreath().toBuilder().setSequence(2)).build();
         assertEquals(FailureCode.MODULE_UNAVAILABLE, GatheringResponse.parseFrom(session.handle(retry.toByteArray())).getFailure().getCode());
         assertTrue(HumanContent.breathing().getAutomatic().getCaptureEfficiency() < 1);
+
+        // 等待期间只结算膈肌自然恢复，不新增接触或注意组织费用；达线后服务端重新占用动作。
+        double absorbedBeforeRecovery = session.view().getBreathing().getAbsorbedQi();
+        double attentionBeforeRecovery = session.view().getBreathing().getAttentionRatio();
+        int recoveryTicks = 0;
+        while (!session.view().getBreathing().getActive() && recoveryTicks++ < 100) {
+            host.now += 250;
+            session.advance();
+        }
+        BreathingView resumed = session.view().getBreathing();
+        assertTrue(resumed.getActive());
+        assertTrue(resumed.getAutomatic());
+        assertEquals(absorbedBeforeRecovery, resumed.getAbsorbedQi(), 0);
+        assertEquals(attentionBeforeRecovery, resumed.getAttentionRatio(), 0);
+        assertTrue(host.body().actions().stream().anyMatch(action -> action.definition().tissueIds().stream()
+                .anyMatch(id -> id.value().equals("diaphragm"))
+                && action.definition().tissueIds().stream().noneMatch(id -> id.value().equals("attention_network"))));
+
+        // 自动重新做功再越过80%线后，取消复选框必须清除等待和自动意图。
+        int retryTicks = 0;
+        while (session.view().getBreathing().getActive() && retryTicks++ < 20) {
+            host.now += 250;
+            session.advance();
+        }
+        BreathingView waitingAgain = session.view().getBreathing();
+        assertFalse(waitingAgain.getActive());
+        assertTrue(waitingAgain.getAutomatic());
+        var cancelAutomatic = request.toBuilder().setRequestId("automatic-cancel")
+                .setBreath(BreathControl.newBuilder().setSequence(3).setAction(BreathAction.SET_AUTOMATIC_BREATHING)
+                        .setAutomatic(false)).build();
+        BreathingView cancelled = GatheringResponse.parseFrom(session.handle(cancelAutomatic.toByteArray())).getView().getBreathing();
+        assertFalse(cancelled.getActive());
+        assertFalse(cancelled.getAutomatic());
+        assertTrue(host.body().actions().isEmpty());
     }
 
     @Test

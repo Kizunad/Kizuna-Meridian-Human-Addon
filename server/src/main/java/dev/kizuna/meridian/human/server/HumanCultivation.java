@@ -61,6 +61,7 @@ public final class HumanCultivation {
         var state = state(body).toBuilder();
         boolean wasBreakingThrough = state.getBreakthrough();
         boolean wasMobilizing = state.getMobilizing();
+        boolean wasWaitingForAutomaticStamina = state.getAutomaticWaiting();
         // 活动期间宿主按250ms边界推进；休眠后余额刚变动时只结当前边界，不追补空闲期。
         double seconds = Math.min(STEP_MILLIS, Math.max(0, now - state.getLastMillis())) / 1000.0;
         var plan = new HumanQiPlan(body);
@@ -70,7 +71,7 @@ public final class HumanCultivation {
 
         if (state.getRunning() && seconds > 0) {
             if (state.getAutomatic() && brainStaminaRatio(body, 0) < AUTOMATIC_MIN_STAMINA_RATIO) {
-                stop(plan, state, transit, "脑耐力低于80%，自动周天已停止");
+                waitForAutomaticStamina(plan, state, transit, "脑耐力低于80%，恢复后自动继续周天");
                 transit = null;
             } else if (!available(body, "brain", BRAIN_WATTS, seconds)
                     || !state.getAutomatic() && !attentionAvailable(body, ATTENTION_WATTS, seconds)) {
@@ -87,9 +88,19 @@ public final class HumanCultivation {
                 }
                 transit = advanceCircuit(plan, state, transit, seconds, now);
                 if (state.getAutomatic() && brainStaminaRatio(body, BRAIN_WATTS * seconds) < AUTOMATIC_MIN_STAMINA_RATIO) {
-                    stop(plan, state, transit, "脑耐力低于80%，自动周天已停止");
+                    waitForAutomaticStamina(plan, state, transit, "脑耐力低于80%，恢复后自动继续周天");
                     transit = null;
                 }
+            }
+        }
+        if (wasWaitingForAutomaticStamina && state.getAutomaticWaiting()) {
+            // 等待期间不计脑部做功；仅在身体已经恢复且路线仍有效时重新启用自动周天。
+            if (!openedAndIntact(body) || body.openingTask() != null && body.openingTask().active()) {
+                stop(plan, state, transit, "周天通路受损，自动运行已取消");
+                transit = null;
+            } else if (brainStaminaRatio(body, 0) >= AUTOMATIC_MIN_STAMINA_RATIO) {
+                state.setRunning(true).setAutomatic(true).setAutomaticWaiting(false).setPushing(false).setThrust(1)
+                        .setGateIndex(0).setGateHits(0).setGateRetryUntil(0).setReason("");
             }
         }
         if (input != null && input.getSequence() > state.getLastSequence()) {
@@ -98,7 +109,8 @@ public final class HumanCultivation {
             transit = input(plan, state, transit, input, now);
         }
 
-        if (wasMobilizing && state.getMobilizing() && seconds > 0) {
+        // 本边界的动员费用按上一边界的占用结算，即使周天刚暂停并取消突破也不能免掉已做的功。
+        if (wasMobilizing && seconds > 0) {
             if (!available(body, "spleen", MOBILIZE_WATTS, seconds)) {
                 // 超载伤脾走既有健康结果，不直接改写器官 HP。
                 var spleen = body.organStates().stream().filter(item -> item.id().value().equals("spleen")).findFirst().orElseThrow();
@@ -145,7 +157,7 @@ public final class HumanCultivation {
     public static boolean needsAdvance(BodySnapshot body) {
         // 静止且没有储备交换的身体不轮询；活动和生理阈值变化才安排有限事件。
         CultivationState state = state(body);
-        if (state.getRunning() || state.getMobilizing()) {
+        if (state.getRunning() || state.getAutomaticWaiting() || state.getMobilizing()) {
             return true;
         }
         return HumanReserves.needsAdvance(body, state);
@@ -167,14 +179,14 @@ public final class HumanCultivation {
                 }
                 if (state.getRunning()) {
                     // 切换控制方式不重置本圈货物和关口，防止反复切换领取收益。
-                    state.setAutomatic(automatic).setPushing(false).setThrust(1);
+                    state.setAutomatic(automatic).setAutomaticWaiting(false).setPushing(false).setThrust(1);
                     return transit;
                 }
                 if (!openedAndIntact(plan.body) || plan.body.openingTask() != null && plan.body.openingTask().active()) {
                     state.setReason("需要完整开通中焦八脉，且没有正在开脉");
                     return transit;
                 }
-                state.setRunning(true).setAutomatic(automatic).setPushing(false).setThrust(1)
+                state.setRunning(true).setAutomatic(automatic).setAutomaticWaiting(false).setPushing(false).setThrust(1)
                         .setGateIndex(0).setGateHits(0).setGateRetryUntil(0).setReason("");
             }
             case STOP -> {
@@ -326,7 +338,7 @@ public final class HumanCultivation {
         String origin = MERIDIANS.stream().max(Comparator.comparingDouble(id -> plan.get("l:" + id).totalQi())).orElseThrow();
         // 先检查可启动批次再扣源，停止启动不能遗失尚未进入在途的微量余额。
         if (plan.available("l:" + origin, BATCH_QI, Double.MAX_VALUE).totalQi() < 1e-6) {
-            state.setRunning(false).setReason("内腔没有可运转真元");
+            stop(plan, state, null, "内腔没有可运转真元");
             return null;
         }
         QiInventory cargo = plan.take("l:" + origin, BATCH_QI, Double.MAX_VALUE);
@@ -395,15 +407,30 @@ public final class HumanCultivation {
     }
 
     private static void stop(HumanQiPlan plan, CultivationState.Builder state, QiTransit transit, String reason) {
-        // 取消循环时归还唯一货物；预留保证返回容量，伤脉也不会凭空吞掉余额。
+        // 显式停止或不可恢复故障会归还唯一货物，并清除自动意图与等待标记。
+        returnCircuit(plan, transit);
+        failBreakthrough(state, reason);
+        state.setRunning(false).setAutomatic(false).setAutomaticWaiting(false).setPushing(false)
+                .setMobilizing(false).setGateRetryUntil(0).setReason(reason);
+    }
+
+    private static void waitForAutomaticStamina(HumanQiPlan plan, CultivationState.Builder state,
+                                                QiTransit transit, String reason) {
+        // 耐力暂停保留自动选择，但先归还货物、释放动作并中断依赖周天的突破。
+        returnCircuit(plan, transit);
+        failBreakthrough(state, reason);
+        state.setRunning(false).setAutomatic(true).setAutomaticWaiting(true).setPushing(false)
+                .setMobilizing(false).setGateRetryUntil(0).setReason(reason);
+    }
+
+    private static void returnCircuit(HumanQiPlan plan, QiTransit transit) {
+        // 在途货物回到原出发经脉，等待期间不占用闭环容量。
         if (transit != null) {
             String origin = CircuitTransport.meridian(plan.body.structure(),
                     CircuitTransport.connection(plan.body.structure(), transit.connectionId().value()).to()).value();
             plan.add("l:" + origin, transit.cargo());
             plan.activity.clearCircuits().addCircuits(CircuitChange.newBuilder().setId(CIRCUIT));
         }
-        failBreakthrough(state, reason);
-        state.setRunning(false).setPushing(false).setMobilizing(false).setGateRetryUntil(0).setReason(reason);
     }
 
     private static void replace(HumanQiPlan plan, QiTransit transit) {

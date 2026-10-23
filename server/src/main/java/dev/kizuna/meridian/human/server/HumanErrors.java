@@ -4,6 +4,8 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 
 /** 人体内容工具的错误集中定义；身体业务拒绝仍由框架协议表达。 */
 public final class HumanErrors {
+    public static final String ENVIRONMENT_HOST_FAILED = "环境宿主请求处理失败";
+    public static final String ENVIRONMENT_CREDIT_FAILED = "环境待入账失败，已保留队列等待下次续窗";
     public static final String MIDDLE_JIAO_LOCKED = "请先右键使用《炁脉札记》和中焦残卷，再打开中焦，无须看完。";
     public static final String INVALID_CULTIVATION = "周天进度或人体模块配置无效";
     public static final String INVALID_PROGRESS = "身体内的修炼进度类型或版本无效";
@@ -41,9 +43,24 @@ public final class HumanErrors {
         return new IllegalStateException(INVALID_GATHERING_RESPONSE, cause);
     }
 
-    public static IllegalStateException hostRejected(FailureCode code) {
+    public static HostRejected hostRejected(FailureCode code) {
         // 保留协议失败码供宿主中止当前事件，避免失败后继续切换动作。
-        return new IllegalStateException(HOST_FAILED + ": " + code);
+        return new HostRejected(code);
+    }
+
+    public static final class HostRejected extends IllegalStateException {
+        private final FailureCode code;
+
+        private HostRejected(FailureCode code) {
+            // 协议拒绝保存为结构化值，不从运行时文案反解析失败码。
+            super(HOST_FAILED + ": " + code);
+            this.code = code;
+        }
+
+        public FailureCode code() {
+            // 返回原始框架失败码，让宿主直接编码业务拒绝。
+            return code;
+        }
     }
 
     public static String openingRejected(FailureCode code) {

@@ -30,10 +30,69 @@ import static org.junit.Assert.*;
 /** 整体回归：Minecraft 运动编排走人体注册内容与框架权威命令链。 */
 public class HumanPlayerBodyTest {
     @Test
+    public void completedProcessingReleasesLossOnceWithoutReplayingHistory() {
+        // 从可信加工中存档恢复，真实推进须把损耗交给宿主，并排除历史与重复结算。
+        HumanPlayerBody initial = born();
+        initial.settle(0);
+        var recipe = HumanContent.bundle().getOrganRecipes(0);
+        var message = BodyProtobuf.toMessage(initial.snapshot()).toBuilder();
+        for (int index = 0; index < message.getOrganStatesCount(); index++) {
+            var organ = message.getOrganStates(index);
+            if (organ.getId().equals("left_lung")) {
+                message.setOrganStates(index, organ.toBuilder().setProcess(BodyMessages.OrganProcess.newBuilder()
+                        .setRecipe(recipe).setInput(recipe.getInput()).setCompletionMillis(1000).setBlocked(false)));
+            }
+        }
+        QiInventory history = BodyProtobuf.fromInventory(recipe.getInput());
+        HumanPlayerBody body = new HumanPlayerBody(BodyProtobuf.fromMessage(message.build()), List.of(), history);
+        var releases = new java.util.ArrayList<QiInventory>();
+        body.bindReleaseSink(releases::add);
+        double before = body.snapshot().totalQi();
+        body.settle(1000);
+        assertEquals(1, releases.size());
+        assertEquals(.8, releases.get(0).totalQi(), 1e-9);
+        assertEquals(before, body.snapshot().totalQi() + releases.get(0).totalQi(), 1e-9);
+        assertEquals(history.volume() + releases.get(0).volume(), body.releasedQi().volume(), 1e-9);
+        body.settle(1000);
+        assertEquals(1, releases.size());
+    }
+
+    @Test
+    public void deathReleaseExcludesHistoryWithDifferentDensity() {
+        // 历史释放与死亡释放同类但密度不同，回调仍须独立保留本次数量和体积。
+        HumanPlayerBody initial = born();
+        initial.settle(0);
+        var saved = initial.snapshot();
+        var expected = dev.kizuna.meridian.core.BodyDeath.release(
+                saved.meridianStates(), saved.organStates(), saved.transits()).qi();
+        var history = new QiInventory(expected.entries().stream().map(entry -> new dev.kizuna.meridian.core.Qi(
+                entry.attribute(), entry.amount() * 2,
+                dev.kizuna.meridian.protocol.QiDensity.clampToPhase(entry.density() * 1.5,
+                        BodyMessages.QiPhase.valueOf(entry.phase().name())))).toList());
+        assertNotEquals(expected.entries().get(0).density(), history.entries().get(0).density(), 0);
+        HumanPlayerBody body = new HumanPlayerBody(saved, initial.receipts(), history);
+        var releases = new java.util.ArrayList<QiInventory>();
+        body.bindReleaseSink(releases::add);
+        assertTrue(releases.isEmpty());
+        var death = RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId("mixed-density-death")
+                .setBodyCommand(BodyCommand.newBuilder().setBodyId(saved.id().value())
+                        .setExpectedRevision(saved.revision()).setConfirmBodyDeath(
+                                ConfirmBodyDeath.newBuilder().setSourceId("sample:vanilla"))).build();
+        assertTrue(body.applyHealth(0, death).hasCommandCommitted());
+        assertEquals(1, releases.size());
+        assertEquals(expected.totalQi(), releases.get(0).totalQi(), 1e-9);
+        assertEquals(expected.volume(), releases.get(0).volume(), 1e-9);
+        assertTrue(body.applyHealth(0, death).hasCommandCommitted());
+        assertEquals(1, releases.size());
+    }
+
+    @Test
     public void trustedDamageUsesCurrentRevisionAndDeathRetainsInjuriesAfterReload() {
         // 伤害附属先查询后提交，宿主保持原请求身份，重试不会重复损伤或释放。
         HumanPlayerBody body = born();
         body.settle(0);
+        var releases = new java.util.ArrayList<QiInventory>();
+        body.bindReleaseSink(releases::add);
         var original = body.snapshot();
         var effect = RequestEnvelope.newBuilder()
                 .setProtocolVersion(1).setRequestId("vanilla-hit")
@@ -59,14 +118,20 @@ public class HumanPlayerBodyTest {
                         .setConfirmBodyDeath(ConfirmBodyDeath.newBuilder()
                                 .setSourceId("sample:vanilla"))).build();
         assertTrue(body.applyHealth(0, death).hasCommandCommitted());
+        assertEquals(1, releases.size());
+        assertEquals(hurt.totalQi(), releases.get(0).totalQi(), 1e-9);
+        assertTrue(body.applyHealth(0, death).hasCommandCommitted());
+        assertEquals(1, releases.size());
         assertTrue(body.snapshot().vitality().dead());
         assertEquals(hurt.partStates(), body.snapshot().partStates());
         assertEquals(hurt.tissueStates(), body.snapshot().tissueStates());
         var restored = new HumanPlayerBody(body.snapshot(), body.receipts(), body.releasedQi());
+        restored.bindReleaseSink(releases::add);
         assertTrue(restored.applyHealth(0, death).hasCommandCommitted());
         assertEquals(body.snapshot(), restored.snapshot());
         assertEquals(body.releasedQi(), restored.releasedQi());
         assertTrue(restored.applyHealth(0, effect.toBuilder().setRequestId("stale-hit").build()).hasFailure());
+        assertEquals(1, releases.size());
     }
 
     @Test
@@ -161,6 +226,10 @@ public class HumanPlayerBodyTest {
         String epoch = UUID.randomUUID().toString();
         HumanPlayerBody body = HumanPlayerBody.born(UUID.randomUUID(), epoch, 0, store);
         HumanPlayerBody neighbor = HumanPlayerBody.born(UUID.randomUUID(), epoch, 0, store);
+        var releases = new java.util.ArrayList<QiInventory>();
+        var neighborReleases = new java.util.ArrayList<QiInventory>();
+        body.bindReleaseSink(releases::add);
+        neighbor.bindReleaseSink(neighborReleases::add);
         unlock(body);
         unlock(neighbor);
         var origin = BodyProtobuf.toTime(body.snapshot().settledAt());
@@ -215,6 +284,11 @@ public class HumanPlayerBodyTest {
         assertEquals(initialTotal, body.snapshot().totalQi() + neighbor.snapshot().totalQi()
                 + store.environmentQi().totalQi()
                 + BodyProtobuf.fromInventory(store.environmentSource("test:shared").orElseThrow().getInventory()).totalQi(), 1e-9);
+        // 加工损耗逐笔归位，读取同一个共享账本的邻居不能重复领取释放。
+        assertTrue(neighborReleases.isEmpty());
+        assertEquals(store.environmentQi().totalQi(), releases.stream().mapToDouble(QiInventory::totalQi).sum(), 1e-9);
+        assertEquals(store.environmentQi().volume(), releases.stream().mapToDouble(QiInventory::volume).sum(), 1e-9);
+        assertTrue(releases.stream().flatMap(release -> release.entries().stream()).allMatch(entry -> entry.amount() > 0));
 
         // 保存身体、共享来源及回执后重连；只解除本会话占用，离线不恢复，在线休息才指数恢复。
         var saved = BodyProtobuf.decodeSnapshot(BodyProtobuf.encodeSnapshot(body.snapshot()));
@@ -242,11 +316,17 @@ public class HumanPlayerBodyTest {
     }
 
     private static GatheringResponse breath(HumanPlayerBody body, long millis, long sequence, BreathAction action) {
+        // 默认请求明确保持手动模式，方便回归验证移动停止规则。
+        return breath(body, millis, sequence, action, false);
+    }
+
+    private static GatheringResponse breath(HumanPlayerBody body, long millis, long sequence, BreathAction action,
+            boolean automatic) {
         // 只上传公开控制意图，身体身份与时间分别由测试宿主绑定，不自报摄入结果。
         return body.gather(millis, GatheringRequest.newBuilder().setProtocolVersion(1)
                 .setRequestId("breath-" + sequence).setBodyId(body.snapshot().id().value())
                 .setBreath(BreathControl.newBuilder().setSequence(sequence).setAction(action)
-                        .setAimX(.5).setAimY(.4).setAimZ(.5)).build());
+                        .setAutomatic(automatic).setAimX(.5).setAimY(.4).setAimZ(.5)).build());
     }
 
     @Test
@@ -260,25 +340,62 @@ public class HumanPlayerBodyTest {
         assertFalse(breath(body, 0, 2, BreathAction.INHALE).hasFailure());
         var breathingInstances = body.breathingActions();
         assertFalse(breathingInstances.isEmpty());
-        assertEquals("meditate", HumanPlayerAnimation.select(body.motion(), body.breathingActive()));
+        assertEquals("meditate", HumanPlayerAnimation.select(body.motion(), body.breathingActive(), body.breathingAutomatic()));
 
         body.observe(100, HumanPlayerBody.Motion.WALK, true);
         assertFalse(body.breathingActive());
         assertEquals(BreathAction.END_BREATHING, responses.get(responses.size() - 1).getView().getBreathing().getAction());
         assertTrue(body.snapshot().actions().stream().noneMatch(action -> breathingInstances.contains(action.instanceId())));
         assertTrue(fatigue(body, "diaphragm") > 0);
-        assertEquals("walk", HumanPlayerAnimation.select(body.motion(), body.breathingActive()));
+        assertEquals("walk", HumanPlayerAnimation.select(body.motion(), body.breathingActive(), body.breathingAutomatic()));
         assertFalse(breath(body, 150, 4, BreathAction.INHALE).getView().getBreathing().getActive());
         body.observe(200, HumanPlayerBody.Motion.SPRINT, true);
-        assertEquals("run", HumanPlayerAnimation.select(body.motion(), body.breathingActive()));
+        assertEquals("run", HumanPlayerAnimation.select(body.motion(), body.breathingActive(), body.breathingAutomatic()));
         body.observe(250, HumanPlayerBody.Motion.IDLE, false);
-        assertEquals("", HumanPlayerAnimation.select(body.motion(), body.breathingActive()));
+        assertEquals("", HumanPlayerAnimation.select(body.motion(), body.breathingActive(), body.breathingAutomatic()));
 
         // 跳跃等非地面位移也结束静坐，但不伪造 walk 动作。
         assertTrue(breath(body, 300, 5, BreathAction.BEGIN_BREATHING).getView().getBreathing().getActive());
         body.observe(350, HumanPlayerBody.Motion.IDLE, true);
         assertFalse(body.breathingActive());
-        assertEquals("", HumanPlayerAnimation.select(body.motion(), body.breathingActive()));
+        assertEquals("", HumanPlayerAnimation.select(body.motion(), body.breathingActive(), body.breathingAutomatic()));
+    }
+
+    @Test
+    public void automaticBreathingContinuesDuringMovementWhileManualBreathingStillStops() {
+        // 自动模式由服务端维持；移动只替换走跑动作，不结束吐纳占用或呼吸会话。
+        HumanPlayerBody body = born();
+        unlock(body);
+        var responses = new java.util.ArrayList<GatheringResponse>();
+        body.connectGathering(0, responses::add);
+        GatheringResponse started = breath(body, 0, 1, BreathAction.BEGIN_BREATHING, true);
+        assertTrue(started.getView().getBreathing().getActive());
+        assertTrue(started.getView().getBreathing().getAutomatic());
+        var breathingInstances = body.breathingActions();
+        assertFalse(breathingInstances.isEmpty());
+
+        body.observe(100, HumanPlayerBody.Motion.WALK, true);
+        for (long millis = 250; millis <= 2_000; millis += 250) {
+            body.advanceGathering(millis);
+            body.observe(millis, HumanPlayerBody.Motion.WALK, true);
+        }
+
+        assertTrue(body.breathingActive());
+        assertTrue(body.breathingAutomatic());
+        assertTrue(body.snapshot().actions().stream().anyMatch(action -> breathingInstances.contains(action.instanceId())));
+        assertTrue(fatigue(body, "diaphragm") > 0);
+        assertEquals(0, fatigue(body, "attention_network"), 0);
+        assertEquals("walk", HumanPlayerAnimation.select(body.motion(), body.breathingActive(), body.breathingAutomatic()));
+        assertTrue(responses.stream().noneMatch(response -> response.hasView()
+                && response.getView().getBreathing().getAction() == BreathAction.END_BREATHING));
+
+        // 手动模式仍在首次真实位移时发送正式结束意图。
+        HumanPlayerBody manual = born();
+        unlock(manual);
+        manual.connectGathering(0, response -> {});
+        assertTrue(breath(manual, 0, 1, BreathAction.BEGIN_BREATHING).getView().getBreathing().getActive());
+        manual.observe(100, HumanPlayerBody.Motion.WALK, true);
+        assertFalse(manual.breathingActive());
     }
 
     @Test

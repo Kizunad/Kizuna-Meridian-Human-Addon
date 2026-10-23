@@ -48,9 +48,10 @@ message CultivationState {
   bool reserve_processing = 22;
   int64 gate_window_millis = 23; // 服务端命中半窗口，供红绿提示插值。
   double brain_stamina_ratio = 24; // 当前有效脑耐力比例，含器官和部位健康折减。
-  double automatic_minimum_stamina_ratio = 25; // 自动周天停止线，由人体占位参数声明。
+  double automatic_minimum_stamina_ratio = 25; // 自动周天暂停与恢复启动线，由人体占位参数声明。
   double automatic_efficiency = 26; // 自动周天提纯系数，服务端权威值。
   int64 breath_cycle_millis = 27; // 自然呼吸完整周期，供客户端展示吸呼阶段。
   int64 exhale_start_millis = 28; // 周期内进入呼气阶段的偏移。
   int64 gate_retry_millis = 29; // 关口指示圈收缩到目标的展示时长。
+  bool automatic_waiting = 30; // 自动周天暂停做功并等待脑耐力恢复到启动线。
 }

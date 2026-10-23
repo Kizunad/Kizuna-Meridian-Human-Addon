@@ -11,9 +11,9 @@ import java.util.UUID;
 final class HumanPlayerAnimation {
     private final Map<UUID, String> playing = new HashMap<>();
 
-    void synchronize(ServerPlayerEntity player, HumanPlayerBody.Motion motion, boolean breathing) {
-        // 运动前已正式结束吐纳；这里仅选择外观，不能替代会话结算。
-        String desired = select(motion, breathing);
+    void synchronize(ServerPlayerEntity player, HumanPlayerBody.Motion motion, boolean breathing, boolean automatic) {
+        // 手动吐纳保持盘坐；自动吐纳允许走跑，动画优先反映玩家当前移动。
+        String desired = select(motion, breathing, automatic);
         String previous = playing.getOrDefault(player.getUuid(), "");
         if (desired.equals(previous)) {
             return;
@@ -26,9 +26,9 @@ final class HumanPlayerAnimation {
         }
     }
 
-    static String select(HumanPlayerBody.Motion motion, boolean breathing) {
-        // 吐纳由权威会话决定，其余只在已识别的地面运动中播放。
-        if (breathing) {
+    static String select(HumanPlayerBody.Motion motion, boolean breathing, boolean automatic) {
+        // 静止吐纳或手动吐纳显示盘坐；自动吐纳移动时显示实际步态。
+        if (breathing && (!automatic || motion == HumanPlayerBody.Motion.IDLE)) {
             return "meditate";
         }
         return switch (motion) {

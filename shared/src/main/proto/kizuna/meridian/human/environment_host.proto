@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package kizuna.meridian.human.v1;
+
+import "kizuna/meridian/v1/body.proto";
+import "kizuna/meridian/v1/protocol.proto";
+
+option java_package = "dev.kizuna.meridian.human.protocol.pb";
+option java_outer_classname = "EnvironmentHostMessages";
+
+// 仅供可信服务端附属使用，不注册客户端网络通道。
+message EnvironmentHostRequest {
+  int32 protocol_version = 1;
+  string request_id = 2;
+  oneof operation {
+    RegionQuery query = 10;
+    RegionRelease release = 11;
+    bool clock = 12; // 必须为 true。
+  }
+}
+
+message RegionQuery {
+  string dimension_id = 1;
+  int32 block_x = 2;
+  int32 block_z = 3;
+}
+
+message RegionView {
+  string source_id = 1;
+  double volume_blocks = 2;
+  kizuna.meridian.v1.QiInventory inventory = 3;
+  double concentration = 4;
+  int64 source_revision = 5;
+}
+
+message RegionRelease {
+  string release_id = 1; // 全局唯一；保留期内去重，重试必须保留原内容。
+  RegionQuery position = 2;
+  kizuna.meridian.v1.QiInventory released_qi = 3;
+}
+
+message ReleaseResult {
+  optional string source_id = 1;
+  bool duplicate = 2;
+}
+
+message EnvironmentHostResponse {
+  int32 protocol_version = 1;
+  string request_id = 2;
+  oneof result {
+    bool unbound = 10; // 必须为 true；当前尚未绑定世界宿主。
+    RegionView region = 11;
+    ReleaseResult released = 12;
+    kizuna.meridian.v1.TimeCursor now = 13;
+    kizuna.meridian.v1.RequestFailure failure = 14;
+  }
+}

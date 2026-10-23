@@ -5,6 +5,7 @@ import dev.kizuna.meridian.core.BodyId;
 import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.core.BodyTimeAdvancement;
 import dev.kizuna.meridian.core.QiInventory;
+import dev.kizuna.meridian.core.Qi;
 import dev.kizuna.meridian.core.TissueCapabilities;
 import dev.kizuna.meridian.human.server.HumanBirth;
 import dev.kizuna.meridian.human.server.HumanContent;
@@ -38,6 +39,7 @@ import java.util.UUID;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /** 单玩家的可信运动编排；账本、占用与恢复只由框架命令处理器修改。 */
 final class HumanPlayerBody {
@@ -71,6 +73,7 @@ final class HumanPlayerBody {
     private GatheringSession<String> gathering;
     private OpeningSession<String> openingSession;
     private Consumer<GatheringResponse> gatheringOutput;
+    private Consumer<QiInventory> releaseSink = released -> { /* 独立身体测试无需世界路由。 */ };
     private final Set<String> breathingActions = new HashSet<>();
     private boolean debugAuthorized;
     private BreathingView lastBreathing = BreathingView.getDefaultInstance();
@@ -142,7 +145,8 @@ final class HumanPlayerBody {
                 .setBodyCommand(BodyCommand.newBuilder().setBodyId(id.value()).setExpectedRevision(snapshot().revision())
                         .setSetAddonProgress(SetAddonProgress.newBuilder().setId(ProgressionProtocol.PROGRESS_KEY)
                                 .setProgress(com.google.protobuf.Any.pack(progress)))).build();
-        ResponseEnvelope response = MeridianProtocol.decodeResponse(commands.handleAddonProgress(id.value(), request.toByteArray()));
+        ResponseEnvelope response = MeridianProtocol.decodeResponse(captureRelease(
+                () -> commands.handleAddonProgress(id.value(), request.toByteArray())));
         if (response.hasFailure()) {
             throw HumanErrors.hostRejected(response.getFailure().getCode());
         }
@@ -198,7 +202,7 @@ final class HumanPlayerBody {
 
     boolean observe(long millis, Motion observed, boolean moved) {
         // 每 tick 只比较动作和下一边界；持续做功及空闲恢复最多每秒结算一次。
-        boolean stoppedBreathing = moved && lastBreathing.getActive();
+        boolean stoppedBreathing = moved && lastBreathing.getActive() && !lastBreathing.getAutomatic();
         if (stoppedBreathing) {
             // 与界面结束按钮使用同一个 END_BREATHING 意图，先结清气流并解除呼吸占用。
             GatheringResponse stopped = gather(millis, GatheringRequest.newBuilder().setProtocolVersion(1)
@@ -237,6 +241,11 @@ final class HumanPlayerBody {
     boolean breathingActive() {
         // 缓存只来自权威会话回执，避免每 tick 重建整个身体展示快照。
         return lastBreathing.getActive();
+    }
+
+    boolean breathingAutomatic() {
+        // 动画展示读取服务端确认的模式，自动吐纳移动时优先显示真实移动动作。
+        return lastBreathing.getAutomatic();
     }
 
     void settle(long millis) {
@@ -331,7 +340,8 @@ final class HumanPlayerBody {
         gathering.synchronizeBodyRevision();
         Set<String> previous = actionIds();
         try {
-            GatheringResponse response = GatheringResponse.parseFrom(gathering.handle(request.toByteArray()));
+            GatheringResponse response = GatheringResponse.parseFrom(captureRelease(
+                    () -> gathering.handle(request.toByteArray())));
             if (response.hasView()) {
                 lastBreathing = response.getView().getBreathing();
             }
@@ -352,7 +362,7 @@ final class HumanPlayerBody {
         }
         gathering.synchronizeBodyRevision();
         Set<String> previous = actionIds();
-        boolean changed = gathering.advance();
+        boolean changed = captureRelease(() -> gathering.advance());
         rememberBreathingActions(previous);
         if (changed) {
             publishGathering();
@@ -381,7 +391,11 @@ final class HumanPlayerBody {
             applyActivity(HumanCultivation.cancel(snapshot()));
         }
         if (gathering != null) {
-            gathering.close();
+            captureRelease(() -> {
+                // 关闭也可能推进身体时间，先收集本次释放再销毁会话。
+                gathering.close();
+                return null;
+            });
             gathering = null;
             lastBreathing = BreathingView.getDefaultInstance();
             gatheringOutput = null;
@@ -452,7 +466,8 @@ final class HumanPlayerBody {
         var request = RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId(UUID.randomUUID().toString())
                 .setBodyCommand(BodyCommand.newBuilder().setBodyId(id.value()).setExpectedRevision(snapshot().revision())
                         .setExecuteActivity(plan)).build();
-        ResponseEnvelope response = MeridianProtocol.decodeResponse(commands.handleActivity(id.value(), request.toByteArray()));
+        ResponseEnvelope response = MeridianProtocol.decodeResponse(captureRelease(
+                () -> commands.handleActivity(id.value(), request.toByteArray())));
         if (response.hasFailure()) {
             throw HumanErrors.hostRejected(response.getFailure().getCode());
         }
@@ -486,7 +501,8 @@ final class HumanPlayerBody {
         // 业务拒绝供玩家调整储量或资源，不应把整个人体标记为宿主故障。
         var request = RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId(UUID.randomUUID().toString())
                 .setBodyCommand(command.setBodyId(id.value()).setExpectedRevision(snapshot().revision())).build();
-        ResponseEnvelope response = MeridianProtocol.decodeResponse(commands.handle(id.value(), request.toByteArray()));
+        ResponseEnvelope response = MeridianProtocol.decodeResponse(captureRelease(
+                () -> commands.handle(id.value(), request.toByteArray())));
         scheduleNextBoundary();
         publishGathering();
         return response.hasFailure() ? response.getFailure().getCode() : FailureCode.FAILURE_CODE_UNSPECIFIED;
@@ -496,7 +512,7 @@ final class HumanPlayerBody {
         // 独立伤害附属保留自己的事件身份与读取版本，宿主不能替它刷新版本绕过并发校验。
         settle(millis);
         ResponseEnvelope response = MeridianProtocol.decodeResponse(
-                commands.handleHealthEffect(id.value(), MeridianProtocol.encodeRequest(request)));
+                captureRelease(() -> commands.handleHealthEffect(id.value(), MeridianProtocol.encodeRequest(request))));
         scheduleNextBoundary();
         publishGathering();
         return response;
@@ -519,7 +535,7 @@ final class HumanPlayerBody {
             openingSession = new OpeningSession<>(id.value(), id, commands, store,
                     (caller, requested) -> caller.equals(id.value()) && requested.equals(id) && progress().getQiNotesRead());
         }
-        ResponseEnvelope response = openingSession.handle(request);
+        ResponseEnvelope response = captureRelease(() -> openingSession.handle(request));
         scheduleNextBoundary();
         publishGathering();
         return response;
@@ -547,6 +563,39 @@ final class HumanPlayerBody {
     QiInventory releasedQi() {
         // 寿尽释放保留唯一账本，宿主后续可按世界环境规则接收。
         return store.environmentQi();
+    }
+
+    void bindReleaseSink(Consumer<QiInventory> sink) {
+        // 世界宿主在恢复或执行前绑定真实位置路由；绑定本身不重发共享账本中的历史释放。
+        releaseSink = java.util.Objects.requireNonNull(sink);
+    }
+
+    private <T> T captureRelease(Supplier<T> operation) {
+        // 串行宿主按实际命令或会话划定增量，即使后续步骤失败也归位已经提交的释放。
+        QiInventory before = store.environmentQi();
+        try {
+            return operation.get();
+        } finally {
+            var entries = new java.util.ArrayList<Qi>();
+            for (Qi after : store.environmentQi().entries()) {
+                Qi previous = before.entries().stream().filter(entry -> entry.phase() == after.phase()
+                        && entry.attribute().equals(after.attribute())).findFirst().orElse(null);
+                double amount = after.amount() - (previous == null ? 0 : previous.amount());
+                if (amount > 0) {
+                    // 合并账本会改变密度，必须同时扣除历史体积才能还原本次释放。
+                    double volume = after.volume() - (previous == null ? 0 : previous.volume());
+                    double density = previous == null || previous.density() == after.density()
+                            ? after.density() : amount / volume;
+                    density = dev.kizuna.meridian.protocol.QiDensity.clampToPhase(density,
+                            BodyMessages.QiPhase.valueOf(after.phase().name()));
+                    entries.add(new Qi(after.attribute(), amount, density));
+                }
+            }
+            QiInventory released = new QiInventory(entries);
+            if (!released.entries().isEmpty()) {
+                releaseSink.accept(released);
+            }
+        }
     }
 
     Motion motion() {
@@ -580,7 +629,8 @@ final class HumanPlayerBody {
         // 每笔内部意图有独立身份和当前版本；收到明确成功后才继续下一步编排。
         var request = RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId(UUID.randomUUID().toString())
                 .setBodyCommand(command.setBodyId(id.value()).setExpectedRevision(snapshot().revision())).build();
-        ResponseEnvelope response = MeridianProtocol.decodeResponse(commands.handle(id.value(), request.toByteArray()));
+        ResponseEnvelope response = MeridianProtocol.decodeResponse(captureRelease(
+                () -> commands.handle(id.value(), request.toByteArray())));
         if (response.hasFailure()) {
             throw HumanErrors.hostRejected(response.getFailure().getCode());
         }

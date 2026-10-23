@@ -17,8 +17,8 @@ import static org.junit.Assert.*;
 /** 整体回归：真实原子入口的闭环、提纯守恒、脾加工、持久化与突破成败。 */
 public class HumanCultivationTest {
     @Test
-    public void automaticNeedsNoPracticePaysOnlyBrainAndStopsBelowEightyPercent() {
-        // 真实权威执行到停止线，检查账本、占用、归还和不可立即重启。
+    public void automaticNeedsNoPracticePaysOnlyBrainAndResumesAfterStaminaRecovery() {
+        // 真实权威执行到停止线，检查等待状态、空闲恢复、自动续跑和显式取消。
         Host host = new Host();
         host.open();
         var initial = HumanCultivation.state(host.body());
@@ -43,7 +43,13 @@ public class HumanCultivationTest {
         host.now += 250;
         host.commit(BodyCommand.newBuilder().setAdvanceTime(AdvanceTime.getDefaultInstance()));
         host.input(CultivationInput.Operation.START_AUTOMATIC);
-        assertFalse(HumanCultivation.state(host.body()).getRunning());
+        var waiting = HumanCultivation.state(host.body());
+        assertFalse(waiting.getRunning());
+        assertTrue(waiting.getAutomatic());
+        assertTrue(waiting.getAutomaticWaiting());
+        assertTrue(HumanCultivation.needsAdvance(host.body()));
+        assertTrue(HumanCultivation.state(BodyProtobuf.decodeSnapshot(BodyProtobuf.encodeSnapshot(host.body())))
+                .getAutomaticWaiting());
         double fatigue = host.body().organStates().stream().filter(organ -> organ.id().value().equals("brain"))
                 .findFirst().orElseThrow().fatigueJoules();
         assertEquals(120.25, fatigue, 1e-8);
@@ -51,8 +57,28 @@ public class HumanCultivationTest {
                 .findFirst().orElseThrow().fatigue(), 0);
         assertTrue(host.body().actions().isEmpty());
         assertTrue(host.body().transits().stream().noneMatch(transit -> transit.circuit() != null));
-        host.input(CultivationInput.Operation.START_AUTOMATIC);
-        assertFalse(HumanCultivation.state(host.body()).getRunning());
+        int recoveryTicks = 0;
+        while (HumanCultivation.state(host.body()).getAutomaticWaiting() && recoveryTicks++ < 100) {
+            host.tick();
+        }
+        var resumed = HumanCultivation.state(host.body());
+        assertTrue(resumed.getRunning());
+        assertTrue(resumed.getAutomatic());
+        assertFalse(resumed.getAutomaticWaiting());
+        assertTrue(resumed.getBrainStaminaRatio() >= HumanCultivationNumbers.AUTOMATIC_MIN_STAMINA_RATIO);
+        assertEquals(0, host.body().tissueStates().stream().filter(tissue -> tissue.id().value().equals("attention_network"))
+                .findFirst().orElseThrow().fatigue(), 0);
+
+        // 自动续跑后再次到达停止线，显式 STOP 必须撤销等待意图。
+        int waitAgainTicks = 0;
+        while (!HumanCultivation.state(host.body()).getAutomaticWaiting() && waitAgainTicks++ < 10) {
+            host.tick();
+        }
+        assertTrue(HumanCultivation.state(host.body()).getAutomaticWaiting());
+        host.input(CultivationInput.Operation.STOP);
+        var stoppedByPlayer = HumanCultivation.state(host.body());
+        assertFalse(stoppedByPlayer.getAutomatic());
+        assertFalse(stoppedByPlayer.getAutomaticWaiting());
         var cargo = new QiInventory(List.of(new Qi(Qi.QiAttribute.NONE, 10, .01)));
         assertTrue(HumanCultivation.purify(cargo, HumanCultivationNumbers.AUTOMATIC_EFFICIENCY).entries().get(0).density()
                 < HumanCultivation.purify(cargo, 1).entries().get(0).density());

@@ -9,7 +9,8 @@
   "environment": "*",
   "entrypoints": {
     "main": ["dev.kizuna.meridian.human.fabric.HumanFabric"],
-    "meridian_health_host": ["dev.kizuna.meridian.human.fabric.HumanHealthHost"]
+    "meridian_health_host": ["dev.kizuna.meridian.human.fabric.HumanHealthHost"],
+    "meridian_environment_host": ["dev.kizuna.meridian.human.fabric.HumanEnvironmentHost"]
   },
   "depends": {"java": ">=17", "minecraft": "1.20.1", "fabricloader": ">=0.16.10", "fabric-api": "*",
     "kizuna_players_animation": "*", "meridian_progression": "*", "meridian_vanilla_damage": "*", "meridian_vanilla_healing": "*"}
