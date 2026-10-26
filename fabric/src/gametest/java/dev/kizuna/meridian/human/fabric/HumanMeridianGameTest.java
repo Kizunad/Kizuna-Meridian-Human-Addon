@@ -75,6 +75,8 @@ public final class HumanMeridianGameTest implements FabricGameTest {
         long now = player.getServer().getOverworld().getTime() * 50;
         var state = new HumanWorldState();
         var body = state.join(player, now);
+        // 健康请求须先结算再读取版本，避免首次修炼进度初始化使请求过期。
+        body.settle(now);
         var position = player.getBlockPos();
         var original = state.query(context.getWorld(), position.getX(), position.getZ(), now);
         double released = body.snapshot().totalQi();
@@ -160,7 +162,10 @@ public final class HumanMeridianGameTest implements FabricGameTest {
         // 玩家在下界死亡没有区域归位项，既有余额继续留在默认账户。
         var player = new net.minecraft.server.network.ServerPlayerEntity(nether.getServer(), nether,
                 new com.mojang.authlib.GameProfile(java.util.UUID.randomUUID(), "EnvironmentTest"));
-        var body = state.join(player, 30_001);
+        long deathMillis = 30_001;
+        var body = state.join(player, deathMillis);
+        // 与正式健康宿主保持相同读取顺序，结算完成后才能固定预期版本。
+        body.settle(deathMillis);
         double bodyQi = body.snapshot().totalQi();
         var death = dev.kizuna.meridian.protocol.pb.MeridianMessages.RequestEnvelope.newBuilder()
                 .setProtocolVersion(1).setRequestId("gametest:nether-death")
@@ -168,7 +173,7 @@ public final class HumanMeridianGameTest implements FabricGameTest {
                         .setBodyId(body.snapshot().id().value()).setExpectedRevision(body.snapshot().revision())
                         .setConfirmBodyDeath(dev.kizuna.meridian.protocol.pb.HealthMessages.ConfirmBodyDeath.newBuilder()
                                 .setSourceId("gametest:death"))).build();
-        context.assertTrue(body.applyHealth(30_001, death).hasCommandCommitted(), "下界玩家死亡未提交");
+        context.assertTrue(body.applyHealth(deathMillis, death).hasCommandCommitted(), "下界玩家死亡未提交");
         state.renewEnvironment(60_000);
         var saved = state.writeNbt(new NbtCompound());
         context.assertTrue(Math.abs(defaultReleased(saved) - 35 - bodyQi) < 1e-7, "下界玩家释放丢失或被转出");
