@@ -6,7 +6,6 @@ import dev.kizuna.meridian.core.QiConsumption;
 import dev.kizuna.meridian.human.protocol.pb.HumanOpeningMessages.HumanOpeningConditions;
 import dev.kizuna.meridian.human.protocol.pb.HumanOpeningMessages.IntakeRequirement;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
-import dev.kizuna.meridian.protocol.OpeningProtobuf;
 import dev.kizuna.meridian.protocol.pb.BodyMessages.*;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.protocol.pb.OpeningPolicyMessages.*;
@@ -25,9 +24,8 @@ public final class HumanOpeningPolicy implements OpeningPolicy {
     }
 
     @Override
-    public byte[] evaluate(byte[] payload) {
+    public OpeningPolicyDecision evaluate(OpeningPolicyRequest request) {
         // 先校验内容配置，再按启动编排和区间检查两个阶段裁定。
-        OpeningPolicyRequest request = OpeningProtobuf.decodePolicyRequest(payload);
         HumanOpeningConditions conditions = conditions(request.getRule());
         OpeningPolicyDecision decision;
         if (request.getPhase() == OpeningPolicyPhase.PREPARE_OPENING) {
@@ -35,7 +33,7 @@ public final class HumanOpeningPolicy implements OpeningPolicy {
         } else {
             decision = check(request.getBody(), request.getRule(), conditions, request.getIntervalMillis());
         }
-        return decision.toByteArray();
+        return decision;
     }
 
     public static HumanOpeningConditions conditions(MeridianOpeningRule rule) {

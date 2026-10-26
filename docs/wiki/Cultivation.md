@@ -6,6 +6,8 @@
 
 人体条件的唯一协议是本包 `shared/src/main/proto/kizuna/meridian/human/v1/opening.proto` 的 `HumanOpeningConditions`，通过 protoc 生成并装入规则 Any。`HumanOpeningPolicy` 以 `human:meridian_opening` SPI 接收 Framework 的 Protobuf 策略请求，裁定全身与目标体积占比、引导目标、时长及持续摄入。Framework 只校验计划并执行资源、时间与成长；Human-UI 只读取固定任务的维持阈值显示预警，不能判定成功或修改进度。其他语言宿主须提供相同人体策略，不能仅安装定义便宣称可执行。
 
+同进程 Java 策略直接接收 `OpeningPolicyRequest` 并返回 `OpeningPolicyDecision`，由 Framework 复用推进中的消息子树。字节调用继续通过 `OpeningPolicy.evaluate(byte[])` 的完整协议校验适配；人体条件、检查顺序和返回计划不变。
+
 人体开拓条件由本包 `HumanOpeningConditions` 声明：全身与目标脉的启动体积占用均须达到 80%，维持门槛分别为 60%；费用按实际内腔体积占比从全身分摊。境界、前置经脉、器官耐力与持续摄入仍由 Human 判定，Framework 只执行已校验的计划。
 
 `HumanOpeningViews.update` 与执行策略共享条件及计划，为当前身体 revision 生成紧凑操作卡，由 Human Fabric 的 `BodyViewUpdate.operations` 推送。规则选项使用 `BodyViewUpdate.opening`；卡片的可用性仅供展示，实际点击后仍由核心事务重新裁定。缺失原策略时活动任务会安全暂停并解除动作占用，合法库存和稳定体积保留；旧条件格式不自动迁移。
