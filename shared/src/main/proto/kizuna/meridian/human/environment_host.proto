@@ -16,6 +16,7 @@ message EnvironmentHostRequest {
     RegionQuery query = 10;
     RegionRelease release = 11;
     bool clock = 12; // 必须为 true。
+    string forget_release = 13; // 发送端已持久删除原请求；ID 不得再次用于 release。
   }
 }
 
@@ -34,14 +35,19 @@ message RegionView {
 }
 
 message RegionRelease {
-  string release_id = 1; // 全局唯一；保留期内去重，重试必须保留原内容。
+  string release_id = 1; // 全局唯一；交接完成前去重，重试必须保留原内容。
   RegionQuery position = 2;
   kizuna.meridian.v1.QiInventory released_qi = 3;
 }
 
 message ReleaseResult {
   optional string source_id = 1;
-  bool duplicate = 2;
+  bool duplicate = 2; // 只表示此前已受理，不代表持久化。
+  bool persisted = 3; // ID、完整原请求和待入账事实或已入账余额已同步写盘。
+}
+
+message ForgetReleaseResult {
+  bool persisted = 1; // 已入账且去重项的删除已写盘，或该 ID 已不存在；可幂等重试。
 }
 
 message EnvironmentHostResponse {
@@ -53,5 +59,6 @@ message EnvironmentHostResponse {
     ReleaseResult released = 12;
     kizuna.meridian.v1.TimeCursor now = 13;
     kizuna.meridian.v1.RequestFailure failure = 14;
+    ForgetReleaseResult forgotten = 15;
   }
 }

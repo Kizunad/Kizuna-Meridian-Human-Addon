@@ -111,6 +111,9 @@ public final class HumanFabric implements ModInitializer {
                 state = new HumanWorldState();
                 persistence.set("meridian_human", state);
             }
+            if (state != null) {
+                state.bind(server);
+            }
         });
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> join(handler.player, server));
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> leave(handler.player, server));
@@ -336,35 +339,14 @@ public final class HumanFabric implements ModInitializer {
         if (state == null) {
             return environmentFailure(response, FailureCode.INTERNAL_ERROR);
         }
+        return environmentResult(request, server, response);
+    }
+
+    private byte[] environmentResult(EnvironmentHostRequest request, MinecraftServer server,
+                                     EnvironmentHostResponse.Builder response) {
+        // 协议拒绝与磁盘失败分别保留原失败码和内部错误，失败时不产生持久化确认。
         try {
-            long now = millis(server);
-            if (request.hasClock()) {
-                return response.setNow(state.time(now)).build().toByteArray();
-            }
-            String dimension = request.hasQuery() ? request.getQuery().getDimensionId()
-                    : request.getRelease().getPosition().getDimensionId();
-            Identifier id = Identifier.tryParse(dimension);
-            if (id == null || !id.toString().equals(dimension)) {
-                return environmentFailure(response, FailureCode.INVALID_REQUEST);
-            }
-            var world = server.getWorld(RegistryKey.of(RegistryKeys.WORLD, id));
-            if (world == null) {
-                return environmentFailure(response, FailureCode.ENVIRONMENT_UNAVAILABLE);
-            }
-            if (request.hasQuery()) {
-                var query = request.getQuery();
-                var region = state.query(world, query.getBlockX(), query.getBlockZ(), now);
-                if (region != null) {
-                    response.setRegion(region);
-                }
-                return response.build().toByteArray();
-            }
-            if (request.getRelease().getReleaseId().isBlank() || !request.getRelease().hasPosition()
-                    || !request.getRelease().hasReleasedQi()) {
-                return environmentFailure(response, FailureCode.INVALID_REQUEST);
-            }
-            BodyProtobuf.fromInventory(request.getRelease().getReleasedQi());
-            return response.setReleased(state.release(request.getRelease(), world, now)).build().toByteArray();
+            return executeEnvironment(request, server, response);
         } catch (HumanErrors.HostRejected rejected) {
             return environmentFailure(response, rejected.code());
         } catch (dev.kizuna.meridian.error.MeridianErrors.IntakeRejected rejected) {
@@ -379,9 +361,53 @@ public final class HumanFabric implements ModInitializer {
         }
     }
 
+    private byte[] executeEnvironment(EnvironmentHostRequest request, MinecraftServer server,
+                                      EnvironmentHostResponse.Builder response) {
+        // 请求只受理和查询状态，写盘统一在 tick 末完成，避免逐笔阻塞主线程。
+        long now = millis(server);
+        if (request.hasClock()) {
+            return response.setNow(state.time(now)).build().toByteArray();
+        }
+        if (request.hasForgetRelease()) {
+            return response.setForgotten(state.forgetRelease(request.getForgetRelease())).build().toByteArray();
+        }
+        boolean queryingRegion = request.hasQuery();
+        var query = request.getQuery();
+        String dimension;
+        if (queryingRegion) {
+            dimension = query.getDimensionId();
+        } else {
+            dimension = request.getRelease().getPosition().getDimensionId();
+        }
+        var world = environmentWorld(server, dimension);
+        if (queryingRegion) {
+            var region = state.query(world, query.getBlockX(), query.getBlockZ(), now);
+            if (region != null) {
+                response.setRegion(region);
+            }
+            return response.build().toByteArray();
+        }
+        var released = state.release(request.getRelease(), world, now);
+        return response.setReleased(released).build().toByteArray();
+    }
+
     private static byte[] environmentFailure(EnvironmentHostResponse.Builder response, FailureCode code) {
         // 统一返回框架真实失败码，调用方无需解析异常文案。
-        return response.setFailure(RequestFailure.newBuilder().setCode(code)).build().toByteArray();
+        var failure = RequestFailure.newBuilder().setCode(code).build();
+        return response.setFailure(failure).build().toByteArray();
+    }
+
+    private static net.minecraft.server.world.ServerWorld environmentWorld(MinecraftServer server, String dimension) {
+        // 非法或不存在的维度必须明确拒绝，不能当作没有区域接收释放。
+        Identifier id = Identifier.tryParse(dimension);
+        if (id == null || !id.toString().equals(dimension)) {
+            throw HumanErrors.hostRejected(FailureCode.INVALID_REQUEST);
+        }
+        var world = server.getWorld(RegistryKey.of(RegistryKeys.WORLD, id));
+        if (world == null) {
+            throw HumanErrors.hostRejected(FailureCode.ENVIRONMENT_UNAVAILABLE);
+        }
+        return world;
     }
 
     private byte[] health(byte[] payload) {
@@ -560,6 +586,7 @@ public final class HumanFabric implements ModInitializer {
             }
         }
         state.renewEnvironment(millis);
+        state.flushHandoffs(server.getSavePath(WorldSavePath.ROOT).resolve("data/meridian_human.dat"));
     }
 
     private void sendGathering(ServerPlayerEntity player, GatheringResponse response) {

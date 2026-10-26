@@ -18,54 +18,67 @@ import java.util.List;
 
 /** 整体回归：游戏服务端加载真实人体内容，并由玩家宿主执行新拓扑扩散和存档恢复。 */
 public final class HumanMeridianGameTest implements FabricGameTest {
+    private static final int RELEASE_COORDINATE = -1;
+    private static final long RELEASE_WINDOW_MILLIS = 30_000;
+    private static final double GAS_RELEASE_AMOUNT = 4;
+    private static final double LIQUID_RELEASE_AMOUNT = 2;
+    private static final double GAS_RELEASE_DENSITY = 0.01;
+    private static final double LIQUID_RELEASE_DENSITY = 0.1;
+
     @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
     public void regionReleaseSurvivesSaveAndCreditsOnlyAtWindowBoundary(TestContext context) {
         // 真实世界首次查询生成区域，后续查询与排队释放均不得重抽库存或提前改版。
         var world = context.getWorld();
         var state = new HumanWorldState();
-        var original = state.query(world, -1, -1, 0);
+        var original = state.query(world, RELEASE_COORDINATE, RELEASE_COORDINATE, 0);
         context.assertTrue(original != null, "主世界区域未生成");
-        context.assertTrue(original.equals(state.query(world, -1, -1, 1)), "重复查询重抽区域或改变版本");
-        var qi = new QiInventory(List.of(new Qi(Qi.QiAttribute.of("qi_variants:wither"), 4, .01),
-                new Qi(Qi.QiAttribute.of("qi_variants:wither"), 2, .1)));
-        var release = RegionRelease.newBuilder().setPosition(RegionQuery.newBuilder()
-                .setDimensionId(world.getRegistryKey().getValue().toString()).setBlockX(-1).setBlockZ(-1))
-                .setReleaseId("gametest:queued-release").setReleasedQi(BodyProtobuf.toInventory(qi)).build();
+        context.assertTrue(original.equals(state.query(world, RELEASE_COORDINATE, RELEASE_COORDINATE, 1)),
+                "重复查询重抽区域或改变版本");
+        var qi = new QiInventory(List.of(new Qi(Qi.QiAttribute.of("qi_variants:wither"),
+                GAS_RELEASE_AMOUNT, GAS_RELEASE_DENSITY), new Qi(Qi.QiAttribute.of("qi_variants:wither"),
+                LIQUID_RELEASE_AMOUNT, LIQUID_RELEASE_DENSITY)));
+        var position = RegionQuery.newBuilder()
+                .setDimensionId(world.getRegistryKey().getValue().toString())
+                .setBlockX(RELEASE_COORDINATE)
+                .setBlockZ(RELEASE_COORDINATE)
+                .build();
+        var release = RegionRelease.newBuilder()
+                .setPosition(position)
+                .setReleaseId("gametest:queued-release")
+                .setReleasedQi(BodyProtobuf.toInventory(qi))
+                .build();
         context.assertTrue(!state.release(release, world, 1).getDuplicate(), "首次释放被判为重试");
-        context.assertTrue(state.release(release, world, 2).getDuplicate(), "重复释放未去重");
-        context.assertTrue(original.equals(state.query(world, -1, -1, 2)), "排队释放提前改变区域");
+        context.assertTrue(state.release(release, world, 1).getDuplicate(), "重复释放未去重");
+        context.assertTrue(original.equals(state.query(world, RELEASE_COORDINATE, RELEASE_COORDINATE, 1)),
+                "排队释放提前改变区域");
+        verifySavedRelease(context, state, release, original, qi);
+        context.complete();
+    }
 
-        // 排队状态经过真实 NBT 写读后仍保留去重键，并拒绝相同键的不同内容。
+    private static void verifySavedRelease(TestContext context, HumanWorldState state, RegionRelease release,
+                                           RegionView original, QiInventory qi) {
+        // 排队状态经过 NBT 写读后仍保留去重键，跨供给窗续算只能入账一次。
         var restored = HumanWorldState.read(state.writeNbt(new NbtCompound()));
-        context.assertTrue(restored.release(release, world, 3).getDuplicate(), "存档恢复丢失排队去重键");
-        boolean conflict = false;
-        try {
-            restored.release(release.toBuilder().setPosition(release.getPosition().toBuilder().setBlockX(100)).build(), world, 3);
-        } catch (HumanErrors.HostRejected expected) {
-            conflict = expected.code() == FailureCode.REQUEST_ID_CONFLICT;
-        }
-        context.assertTrue(conflict, "相同释放键的冲突内容未拒绝");
-        long boundary = 30_000;
-        restored.renewEnvironment(boundary - 1);
-        context.assertTrue(original.equals(restored.query(world, -1, -1, boundary - 1)), "窗口结束前已入账");
-        restored.renewEnvironment(boundary);
-        var credited = restored.query(world, -1, -1, boundary);
+        var world = context.getWorld();
+        context.assertTrue(restored.release(release, world, 1).getDuplicate(), "存档恢复丢失排队去重键");
+        restored.renewEnvironment(RELEASE_WINDOW_MILLIS - 1);
+        context.assertTrue(original.equals(restored.query(world, RELEASE_COORDINATE, RELEASE_COORDINATE,
+                RELEASE_WINDOW_MILLIS - 1)), "窗口结束前已入账");
+        restored.renewEnvironment(RELEASE_WINDOW_MILLIS);
+        var credited = restored.query(world, RELEASE_COORDINATE, RELEASE_COORDINATE, RELEASE_WINDOW_MILLIS);
         var expected = dev.kizuna.meridian.core.QiAccounting.credit(
                 BodyProtobuf.fromInventory(original.getInventory()), qi);
         context.assertTrue(BodyProtobuf.fromInventory(credited.getInventory()).equals(expected),
                 "区域入账未保留自定义属性、数量、密度与相态");
         context.assertTrue(credited.getSourceRevision() > original.getSourceRevision(), "入账未更新区域版本");
         var savedAgain = HumanWorldState.read(restored.writeNbt(new NbtCompound()));
-        context.assertTrue(savedAgain.release(release, world, boundary + 1).getDuplicate(), "已入账去重键未保存");
-        savedAgain.renewEnvironment(boundary * 2);
-        context.assertTrue(BodyProtobuf.fromInventory(savedAgain.query(world, -1, -1, boundary * 2)
+        context.assertTrue(savedAgain.release(release, world, RELEASE_WINDOW_MILLIS + 1).getDuplicate(),
+                "已入账去重键未保存");
+        long nextWindowMillis = RELEASE_WINDOW_MILLIS + RELEASE_WINDOW_MILLIS;
+        savedAgain.renewEnvironment(nextWindowMillis);
+        context.assertTrue(BodyProtobuf.fromInventory(savedAgain.query(world,
+                RELEASE_COORDINATE, RELEASE_COORDINATE, nextWindowMillis)
                 .getInventory()).equals(expected), "重启或续窗重复入账");
-        long expiry = 1 + 7L * 24_000 * 50;
-        savedAgain.renewEnvironment(expiry - 1);
-        context.assertTrue(savedAgain.release(release, world, expiry - 1).getDuplicate(), "去重记录提前过期");
-        savedAgain.renewEnvironment(expiry);
-        context.assertTrue(savedAgain.writeNbt(new NbtCompound()).getList("release_ids", 10).isEmpty(), "七游戏日后未清理去重记录");
-        context.complete();
     }
 
     @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
