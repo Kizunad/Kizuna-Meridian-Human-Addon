@@ -5,9 +5,11 @@
   "name": "Meridian Human Integration Test",
   "environment": "*",
   "entrypoints": {
+    "meridian_technique_catalog": ["dev.kizuna.meridian.human.fabric.HumanTechniqueTestCatalog"],
     "fabric-gametest": [
       "dev.kizuna.meridian.human.fabric.HumanMeridianGameTest",
-      "dev.kizuna.meridian.human.fabric.HumanReleasePersistenceGameTest"
+      "dev.kizuna.meridian.human.fabric.HumanReleasePersistenceGameTest",
+      "dev.kizuna.meridian.human.fabric.HumanTechniqueGameTest"
     ]
   }
 }

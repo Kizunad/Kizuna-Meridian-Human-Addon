@@ -21,6 +21,7 @@
 - [最基础的聚气](Gathering.md)
 - [游炁修炼与开脉要求](Cultivation.md)
 - [依赖、构建与宿主接入](Integration.md)
+- [玩家功法宿主](Technique-Host.md)
 - [人体模型与空间位置](Presentation.md)
 
 ## 接下来的边界

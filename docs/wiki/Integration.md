@@ -1,5 +1,14 @@
 # 依赖、构建与宿主接入
 
+## 玩家功法库依赖
+
+Human 的玩家施放宿主硬依赖相邻 `Kizuna-Meridian-Technique-Framework`。
+纯 Java `server` 与其共享协议通过 Gradle composite 接入，可用 `-PmeridianTechniqueDir=../目录`
+指定相邻源码位置；Fabric 入口使用该仓库本地构建的安装 JAR。
+先在功法库运行 `./gradlew build`，再构建 Human；功法库也必须安装到服务端。
+Human 不携带具体功法目录，不复制协议或新增战斗 UI 频道。
+接线、时间、幂等、释放归位和吐纳占用规则见[玩家功法宿主](Technique-Host.md)。
+
 ## 可信区域环境服务
 
 服务端附属通过 Fabric entrypoint `meridian_environment_host` 获取服务对象，再反射调用公开的 `exchange(byte[])`，返回值为 `byte[]`。Human 内部绑定使用 `java.util.function.Function<byte[], byte[]>`；调用方不依赖 Human Java 接口。该服务不注册客户端网络频道，所有操作必须在服务器主线程调用。

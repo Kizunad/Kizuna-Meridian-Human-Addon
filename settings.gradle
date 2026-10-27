@@ -18,3 +18,11 @@ includeBuild(frameworkDirectory) {
         substitute module('local.meridian:server') using project(':server')
     }
 }
+
+// 功法协议与纯 Java 服务直接从相邻仓库构建，Fabric 入口使用其本地安装产物。
+includeBuild(providers.gradleProperty('meridianTechniqueDir')
+        .getOrElse('../Kizuna-Meridian-Technique-Framework')) {
+    dependencySubstitution {
+        substitute module('local.meridian.technique:server') using project(':server')
+    }
+}

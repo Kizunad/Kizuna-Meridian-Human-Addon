@@ -4,6 +4,8 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 
 /** 人体内容工具的错误集中定义；身体业务拒绝仍由框架协议表达。 */
 public final class HumanErrors {
+    public static final String INVALID_TECHNIQUE_OPERATION = "功法宿主操作无效";
+    public static final String TECHNIQUE_HOST_FAILED = "功法宿主请求处理失败";
     public static final String ENVIRONMENT_HOST_FAILED = "环境宿主请求处理失败";
     public static final String SAVE_FAILED = "人体世界存档写入失败，已保留待保存状态";
     public static final String ENVIRONMENT_CREDIT_FAILED = "环境待入账失败，已保留队列等待下次续窗";

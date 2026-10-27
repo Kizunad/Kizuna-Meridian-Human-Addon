@@ -4,45 +4,49 @@ import dev.kizuna.meridian.core.Anatomy;
 import dev.kizuna.meridian.core.BodyId;
 import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.core.BodyTimeAdvancement;
-import dev.kizuna.meridian.core.QiInventory;
 import dev.kizuna.meridian.core.Qi;
+import dev.kizuna.meridian.core.QiInventory;
 import dev.kizuna.meridian.core.TissueCapabilities;
+import dev.kizuna.meridian.human.pb.CultivationMessages.CultivationInput;
 import dev.kizuna.meridian.human.server.HumanBirth;
 import dev.kizuna.meridian.human.server.HumanContent;
+import dev.kizuna.meridian.human.server.HumanCultivation;
+import dev.kizuna.meridian.human.server.HumanCultivationNumbers;
 import dev.kizuna.meridian.human.server.HumanDamage;
 import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.human.server.HumanOpening;
-import dev.kizuna.meridian.human.server.HumanCultivation;
-import dev.kizuna.meridian.human.server.HumanCultivationNumbers;
-import dev.kizuna.meridian.human.pb.CultivationMessages.CultivationInput;
-import dev.kizuna.meridian.protocol.pb.ActivityMessages;
-import dev.kizuna.meridian.protocol.pb.OpeningMessages;
-import dev.kizuna.meridian.protocol.BodyProtobuf;
-import dev.kizuna.meridian.protocol.MeridianProtocol;
-import dev.kizuna.meridian.protocol.pb.AddonMessages.*;
-import dev.kizuna.meridian.protocol.pb.BodyMessages;
-import dev.kizuna.meridian.protocol.pb.GatheringMessages.*;
-import dev.kizuna.meridian.protocol.pb.BreathingMessages.*;
-import dev.kizuna.meridian.protocol.pb.MeridianMessages.*;
-import dev.kizuna.meridian.server.AddonRegistry;
-import dev.kizuna.meridian.server.BodyCommandHandler;
-import dev.kizuna.meridian.server.InMemoryBodyStore;
-import dev.kizuna.meridian.server.GatheringSession;
-import dev.kizuna.meridian.server.BodyTimeSource;
-import dev.kizuna.meridian.server.OpeningSession;
 import dev.kizuna.meridian.progression.ProgressionProtocol;
 import dev.kizuna.meridian.progression.pb.ProgressionMessages.PlayerProgress;
+import dev.kizuna.meridian.protocol.BodyProtobuf;
+import dev.kizuna.meridian.protocol.MeridianProtocol;
+import dev.kizuna.meridian.protocol.pb.ActivityMessages;
+import dev.kizuna.meridian.protocol.pb.AddonMessages.*;
+import dev.kizuna.meridian.protocol.pb.BodyMessages;
+import dev.kizuna.meridian.protocol.pb.BreathingMessages.*;
+import dev.kizuna.meridian.protocol.pb.GatheringMessages.*;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.*;
+import dev.kizuna.meridian.protocol.pb.OpeningMessages;
+import dev.kizuna.meridian.server.AddonRegistry;
+import dev.kizuna.meridian.server.BodyCommandHandler;
+import dev.kizuna.meridian.server.BodyTimeSource;
+import dev.kizuna.meridian.server.GatheringSession;
+import dev.kizuna.meridian.server.InMemoryBodyStore;
+import dev.kizuna.meridian.server.OpeningSession;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostRequest;
+import dev.kizuna.meridian.technique.server.TechniqueErrors;
+import dev.kizuna.meridian.technique.server.TechniqueHost;
+import dev.kizuna.meridian.technique.server.TechniqueRecoveryHost;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
-import java.util.HashSet;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /** 单玩家的可信运动编排；账本、占用与恢复只由框架命令处理器修改。 */
-final class HumanPlayerBody {
+final class HumanPlayerBody implements TechniqueRecoveryHost {
     static final String MOVEMENT_INSTANCE = "human.minecraft.locomotion";
     static final double WALK_ENDURANCE_SECONDS = 300;
     static final double SPRINT_ENDURANCE_SECONDS = 75;
@@ -96,6 +100,10 @@ final class HumanPlayerBody {
         commands = new BodyCommandHandler<>((caller, command) -> {
             // 仅内部调度身份可提交命令；网络入口不暴露这些资源变更请求。
             if (caller.equals(id.value()) && command.getBodyId().equals(id.value())) {
+                return Optional.of(caller);
+            }
+            if (caller.equals(TechniqueHost.CALLER_ID) && command.hasExecuteActivity()
+                    && command.getBodyId().equals(id.value())) {
                 return Optional.of(caller);
             }
             return Optional.empty();
@@ -298,7 +306,8 @@ final class HumanPlayerBody {
         scheduleNextBoundary();
     }
 
-    BodySnapshot snapshot() {
+    @Override
+    public BodySnapshot snapshot() {
         // 暴露不可变权威事实供保存和展示，不提供外部写入入口。
         return store.find(id).orElseThrow();
     }
@@ -471,6 +480,49 @@ final class HumanPlayerBody {
         if (response.hasFailure()) {
             throw HumanErrors.hostRejected(response.getFailure().getCode());
         }
+    }
+
+    ResponseEnvelope applyTechnique(long millis, TechniqueHostRequest request) {
+        // 固定可信身份保留功法原始请求与预期版本，释放沿现有世界归位回调处理。
+        settle(millis);
+        BodyCommand command = BodyCommand.newBuilder()
+                .setBodyId(id.value())
+                .setExpectedRevision(request.getExpectedRevision())
+                .setExecuteActivity(request.getActivity())
+                .build();
+        RequestEnvelope envelope = RequestEnvelope.newBuilder()
+                .setProtocolVersion(MeridianProtocol.VERSION)
+                .setRequestId(request.getRequestId())
+                .setBodyCommand(command)
+                .build();
+        byte[] payload = MeridianProtocol.encodeRequest(envelope);
+        ResponseEnvelope response = MeridianProtocol.decodeResponse(captureRelease(
+                () -> commands.handleActivity(TechniqueHost.CALLER_ID, payload)));
+        scheduleNextBoundary();
+        return response;
+    }
+
+    @Override
+    public long submitRecovery(String requestId, BodyCommand command) {
+        // 恢复只接收功法服务生成的命令，可信进度与活动仍经过 Framework 授权和版本校验。
+        RequestEnvelope envelope = RequestEnvelope.newBuilder()
+                .setProtocolVersion(MeridianProtocol.VERSION)
+                .setRequestId(requestId)
+                .setBodyCommand(command)
+                .build();
+        byte[] payload = MeridianProtocol.encodeRequest(envelope);
+        byte[] result;
+        if (command.hasSetAddonProgress()) {
+            result = commands.handleAddonProgress(id.value(), payload);
+        } else {
+            result = captureRelease(() -> commands.handleActivity(TechniqueHost.CALLER_ID, payload));
+        }
+        ResponseEnvelope response = MeridianProtocol.decodeResponse(result);
+        if (response.hasFailure()) {
+            throw new TechniqueErrors.HostRejected(response.getFailure().getCode());
+        }
+        scheduleNextBoundary();
+        return response.getCommandCommitted().getRevision();
     }
 
     String diffusionEntry() {

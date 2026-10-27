@@ -1,37 +1,39 @@
 package dev.kizuna.meridian.human.fabric;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
-import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.EnvironmentHostRequest;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.EnvironmentHostResponse;
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.RegistryKeys;
-import dev.kizuna.meridian.protocol.BodyProtobuf;
-import dev.kizuna.meridian.protocol.pb.PresentationMessages.BodyViewUpdate;
-import dev.kizuna.meridian.protocol.pb.PresentationMessages.BodyViewRequest;
-import dev.kizuna.meridian.progression.fabric.ProgressionFabric;
-import dev.kizuna.meridian.progression.server.ProgressionStore;
-import dev.kizuna.meridian.progression.pb.ProgressionMessages.PlayerProgress;
-import dev.kizuna.meridian.protocol.pb.GatheringMessages.*;
-import dev.kizuna.meridian.protocol.GatheringProtobuf;
-import dev.kizuna.meridian.protocol.MeridianProtocol;
-import dev.kizuna.meridian.protocol.HealthHostProtobuf;
-import dev.kizuna.meridian.protocol.pb.HealthHostMessages.HealthHostResponse;
-import dev.kizuna.meridian.protocol.OpeningProtobuf;
-import dev.kizuna.meridian.protocol.pb.OpeningMessages.MeridianOpeningRequest;
-import dev.kizuna.meridian.protocol.pb.PresentationMessages.MeridianOpeningOptions;
 import dev.kizuna.meridian.human.server.HumanContent;
+import dev.kizuna.meridian.human.server.HumanErrors;
+import dev.kizuna.meridian.progression.fabric.ProgressionFabric;
+import dev.kizuna.meridian.progression.pb.ProgressionMessages.PlayerProgress;
+import dev.kizuna.meridian.progression.server.ProgressionStore;
+import dev.kizuna.meridian.protocol.BodyProtobuf;
+import dev.kizuna.meridian.protocol.GatheringProtobuf;
+import dev.kizuna.meridian.protocol.HealthHostProtobuf;
+import dev.kizuna.meridian.protocol.MeridianProtocol;
+import dev.kizuna.meridian.protocol.OpeningProtobuf;
+import dev.kizuna.meridian.protocol.pb.GatheringMessages.*;
+import dev.kizuna.meridian.protocol.pb.HealthHostMessages.HealthHostResponse;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.RequestFailure;
+import dev.kizuna.meridian.protocol.pb.OpeningMessages.MeridianOpeningRequest;
+import dev.kizuna.meridian.protocol.pb.PresentationMessages.BodyViewRequest;
+import dev.kizuna.meridian.protocol.pb.PresentationMessages.BodyViewUpdate;
+import dev.kizuna.meridian.protocol.pb.PresentationMessages.MeridianOpeningOptions;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerEntityWorldChangeEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
+import net.fabricmc.fabric.api.event.Event;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -41,16 +43,17 @@ import net.minecraft.util.WorldSavePath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.nio.file.Files;
 
 /** Fabric 宿主绑定；集成服务器与专服走相同的服务端权威路径。 */
 public final class HumanFabric implements ModInitializer {
     private static final Logger LOG = LoggerFactory.getLogger("meridian_human_host");
+    private static final Identifier DISCONNECT_CLEANUP = new Identifier("meridian_human", "disconnect_cleanup");
     private static final Identifier BODY_VIEW = new Identifier("meridian", "body_view");
     private static final Identifier BODY_VIEW_REQUEST = new Identifier("meridian", "body_view_request");
     private static final Identifier GATHERING_REQUEST = new Identifier("meridian", "gathering_request");
@@ -114,11 +117,24 @@ public final class HumanFabric implements ModInitializer {
             if (state != null) {
                 state.bind(server);
             }
+            HumanTechniqueHost.bind(server, state, failed::contains, sentRevisions::remove);
         });
+        ServerLifecycleEvents.SERVER_STOPPED.register(server -> HumanTechniqueHost.unbind());
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> join(handler.player, server));
-        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> leave(handler.player, server));
+        // 功法库在默认阶段取消当前施放，Human 随后才结束自己的动作并撤销认领。
+        ServerPlayConnectionEvents.DISCONNECT.addPhaseOrdering(Event.DEFAULT_PHASE, DISCONNECT_CLEANUP);
+        ServerPlayConnectionEvents.DISCONNECT.register(DISCONNECT_CLEANUP,
+                (handler, server) -> leave(handler.player, server));
         ServerEntityWorldChangeEvents.AFTER_PLAYER_CHANGE_WORLD.register((player, origin, destination) -> resetGathering(player));
         ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> resetGathering(newPlayer));
+        ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
+            // 原版外部死亡先结束施放，允许后续死亡确认保留已经清理的功法进度。
+            if (entity instanceof ServerPlayerEntity player && state != null
+                    && !failed.contains(player.getUuid())) {
+                HumanTechniqueHost.beforeDeath(player);
+            }
+            return true;
+        });
         ServerTickEvents.END_SERVER_TICK.register(this::tick);
         ServerPlayNetworking.registerGlobalReceiver(BODY_VIEW_REQUEST, (server, player, handler, buffer, sender) -> {
             // 只有授权连接可订阅内部操作视图，拒绝结果仍沿同一 Protobuf 通道返回。
@@ -228,7 +244,8 @@ public final class HumanFabric implements ModInitializer {
                 }
             });
         });
-        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+        ServerLifecycleEvents.SERVER_STOPPING.addPhaseOrdering(Event.DEFAULT_PHASE, DISCONNECT_CLEANUP);
+        ServerLifecycleEvents.SERVER_STOPPING.register(DISCONNECT_CLEANUP, server -> {
             // 保存前结清仍在线玩家，停止移动占用；不能把断线后的整段时间当作跑步。
             for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
                 leave(player, server);
@@ -296,6 +313,7 @@ public final class HumanFabric implements ModInitializer {
                 throw HumanErrors.invalid(HumanErrors.INVALID_SAVED_BODY);
             }
             HumanPlayerBody body = state.join(player, millis(server));
+            HumanTechniqueHost.reconnect(player);
             state.selectEnvironment(player, millis(server));
             body.connectGathering(millis(server), response -> sendGathering(player, response));
             observers.put(player.getUuid(), new HumanMovementObserver());
@@ -456,6 +474,7 @@ public final class HumanFabric implements ModInitializer {
                     animations.stop(player);
                 }
             }
+            HumanTechniqueHost.recoverIfDead(player);
             return HealthHostProtobuf.encodeResponse(response.setBody(BodyProtobuf.toMessage(body.snapshot())).build());
         } catch (RuntimeException failure) {
             fail(player, failure);
@@ -500,6 +519,7 @@ public final class HumanFabric implements ModInitializer {
         introspecting.remove(player.getUuid());
         gatheringPackets.remove(player.getUuid());
         animations.stop(player);
+        HumanTechniqueHost.disconnect(player.getUuid());
     }
 
     private void resetGathering(ServerPlayerEntity player) {
@@ -548,6 +568,7 @@ public final class HumanFabric implements ModInitializer {
                 state.selectEnvironment(player, millis);
                 HumanPlayerBody.Motion motion = observer.sample(player);
                 boolean changed = body.observe(millis, motion, observer.moved());
+                HumanTechniqueHost.recoverIfDead(player);
                 if (changed || breathingChanged) {
                     animations.synchronize(player, body.motion(), body.breathingActive(), body.breathingAutomatic());
                 }

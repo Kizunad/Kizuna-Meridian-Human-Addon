@@ -20,6 +20,11 @@ dependencies {
     implementation files('../../Kizuna-Meridian-Progression-Addon/shared/build/libs/kizuna-meridian-progression-addon-shared-0.1.0-SNAPSHOT.jar',
             '../../Kizuna-Meridian-Progression-Addon/server/build/libs/kizuna-meridian-progression-addon-server-0.1.0-SNAPSHOT.jar')
     implementation project(':server')
+    implementation 'local.meridian.technique:server'
+    def techniqueDirectory = rootProject.file(providers.gradleProperty('meridianTechniqueDir')
+            .getOrElse('../Kizuna-Meridian-Technique-Framework'))
+    modImplementation files(new File(techniqueDirectory,
+            'fabric/build/libs/kizuna-meridian-technique-framework-fabric-0.1.0-SNAPSHOT.jar'))
     // 人体资源包的编译期协议已由下方服务端库提供，避免 Loom 再解析一份客户端协议副本。
     modImplementation(project(':client')) { transitive = false }
     // 独立安装产物携带其实际运行依赖；源码与 Protobuf 仍只从各自仓库构建。

@@ -99,7 +99,51 @@ final class HumanAnatomy {
         addOrgan(body, "bladder", "膀胱", "pelvis", 10);
 
         addMeridians(body);
+        addModuleTags(body);
         return body.build();
+    }
+
+    private static void addModuleTags(BodyStructure.Builder body) {
+        // 标签按模块身份与开脉分层生成；奇经只参与层标签，不归入手经或足经。
+        for (var meridian : body.getMeridiansBuilderList()) {
+            String id = meridian.getId();
+            if (id.endsWith("_meridian")) {
+                String kind = id.substring(id.indexOf('_') + 1);
+                if (List.of("lung_meridian", "large_intestine_meridian", "heart_meridian",
+                        "small_intestine_meridian", "pericardium_meridian", "triple_burner_meridian")
+                        .contains(kind)) {
+                    meridian.addTags("human:hand_meridian");
+                } else {
+                    meridian.addTags("human:foot_meridian");
+                }
+            }
+            if (HumanOpening.minimumRealm(id) == Realm.WANDERING_QI) {
+                meridian.addTags("human:layer_wandering_qi");
+            }
+        }
+        addMuscleTags(body);
+        for (var organ : body.getOrgansBuilderList()) {
+            if (organ.getKind().equals("human:lung")) {
+                organ.addTags("human:breathing");
+            }
+        }
+    }
+
+    private static void addMuscleTags(BodyStructure.Builder body) {
+        // 左右实例共用同一用途分类，膈肌与肺共同声明呼吸能力。
+        for (var tissue : body.getTissuesBuilderList()) {
+            String id = tissue.getId();
+            if (id.equals("diaphragm")) {
+                tissue.addTags("human:breathing");
+            } else if (tissue.getKind().equals("human:muscle")) {
+                String kind = id.substring(id.indexOf('_') + 1);
+                if (List.of("biceps_brachii", "triceps_brachii", "brachioradialis").contains(kind)) {
+                    tissue.addTags("human:arm_muscle");
+                } else if (List.of("rectus_femoris", "gastrocnemius", "gluteus_maximus").contains(kind)) {
+                    tissue.addTags("human:leg_muscle");
+                }
+            }
+        }
     }
 
     private static void addBone(BodyStructure.Builder body, String id, String name, String partId) {
