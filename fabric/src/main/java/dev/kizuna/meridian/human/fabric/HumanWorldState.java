@@ -1,53 +1,59 @@
 package dev.kizuna.meridian.human.fabric;
 
-import dev.kizuna.meridian.human.server.HumanErrors;
-import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionView;
-import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionRelease;
-import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.ReleaseResult;
-import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.ForgetReleaseResult;
-import dev.kizuna.meridian.core.QiAccounting;
-import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.ChunkPos;
-import dev.kizuna.meridian.protocol.BodyProtobuf;
-import dev.kizuna.meridian.protocol.MeridianProtocol;
-import dev.kizuna.meridian.protocol.pb.BodyMessages;
-import dev.kizuna.meridian.protocol.pb.MeridianMessages.CommandReceipt;
 import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.core.QiInventory;
 import dev.kizuna.meridian.environment.EnvironmentAbsorption;
 import dev.kizuna.meridian.environment.EnvironmentConfigLoader;
 import dev.kizuna.meridian.environment.EnvironmentQiRules;
 import dev.kizuna.meridian.environment.TerrainQiGenerator;
+import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.ForgetReleaseResult;
+import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionRelease;
+import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionView;
+import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.ReleaseResult;
+import dev.kizuna.meridian.human.server.HumanErrors;
+import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.EnvironmentProtobuf;
-import dev.kizuna.meridian.protocol.pb.EnvironmentMessages.*;
+import dev.kizuna.meridian.protocol.MeridianProtocol;
+import dev.kizuna.meridian.protocol.pb.BodyMessages;
+import dev.kizuna.meridian.protocol.pb.EnvironmentMessages.EnvironmentQiConfig;
+import dev.kizuna.meridian.protocol.pb.EnvironmentMessages.EnvironmentQiSource;
+import dev.kizuna.meridian.protocol.pb.EnvironmentMessages.EnvironmentSpace;
+import dev.kizuna.meridian.protocol.pb.EnvironmentMessages.EnvironmentSpaceKind;
+import dev.kizuna.meridian.protocol.pb.EnvironmentMessages.TerrainQiRegionRequest;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.CommandReceipt;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.server.InMemoryBodyStore;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtElement;
-import net.minecraft.nbt.NbtList;
 import net.minecraft.nbt.NbtHelper;
 import net.minecraft.nbt.NbtIo;
-import net.minecraft.world.PersistentState;
+import net.minecraft.nbt.NbtList;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
-import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.util.math.ChunkPos;
+import net.minecraft.world.PersistentState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
-import java.util.List;
-import java.util.HashSet;
-import java.util.Set;
-import java.nio.file.Files;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
-import net.minecraft.server.MinecraftServer;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 /** Minecraft 持久化容器只包装 Protobuf 字节，正文仍由框架负责定义和校验。 */
 final class HumanWorldState extends PersistentState {
-    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(HumanWorldState.class);
+    private static final Logger LOG = LoggerFactory.getLogger(HumanWorldState.class);
     private static final long WINDOW_MILLIS = 30_000;
     private static final int CHUNK_WIDTH_BLOCKS = 16;
     private static final int UNSAVED_TICK = -1;
@@ -130,7 +136,11 @@ final class HumanWorldState extends PersistentState {
             // 失败队列也须恢复，余额不一致留待执行时报告，不能让重启吞掉重试机会。
             for (BodySnapshot body : saved.bodies()) {
                 UUID playerId = UUID.fromString(body.id().value());
-                state.players.put(playerId, new HumanPlayerBody(body, store, saved.breathingActions().get(playerId)));
+                var restored = new HumanPlayerBody(body, store, saved.breathingActions().get(playerId));
+                state.players.put(playerId, restored);
+                if (restored.snapshot().revision() != body.revision()) {
+                    state.markDirty();
+                }
             }
             state.persistedReleaseIds.addAll(state.releaseIds.keySet());
             return state;
@@ -511,9 +521,13 @@ final class HumanWorldState extends PersistentState {
 
     private void creditPending(Set<String> due, long millis) {
         // 只在对应供给窗到期后入账；失败项保留原请求，继续等待下一个边界。
+        creditDefaultPending(due);
         var iterator = pendingCredits.iterator();
         while (iterator.hasNext()) {
             var pending = iterator.next();
+            if (pending.fromDefault()) {
+                continue;
+            }
             String sourceId = pending.sourceId();
             QiInventory qi = pending.qi();
             boolean defaultAccount = sourceId.isEmpty();
@@ -525,10 +539,6 @@ final class HumanWorldState extends PersistentState {
                 try {
                     if (defaultAccount) {
                         store.creditReleasedQi(qi);
-                    } else if (pending.fromDefault()) {
-                        // 共享账户已混合密度，按当前密度分取同量，不能拿旧密度直接扣款。
-                        QiInventory selectedQi = QiAccounting.select(store.environmentQi(), qi);
-                        store.transferReleasedToSource(sourceId, selectedQi);
                     } else {
                         store.creditEnvironmentSource(sourceId, qi);
                     }
@@ -538,6 +548,56 @@ final class HumanWorldState extends PersistentState {
                     // 失败项继续随世界保存并等待下一窗，不能阻断其他入账或吞掉余额不一致。
                     LOG.error(HumanErrors.ENVIRONMENT_CREDIT_FAILED + ": " + sourceId, failure);
                 }
+            }
+        }
+    }
+
+    private void creditDefaultPending(Set<String> due) {
+        // 所有区域共同划分唯一共享余额，不能等最后一笔失败后再单独猜测缺额。
+        var claims = new LinkedHashMap<ReleasedQiAllocation.Kind, List<ReleasedQiAllocation.Claim>>();
+        for (PendingCredit pending : pendingCredits) {
+            if (pending.fromDefault()) {
+                for (var qi : pending.qi().entries()) {
+                    claims.computeIfAbsent(ReleasedQiAllocation.Kind.of(qi), ignored -> new ArrayList<>())
+                            .add(new ReleasedQiAllocation.Claim(pending.sourceId(), qi));
+                }
+            }
+        }
+        for (var entries : claims.values()) {
+            try {
+                var plan = ReleasedQiAllocation.plan(store.environmentQi(), entries);
+                var transfers = new LinkedHashMap<String, QiInventory>();
+                var dueClaims = plan.stream().filter(claim -> due.contains(claim.sourceId())).toList();
+                for (var claim : dueClaims) {
+                    transfers.put(claim.sourceId(), new QiInventory(List.of(claim.qi())));
+                }
+                if (!transfers.isEmpty()) {
+                    store.transferReleasedToSources(transfers);
+                    dueClaims.forEach(this::removeDefaultCredit);
+                    markDirty();
+                }
+            } catch (RuntimeException failure) {
+                // 真正缺账保留对应相态属性的全部意图，其他种类与外部交接仍可入账。
+                LOG.error(HumanErrors.ENVIRONMENT_CREDIT_FAILED, failure);
+            }
+        }
+    }
+
+    private void removeDefaultCredit(ReleasedQiAllocation.Claim claim) {
+        // 只有整个批次提交成功才删除对应种类，其他属性和未到期区域继续保留。
+        var kind = ReleasedQiAllocation.Kind.of(claim.qi());
+        for (int index = 0; index < pendingCredits.size(); index++) {
+            var pending = pendingCredits.get(index);
+            if (pending.fromDefault() && pending.sourceId().equals(claim.sourceId())) {
+                var remaining = pending.qi().entries().stream()
+                        .filter(entry -> !ReleasedQiAllocation.Kind.of(entry).equals(kind)).toList();
+                if (remaining.isEmpty()) {
+                    pendingCredits.remove(index);
+                } else {
+                    pendingCredits.set(index, new PendingCredit(pending.sourceId(),
+                            new QiInventory(remaining), pending.fromDefault(), pending.releaseId()));
+                }
+                return;
             }
         }
     }

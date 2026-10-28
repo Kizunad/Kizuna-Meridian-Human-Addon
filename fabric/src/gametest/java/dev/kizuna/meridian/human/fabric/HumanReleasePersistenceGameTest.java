@@ -8,11 +8,13 @@ import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionRelea
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionView;
 import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
+import dev.kizuna.meridian.protocol.pb.BodyMessages;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtElement;
 import net.minecraft.nbt.NbtIo;
+import net.minecraft.nbt.NbtList;
 import net.minecraft.test.GameTest;
 import net.minecraft.test.TestContext;
 
@@ -32,6 +34,96 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
     private static final int CONFLICT_COORDINATE = 100;
     private static final double RELEASE_AMOUNT = 4;
     private static final double RELEASE_DENSITY = 0.01;
+    private static final int DISTANT_REGION_BLOCK = 1_000_000;
+    private static final double FIRST_SHARE = 0.1;
+    private static final double SECOND_SHARE = 0.2;
+    private static final double SHARED_RELEASE = 0.3;
+    private static final long HALF_WINDOW_MILLIS = WINDOW_MILLIS / 2;
+
+    private record RoundingFixture(HumanWorldState state, RegionView first, RegionView second) { }
+
+    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
+    public void crossRegionRoundingTailReturnsAndSurvivesReload(TestContext context) throws Exception {
+        // 旧存档的区域合并与共享账户采用不同求和顺序，最后一笔不能永远留在队列。
+        var fixture = roundingFixture(context, 0);
+        var restored = fixture.state();
+        restored.renewEnvironment(WINDOW_MILLIS);
+        var first = restored.query(context.getWorld(), 0, 0, WINDOW_MILLIS);
+        var second = restored.query(context.getWorld(), DISTANT_REGION_BLOCK, 0, WINDOW_MILLIS);
+        assertReturned(context, fixture.first(), first, FIRST_SHARE);
+        assertReturned(context, fixture.second(), second, SHARED_RELEASE - FIRST_SHARE);
+        var returned = restored.writeNbt(new NbtCompound());
+        context.assertTrue(returned.getList("pending_credits", NbtElement.COMPOUND_TYPE).isEmpty(),
+                "浮点尾差使跨区域归位永久滞留");
+        context.assertTrue(BodyProtobuf.fromInventory(BodyMessages.QiInventory
+                .parseFrom(returned.getByteArray("released_qi"))).entries().isEmpty(), "共享账户留下尾差");
+        var reloaded = HumanWorldState.read(returned);
+        reloaded.renewEnvironment(WINDOW_MILLIS * 2);
+        context.assertTrue(reloaded.writeNbt(new NbtCompound()).getList("pending_credits", NbtElement.COMPOUND_TYPE)
+                .isEmpty(), "重载恢复了已归位队列");
+        context.assertTrue(reloaded.query(context.getWorld(), 0, 0, WINDOW_MILLIS * 2).getInventory()
+                .equals(first.getInventory()), "重载重复向第一区域入账");
+        context.assertTrue(reloaded.query(context.getWorld(), DISTANT_REGION_BLOCK, 0, WINDOW_MILLIS * 2)
+                .getInventory().equals(second.getInventory()), "重载重复向第二区域入账");
+        context.complete();
+    }
+
+    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
+    public void roundingAllocationPreservesRegionWindowAndPendingAcrossReload(TestContext context) {
+        // 较晚创建的区域尚未到期时不能提前入账；重载后继续使用实际余额处理尾笔。
+        var fixture = roundingFixture(context, HALF_WINDOW_MILLIS);
+        fixture.state().renewEnvironment(WINDOW_MILLIS);
+        var first = fixture.state().query(context.getWorld(), 0, 0, WINDOW_MILLIS);
+        var second = fixture.state().query(context.getWorld(), DISTANT_REGION_BLOCK, 0, WINDOW_MILLIS);
+        assertReturned(context, fixture.first(), first, FIRST_SHARE);
+        context.assertTrue(second.getInventory().equals(fixture.second().getInventory()), "未到期区域提前入账");
+        var saved = fixture.state().writeNbt(new NbtCompound());
+        context.assertTrue(saved.getList("pending_credits", NbtElement.COMPOUND_TYPE).size() == 1,
+                "未到期区域的归位意图丢失");
+        var reloaded = HumanWorldState.read(saved);
+        long secondWindow = WINDOW_MILLIS + HALF_WINDOW_MILLIS;
+        reloaded.renewEnvironment(secondWindow);
+        var returnedSecond = reloaded.query(context.getWorld(), DISTANT_REGION_BLOCK, 0, secondWindow);
+        assertReturned(context, fixture.second(), returnedSecond, SHARED_RELEASE - FIRST_SHARE);
+        context.assertTrue(reloaded.writeNbt(new NbtCompound()).getList("pending_credits", NbtElement.COMPOUND_TYPE)
+                .isEmpty(), "跨窗重载后尾笔未能归位");
+        context.complete();
+    }
+
+    private static RoundingFixture roundingFixture(TestContext context, long secondCreatedAt) {
+        // 直接读取旧队列的 0.1 + 0.2 与账户 0.3，不用新分配规则构造期望数据。
+        var state = new HumanWorldState();
+        var first = state.query(context.getWorld(), 0, 0, 0);
+        var second = state.query(context.getWorld(), DISTANT_REGION_BLOCK, 0, secondCreatedAt);
+        var saved = state.writeNbt(new NbtCompound());
+        saved.putByteArray("released_qi", BodyProtobuf.toInventory(releaseQi(SHARED_RELEASE)).toByteArray());
+        var pending = new NbtList();
+        pending.add(defaultCredit(first.getSourceId(), FIRST_SHARE));
+        pending.add(defaultCredit(second.getSourceId(), SECOND_SHARE));
+        saved.put("pending_credits", pending);
+        return new RoundingFixture(HumanWorldState.read(saved), first, second);
+    }
+
+    private static void assertReturned(TestContext context, RegionView before, RegionView after, double amount) {
+        // 检查目的地完整库存，删除队列或清空默认账户不能冒充实际归位。
+        var expected = QiAccounting.credit(BodyProtobuf.fromInventory(before.getInventory()), releaseQi(amount));
+        context.assertTrue(BodyProtobuf.fromInventory(after.getInventory()).equals(expected), "区域实际入账不守恒");
+    }
+
+    private static QiInventory releaseQi(double amount) {
+        // 使用真实环境释放相态与属性，数量刻意保留十进制浮点边界。
+        return new QiInventory(List.of(new Qi(Qi.QiAttribute.of("qi_variants:wither"), amount, RELEASE_DENSITY)));
+    }
+
+    private static NbtCompound defaultCredit(String sourceId, double amount) {
+        // 与旧存档完全一致的排队格式，不调用新分配器准备预期值。
+        var entry = new NbtCompound();
+        entry.putString("source_id", sourceId);
+        entry.putString("kind", "default");
+        entry.putString("release_id", "");
+        entry.putByteArray("qi", BodyProtobuf.toInventory(releaseQi(amount)).toByteArray());
+        return entry;
+    }
 
     @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
     public void memoryAcceptanceAndDuplicateDoNotConfirmDisk(TestContext context) throws Exception {

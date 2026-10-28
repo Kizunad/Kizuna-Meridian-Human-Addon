@@ -94,9 +94,7 @@ final class HumanPlayerBody implements TechniqueRecoveryHost {
         targetMillis = accountedMillis;
         this.store = store;
         this.breathingActions.addAll(breathingActions);
-        BodyTimeSource<String> clock = (caller, body) -> TimeAdvancePlan.newBuilder()
-                .setTarget(BodyProtobuf.toTime(body.settledAt()).toBuilder().setElapsedMillis(targetMillis))
-                .setBiologicalSecondsPerSimulationSecond(1).setMode(timeMode).build();
+        BodyTimeSource<String> clock = (caller, body) -> timeAdvancePlan(body);
         commands = new BodyCommandHandler<>((caller, command) -> {
             // 仅内部调度身份可提交命令；网络入口不暴露这些资源变更请求。
             if (caller.equals(id.value()) && command.getBodyId().equals(id.value())) {
@@ -109,11 +107,49 @@ final class HumanPlayerBody implements TechniqueRecoveryHost {
             return Optional.empty();
         }, (caller, command, body) -> true, clock,
                 store, (caller, receipt, before, after) -> { /* 保存由宿主在事件完成后统一标脏。 */ },
-                CONTENT.recipes(), (caller, body, plan) -> Optional.ofNullable(sourceId), CONTENT.actions(), CONTENT.openings(),
+                CONTENT.recipes(), (caller, body, plan) -> Optional.ofNullable(sourceId),
+                CONTENT.actions(), CONTENT.openings(),
                 caller -> debugAuthorized && caller.equals(id.value()), new HumanDamage());
+        migrateModuleTags();
         if (!saved.addonProgress().containsKey(ProgressionProtocol.PROGRESS_KEY)) {
             // 新身体与尚无进度字段的存档都从未读开始，并写入同一身体事务。
             writeProgress(PlayerProgress.newBuilder().setSchemaVersion(ProgressionProtocol.PROGRESS_SCHEMA).build());
+        }
+    }
+
+    private TimeAdvancePlan timeAdvancePlan(BodySnapshot body) {
+        // 时钟保留身体的时域与世代，只推进当前宿主记录的目标时刻。
+        var target = BodyProtobuf.toTime(body.settledAt()).toBuilder()
+                .setElapsedMillis(targetMillis)
+                .build();
+        return TimeAdvancePlan.newBuilder()
+                .setTarget(target)
+                .setBiologicalSecondsPerSimulationSecond(1)
+                .setMode(timeMode)
+                .build();
+    }
+
+    private void migrateModuleTags() {
+        // 读档与首次登录共用可信入口；冲突不能覆盖，回执与其他身体状态一起保留。
+        BodySnapshot current = snapshot();
+        FillModuleTags tags = HumanModuleTagMigration.missingTags(current);
+        if (tags.getModulesCount() == 0) {
+            return;
+        }
+        var command = BodyCommand.newBuilder()
+                .setBodyId(id.value())
+                .setExpectedRevision(current.revision())
+                .setFillModuleTags(tags)
+                .build();
+        var request = RequestEnvelope.newBuilder()
+                .setProtocolVersion(MeridianProtocol.VERSION)
+                .setRequestId("human_module_tags_" + UUID.randomUUID())
+                .setBodyCommand(command)
+                .build();
+        var response = MeridianProtocol.decodeResponse(
+                commands.handleModuleTags(id.value(), MeridianProtocol.encodeRequest(request)));
+        if (response.hasFailure()) {
+            throw HumanErrors.hostRejected(response.getFailure().getCode());
         }
     }
 

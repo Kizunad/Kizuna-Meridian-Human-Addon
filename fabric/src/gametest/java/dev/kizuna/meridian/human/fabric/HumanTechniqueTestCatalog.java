@@ -94,6 +94,7 @@ public final class HumanTechniqueTestCatalog implements TechniqueRegistryEntrypo
                 .setMinimumCount(1)
                 .setMaximumCount(1)
                 .build();
+        var foot = footSlot();
         var phases = CastPhases.newBuilder()
                 .setWarmupMillis(WARMUP_MILLIS)
                 .setActiveMillis(ACTIVE_MILLIS)
@@ -107,10 +108,23 @@ public final class HumanTechniqueTestCatalog implements TechniqueRegistryEntrypo
                 .setMinimumRealm(Realm.WANDERING_QI)
                 .addSlots(source)
                 .addSlots(tissue)
+                .addSlots(foot)
                 .setCost(cost())
                 .setPhases(phases)
                 .setCooldownMillis(COOLDOWN_MILLIS)
                 .addEffects(movement())
+                .build();
+    }
+
+    private static TechniqueSlot footSlot() {
+        // 足经只用于核对人体标签，费用与开脉要求仍由手经承担。
+        return TechniqueSlot.newBuilder()
+                .setId("foot")
+                .setModule(ModuleKind.MERIDIAN)
+                .addTags("human:foot_meridian")
+                .setMinimumCount(1)
+                .setMaximumCount(1)
+                .setRequireOpened(false /* requireOpened */)
                 .build();
     }
 

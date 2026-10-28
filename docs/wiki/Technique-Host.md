@@ -7,6 +7,9 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 
 ## 身体与活动
 
+读档先经 Framework 授权命令补齐旧身体的空模块标签，再恢复玩家与功法认领；
+迁移保留实际构型与历史回执，成功后标脏保存。非空冲突拒绝而不覆盖，细则见[人体定义](Human-Definition.md)。
+
 所有操作在服务器主线程执行，其他线程返回 `ACCESS_DENIED`。`inspect` 先结算身体到主世界累计 tick
 乘以 50 毫秒，与 Human 其他入口使用相同时钟；返回的 `BodySnapshot.settled_at` 含身体时刻。
 
@@ -16,7 +19,7 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 操作完成后标脏，并使既有身体视图按原来的 tick 推送规则刷新，不建立独立身体缓存。
 
 起手释放先进入 Store 默认释放账户，再通过现有 `captureRelease` 回调按玩家当时位置排队。
-30 秒供给窗边界用 `transferReleasedToSource` 扣默认账户、贷记原区域；重载与重复请求不重复归位。
+30 秒供给窗边界用 `transferReleasedToSources` 批量扣默认账户、贷记原区域；重载与重复请求不重复归位。
 非主世界没有来源时保留在默认账户。此流程与死亡、开脉和加工损耗共用
 [区域环境服务](Environment-Host.md)及其存档规则。
 
@@ -63,4 +66,11 @@ Framework 尚无复活规则，原版重生不会创建新身体或恢复 HP；�
 `HumanTechniqueGameTest` 使用经过真实登录、频道注册和断线事件的服务端测试玩家，
 覆盖在线认领、身体时钟、版本冲突、持久活动重放、冲量方向与去重、速度包、未知表现、
 学习命令到收势、释放归位、断线不退费、重新认领前清理残留施放及吐纳共享组织。
+旧身体回归在服务器启动读档前，将专用玩家的无标签身体写入真实 `meridian_human.dat`，
+由正式宿主加载后真实登录，核对标签及保存重载；再走正式学习命令与功法服务，
+施放同时绑定手经和足经的测试功法。夹具保留世界中其他玩家与区域数据。
+释放归位曾使 `commandLearnCastFinishAndReleasedQiReturnsOnce` 偶发失败：九笔 `0.001` 起手释放
+按三个区域分组后，最后一区域意图为 `0.0010000000000000009`，逐区域扣转只剩 `0.001`，
+被严格余额校验拒绝。相同真实施放输入已验证修复前失败、修复后归位清空；
+捕获数值、跨区域尾差与跨窗重载分别由分配回归和持久化 GameTest 保护。
 测试功法只在 GameTest 源集注册，不进入发布产物。此验证不代替真实客户端移动手感与多人压力验收。

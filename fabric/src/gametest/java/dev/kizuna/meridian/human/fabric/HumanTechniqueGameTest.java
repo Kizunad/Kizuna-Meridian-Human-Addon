@@ -63,6 +63,27 @@ public final class HumanTechniqueGameTest implements FabricGameTest {
     private static final String OPEN_MERIDIAN = "left_large_intestine_meridian";
 
     @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
+    public void legacyBodyLoadsMigratesAndCastsWithHandAndFootBindings(TestContext context) {
+        // 启动前准备的真实旧文件由正式宿主加载；登录、命令学习和施放不替换任何服务。
+        try (var fixture = new HumanTechniqueTestPlayer(context, HumanLegacyBodyTestBootstrap.PLAYER_ID)) {
+            var body = fixture.body();
+            context.assertTrue(HumanModuleTagMigration.missingTags(body.snapshot()).getModulesCount() == 0,
+                    "旧身体仍然缺少人体标签");
+            context.assertTrue(body.snapshot().revision() > HumanLegacyBodyTestBootstrap.legacyBody.revision(),
+                    "加载旧身体未经过标签补齐命令");
+            var persisted = HumanWorldState.read(fixture.state().writeNbt(new NbtCompound()));
+            context.assertTrue(persisted.find(fixture.player.getUuid()).snapshot().equals(body.snapshot()),
+                    "标签迁移未持久保存或重载重复增加版本");
+            context.assertTrue(body.completeOpening(now(fixture), OPEN_MERIDIAN)
+                    == FailureCode.FAILURE_CODE_UNSPECIFIED, "迁移后开脉失败");
+            learn(context, fixture);
+            var outcome = cast(fixture, "legacy_tags");
+            context.assertTrue(outcome.getPhase() == CastPhase.WARMUP, "迁移后手足经绑定施放失败：" + outcome);
+        }
+        context.complete();
+    }
+
+    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
     public void claimsOnlyOnlinePlayersAndSettlesClock(TestContext context) {
         // 真实入口只认领完成登录的在线玩家，其他实体和离线 UUID 均明确未认领。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
@@ -437,29 +458,38 @@ public final class HumanTechniqueGameTest implements FabricGameTest {
         var fixture = new HumanTechniqueTestPlayer(context);
         context.assertTrue(fixture.body().completeOpening(now(fixture), OPEN_MERIDIAN)
                 == FailureCode.FAILURE_CODE_UNSPECIFIED, "可信开脉失败");
+        learn(context, fixture);
+        return fixture;
+    }
+
+    private static void learn(TestContext context, HumanTechniqueTestPlayer fixture) {
+        // 旧身体与新身体都通过同一公开命令写入可信学习记录。
         var server = fixture.player.getServer();
         int learned = server.getCommandManager().executeWithPrefix(server.getCommandSource(),
                 "meridian_technique learn " + fixture.player.getUuidAsString() + " "
                         + HumanTechniqueTestCatalog.TECHNIQUE_ID);
         context.assertTrue(learned == 1 && TechniqueFabric.service().known(fixture.player.getUuid()).size() == 1,
                 "学会命令未写入可信知识");
-        return fixture;
     }
 
     private static CastOutcome cast(HumanTechniqueTestPlayer fixture, String castId) {
         // 施放请求只引用目录版本和输入，不携带费用与效果数值。
+        return TechniqueFabric.service().cast(fixture.player.getUuid(), castRequest(fixture, castId));
+    }
+
+    private static CastRequest castRequest(HumanTechniqueTestPlayer fixture, String castId) {
+        // 所有玩家夹具都使用同一正式施放请求，迁移不改变绑定规则。
         var reference = TechniqueReference.newBuilder()
                 .setId(HumanTechniqueTestCatalog.TECHNIQUE_ID)
                 .setVersion(1)
                 .build();
         var direction = HorizontalDirection.newBuilder().setX(1).build();
-        var request = CastRequest.newBuilder()
+        return CastRequest.newBuilder()
                 .setBodyId(fixture.player.getUuidAsString())
                 .setTechnique(reference)
                 .setCastId(castId)
                 .setDirection(direction)
                 .build();
-        return TechniqueFabric.service().cast(fixture.player.getUuid(), request);
     }
 
     private static TechniqueHostRequest impulse(UUID playerId, String requestId, ImpulseDirection direction) {

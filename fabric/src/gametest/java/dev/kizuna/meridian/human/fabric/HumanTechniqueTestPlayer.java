@@ -24,9 +24,13 @@ final class HumanTechniqueTestPlayer implements AutoCloseable {
     final RecordingConnection connection;
 
     HumanTechniqueTestPlayer(TestContext context) {
+        // 每个普通夹具使用独立玩家，防止施放与费用在测试间共享。
+        this(context, UUID.randomUUID());
+    }
+
+    HumanTechniqueTestPlayer(TestContext context, UUID playerId) {
         // 只替换传输层，玩家列表、Human 登录和 Fabric 网络事件均使用正式实现。
         var server = context.getWorld().getServer();
-        UUID playerId = UUID.randomUUID();
         var profile = new GameProfile(playerId, "tech_" + playerId.toString().substring(0, 8));
         player = new ServerPlayerEntity(server, context.getWorld(), profile);
         connection = new RecordingConnection();
