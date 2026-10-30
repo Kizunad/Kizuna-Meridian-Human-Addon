@@ -26,4 +26,14 @@ kizunaWorkspace.includeSource('vanilla-damage', [
         fabric: 'dev.kizuna.meridian.vanilla:fabric',
         server: 'dev.kizuna.meridian.vanilla:server'
 ])
-kizunaWorkspace.includeSource('inventory-ui', [server: 'dev.kizuna.inventoryui:server'])
+// 本构建直接组合 Inventory UI，嵌套的 Progression、Items 不再登记它的替换规则，所以两个模块都要列出。
+kizunaWorkspace.includeSource('inventory-ui', [
+        '': 'dev.kizuna.inventoryui:kizuna-inventory-ui-framework',
+        server: 'dev.kizuna.inventoryui:server'
+])
+kizunaWorkspace.includeSource('progression', [
+        server: 'dev.kizuna.meridian.progression:server',
+        shared: 'dev.kizuna.meridian.progression:shared',
+        fabric: 'dev.kizuna.meridian.progression:fabric',
+        client: 'dev.kizuna.meridian.progression:client'
+])

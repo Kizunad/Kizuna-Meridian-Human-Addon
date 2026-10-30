@@ -14,16 +14,16 @@ dependencies {
     mappings "net.fabricmc:yarn:${libs.versions.yarn.get()}:v2"
     modImplementation libs.fabric.loader
     modImplementation libs.fabric.api
-    // 玩家动画、Damage、库存 UI 服务端与功法库在 settings 中以源码组合，依赖处写替换坐标。
+    // 玩家动画、Damage、库存 UI 服务端、功法库与成长附属在 settings 中以源码组合，依赖处写替换坐标。
     modImplementation 'dev.kizuna:kizuna-players-animation'
     modImplementation 'dev.kizuna.meridian.vanilla:fabric'
     modImplementation 'dev.kizuna.inventoryui:server'
     modImplementation 'dev.kizuna.meridian.technique:fabric'
     implementation 'dev.kizuna.meridian.technique:server'
-    // 成长附属仍由 Loom 1.6 构建，与本构建的 Loom 版本不同就无法组合；它升级前按装配清单读安装产物。
-    modImplementation files(kizunaWorkspace.artifact('progression', 'fabric', false))
-    implementation files(kizunaWorkspace.artifact('progression', 'shared', false),
-            kizunaWorkspace.artifact('progression', 'server', false))
+    // 与原先读单个 JAR 一致只取成长附属的模块本身，其传递库由完整装配在运行时按同一组件补齐。
+    modImplementation('dev.kizuna.meridian.progression:fabric') { transitive = false }
+    implementation('dev.kizuna.meridian.progression:shared') { transitive = false }
+    implementation('dev.kizuna.meridian.progression:server') { transitive = false }
     implementation project(':server')
     // 人体资源包的编译期协议已由下方服务端库提供，避免 Loom 再解析一份客户端协议副本。
     modImplementation(project(':client')) { transitive = false }

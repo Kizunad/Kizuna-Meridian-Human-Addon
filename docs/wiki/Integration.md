@@ -75,7 +75,7 @@ Human server → 框架 server 公共编解码/内容校验 API
 其他功法附属 → human 内容依赖（显式声明版本范围）
 ```
 
-`settings.gradle` 应用 Framework 的 `scripts/workspace.gradle`，按装配清单以 Gradle composite build 组合框架、功法库、Players-Animation、Vanilla Damage 与 Inventory UI 服务端，并取得版本目录 `libs`。`local.meridian:client/server` 只是框架的本地项目替换键，不是已发布 Maven 坐标；其余模组仓库的替换键是其工程的真实坐标。Progression 暂按装配清单读取安装 JAR：它升级到相同 Loom 版本前无法组合。默认相邻目录；可用 `-Pkizuna.dir.<清单 id>` 改指单个仓库，例如：
+`settings.gradle` 应用 Framework 的 `scripts/workspace.gradle`，按装配清单以 Gradle composite build 组合框架、功法库、Players-Animation、Vanilla Damage、Inventory UI 与 Progression，并取得版本目录 `libs`。`local.meridian:client/server` 只是框架的本地项目替换键，不是已发布 Maven 坐标；其余模组仓库的替换键是其工程的真实坐标。同一仓库被嵌套组合多次时只采用最先登记的替换规则，本构建直接组合的仓库（如 Inventory UI）要列出嵌套构建用到的全部模块。默认相邻目录；可用 `-Pkizuna.dir.<清单 id>` 改指单个仓库，例如：
 
 ```bash
 ./gradlew -Pkizuna.dir.framework="/path/to/Kizuna-Meridian-Mod-Framework" build
