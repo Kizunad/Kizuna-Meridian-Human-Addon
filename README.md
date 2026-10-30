@@ -10,6 +10,6 @@
 python3 "scripts/check_docs.py"
 ```
 
-本地构建默认依赖同级 `Kizuna-Meridian-Mod-Framework` 仓库；其他路径使用 `-PmeridianFrameworkDir="/path/to/framework"`。交付 Java 17 附属库与 Protobuf 内容，客户端可作为 Fabric 资源容器加载；游戏界面由独立 UI 附属实现。
+本地构建默认依赖同级 `Kizuna-Meridian-Mod-Framework` 等相邻仓库；其他路径使用 `-Pkizuna.dir.framework="/path/to/framework"`（其余仓库按装配清单 id 同理）。交付 Java 17 附属库与 Protobuf 内容，客户端可作为 Fabric 资源容器加载；游戏界面由独立 UI 附属实现。
 
 许可：PolyForm Noncommercial 1.0.0，见 [LICENSE](LICENSE)。

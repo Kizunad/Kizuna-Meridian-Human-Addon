@@ -3,15 +3,16 @@ apply plugin: 'com.google.protobuf'
 description = '人体内容、可信出生候选与框架接入验证。'
 
 protobuf {
-    protoc { artifact = 'com.google.protobuf:protoc:4.36.2' }
+    // protoc 与运行库同版本，取版本目录中的 protobuf-java。
+    protoc { artifact = "com.google.protobuf:protoc:${libs.versions.protobuf.java.get()}" }
 }
 
 dependencies {
     api project(':shared')
     api 'local.meridian:server'
-    implementation 'org.tomlj:tomlj:1.1.1'
+    implementation libs.tomlj
     testImplementation project(':client')
-    testImplementation 'junit:junit:4.13.2'
+    testImplementation libs.junit4
 }
 test {
     useJUnit()

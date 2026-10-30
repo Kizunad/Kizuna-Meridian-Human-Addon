@@ -15,7 +15,7 @@ sourceSets {
 def presentationDirectory = layout.buildDirectory.dir('generated/presentation')
 dependencies {
     // Gson 只在构建时读取 Blockbench；跨包展示仍使用 Protobuf。
-    toolingImplementation 'com.google.code.gson:gson:2.10.1'
+    toolingImplementation libs.gson
     // 构建期从权威人体定义导出层级；客户端成品不依赖或打包服务端计算。
     toolingImplementation project(':server')
 }

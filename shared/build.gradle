@@ -1,7 +1,8 @@
 apply plugin: 'com.google.protobuf'
 description = '人体修炼的跨端 Protobuf 契约。'
-protobuf { protoc { artifact = 'com.google.protobuf:protoc:4.36.2' } }
+// protoc 与运行库同版本，取版本目录中的 protobuf-java。
+protobuf { protoc { artifact = "com.google.protobuf:protoc:${libs.versions.protobuf.java.get()}" } }
 dependencies {
-    api 'com.google.protobuf:protobuf-java:4.36.2'
+    api libs.protobuf.java
     api 'local.meridian:client'
 }

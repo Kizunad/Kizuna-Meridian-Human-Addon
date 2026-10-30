@@ -3,9 +3,9 @@
 ## 玩家功法库依赖
 
 Human 的玩家施放宿主硬依赖相邻 `Kizuna-Meridian-Technique-Framework`。
-纯 Java `server` 与其共享协议通过 Gradle composite 接入，可用 `-PmeridianTechniqueDir=../目录`
-指定相邻源码位置；Fabric 入口使用该仓库本地构建的安装 JAR。
-先在功法库运行 `./gradlew build`，再构建 Human；功法库也必须安装到服务端。
+功法库的 fabric、server、shared 工程在 `settings.gradle` 中以源码组合（`includeSource`，替换键用功法工程的真实坐标
+`dev.kizuna.meridian.technique:*`，Loom 按此重新加入模组的传递库），编译与开发运行使用其当前输出，
+可用 `-Pkizuna.dir.technique=../目录` 指定相邻源码位置；功法库也必须安装到服务端。
 Human 不携带具体功法目录，不复制协议或新增战斗 UI 频道。
 接线、时间、幂等、释放归位和吐纳占用规则见[玩家功法宿主](Technique-Host.md)。
 
@@ -75,10 +75,10 @@ Human server → 框架 server 公共编解码/内容校验 API
 其他功法附属 → human 内容依赖（显式声明版本范围）
 ```
 
-`settings.gradle` 使用 Gradle composite build 引用独立框架仓库。`local.meridian:client/server` 只是本地项目替换键，不是已发布 Maven 坐标。默认相邻目录；可用以下命令指定：
+`settings.gradle` 应用 Framework 的 `scripts/workspace.gradle`，按装配清单以 Gradle composite build 组合框架、功法库、Players-Animation、Vanilla Damage 与 Inventory UI 服务端，并取得版本目录 `libs`。`local.meridian:client/server` 只是框架的本地项目替换键，不是已发布 Maven 坐标；其余模组仓库的替换键是其工程的真实坐标。Progression 暂按装配清单读取安装 JAR：它升级到相同 Loom 版本前无法组合。默认相邻目录；可用 `-Pkizuna.dir.<清单 id>` 改指单个仓库，例如：
 
 ```bash
-./gradlew -PmeridianFrameworkDir="/path/to/Kizuna-Meridian-Mod-Framework" build
+./gradlew -Pkizuna.dir.framework="/path/to/Kizuna-Meridian-Mod-Framework" build
 ./gradlew demo
 python3 "scripts/check_docs.py"
 ```
@@ -171,7 +171,7 @@ python3 "scripts/check_docs.py"
 
 ## Minecraft 行走、疾跑与数值查看
 
-先构建完整装配，直接运行 `./gradlew :fabric:runClient`；专服使用 `:fabric:runServer`。`fabric/` 目标 Minecraft 1.20.1、Fabric Loader 0.16.10、Fabric API 0.92.3+1.20.1、Java 17。开发运行统一应用 Framework 的 `scripts/full-assembly.gradle`，固定读取 Meridian 九仓及 Inventory UI、BS3D 的安装产物；不存在安装开关。正式部署按适用端安装整套产物及其依赖，Items 作为服务端宿主库提供。
+先构建完整装配，直接运行 `./gradlew :fabric:runClient`；专服使用 `:fabric:runServer`。`fabric/` 目标 Minecraft 1.20.1、Fabric Loader 0.16.10、Fabric API 0.92.3+1.20.1、Java 17。开发运行统一应用 Framework 的 `scripts/full-assembly.gradle`，按装配清单读取其余仓库的安装产物，已在 settings 中源码组合的模块按坐标装入同一组件；不存在安装开关。正式部署按适用端安装整套产物及其依赖，Items 作为服务端宿主库提供。
 
 身体模型窗口使用必装的 Meridian UI、Human-UI、Inventory UI 和 owo。进世界按 `I` 打开工作台，进入“检视”，选择肌肉查看基础力量、爆发、耐力、疲劳、动作占用和恢复半衰期。已连接客户端缺少必需接收通道时明确报错并暂停身体，不静默丢弃推送。
 
@@ -213,7 +213,7 @@ Fabric 宿主现在接收 `meridian:gathering_request`，返回 `meridian:gather
 
 进世界按 `I` → 吐纳：原三维交互直接操作当前玩家身体。有效吸呼占用膈肌与注意组织，停止后按实际空闲区间恢复；自动吐纳低于80%时释放膈肌占用并保留自动意图，服务端在耐力恢复到启动线后续跑，等待期间不补算吸呼或摄入。连接重建不补满身体；断线清理本宿主会话占用和自动等待，异常保存留下的占用在重连时清理，其他附属动作保留。已摄入的原料和在途货物保存为现有事实。
 
-Kizuna Players Animation 为客户端和服务端必装依赖，先构建同级动画仓库，再构建 Human。开发运行固定装配其 JAR，打坐还要求动画资源包含 `meditate` 和模型。
+Kizuna Players Animation 为客户端和服务端必装依赖，在 settings 中以源码组合，编译与开发运行使用其当前输出，打坐还要求动画资源包含 `meditate` 和模型。
 
 `HumanPlayerAnimation` 统一选择权威吐纳对应的 `meditate`、行走对应的 `walk` 和疾跑对应的 `run`，直接调用 `ServerPlayerAnimations.play/stop`。只在动作改变时停止旧动作、播放新动作，持续输入和数值推送不重新开始动画。只管理本宿主登记的动作，不停止其他附属动画。唯一同步契约为 Players-Animation 的 `player_animation.proto`（play/stop/result），请求 ID 返回值用于诊断；客户端回执不参与身体授权或开脉完成判定。
 

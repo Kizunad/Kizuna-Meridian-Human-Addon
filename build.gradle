@@ -1,7 +1,7 @@
 plugins {
     id 'base'
-    id 'fabric-loom' version '1.6-SNAPSHOT' apply false
-    id 'com.google.protobuf' version '0.9.6' apply false
+    alias(libs.plugins.fabric.loom) apply false
+    alias(libs.plugins.protobuf) apply false
 }
 
 allprojects {
@@ -17,18 +17,18 @@ subprojects {
     }
     java {
         toolchain {
-            languageVersion = JavaLanguageVersion.of(17)
+            languageVersion = JavaLanguageVersion.of(libs.versions.java.get())
         }
     }
     base.archivesName = "${rootProject.name}-${project.name}"
     tasks.withType(JavaCompile).configureEach {
-        options.release = 17
+        options.release = libs.versions.java.get().toInteger()
         options.encoding = 'UTF-8'
     }
     tasks.withType(JavaExec).configureEach {
         // 导出和演示也使用 Java 17，不能依赖开发机默认 JDK 的额外能力。
         javaLauncher = javaToolchains.launcherFor {
-            languageVersion = JavaLanguageVersion.of(17)
+            languageVersion = JavaLanguageVersion.of(libs.versions.java.get())
         }
     }
     tasks.withType(Jar).configureEach {

@@ -10,22 +10,21 @@ repositories {
 }
 
 dependencies {
-    minecraft 'com.mojang:minecraft:1.20.1'
-    mappings 'net.fabricmc:yarn:1.20.1+build.10:v2'
-    modImplementation 'net.fabricmc:fabric-loader:0.16.10'
-    modImplementation 'net.fabricmc.fabric-api:fabric-api:0.92.3+1.20.1'
-    modImplementation files('../../Kizuna-Players-Animation/build/libs/kizuna-players-animation-0.1.0-SNAPSHOT.jar')
-    modImplementation files('../../Kizuna-Meridian-Vanilla-Damage-Addon/fabric/build/libs/kizuna-meridian-vanilla-damage-addon-fabric-0.1.0-SNAPSHOT.jar')
-    modImplementation files('../../Kizuna-Meridian-Progression-Addon/fabric/build/libs/kizuna-meridian-progression-addon-fabric-0.1.0-SNAPSHOT.jar')
-    modImplementation files('../../Kizuna-Inventory-UI-Framework/server/build/libs/kizuna-inventory-ui-framework-server-0.1.0-SNAPSHOT.jar')
-    implementation files('../../Kizuna-Meridian-Progression-Addon/shared/build/libs/kizuna-meridian-progression-addon-shared-0.1.0-SNAPSHOT.jar',
-            '../../Kizuna-Meridian-Progression-Addon/server/build/libs/kizuna-meridian-progression-addon-server-0.1.0-SNAPSHOT.jar')
+    minecraft libs.minecraft
+    mappings "net.fabricmc:yarn:${libs.versions.yarn.get()}:v2"
+    modImplementation libs.fabric.loader
+    modImplementation libs.fabric.api
+    // 玩家动画、Damage、库存 UI 服务端与功法库在 settings 中以源码组合，依赖处写替换坐标。
+    modImplementation 'dev.kizuna:kizuna-players-animation'
+    modImplementation 'dev.kizuna.meridian.vanilla:fabric'
+    modImplementation 'dev.kizuna.inventoryui:server'
+    modImplementation 'dev.kizuna.meridian.technique:fabric'
+    implementation 'dev.kizuna.meridian.technique:server'
+    // 成长附属仍由 Loom 1.6 构建，与本构建的 Loom 版本不同就无法组合；它升级前按装配清单读安装产物。
+    modImplementation files(kizunaWorkspace.artifact('progression', 'fabric', false))
+    implementation files(kizunaWorkspace.artifact('progression', 'shared', false),
+            kizunaWorkspace.artifact('progression', 'server', false))
     implementation project(':server')
-    implementation 'local.meridian.technique:server'
-    def techniqueDirectory = rootProject.file(providers.gradleProperty('meridianTechniqueDir')
-            .getOrElse('../Kizuna-Meridian-Technique-Framework'))
-    modImplementation files(new File(techniqueDirectory,
-            'fabric/build/libs/kizuna-meridian-technique-framework-fabric-0.1.0-SNAPSHOT.jar'))
     // 人体资源包的编译期协议已由下方服务端库提供，避免 Loom 再解析一份客户端协议副本。
     modImplementation(project(':client')) { transitive = false }
     // 独立安装产物携带其实际运行依赖；源码与 Protobuf 仍只从各自仓库构建。
@@ -33,10 +32,14 @@ dependencies {
     include project(':shared')
     include project(':client')
     include implementation('local.meridian:server')
-    include implementation('com.google.protobuf:protobuf-java:4.36.2')
-    include implementation('org.tomlj:tomlj:1.1.1')
-    include implementation('org.antlr:antlr4-runtime:4.11.1')
-    testImplementation 'junit:junit:4.13.2'
+    // 版本目录条目是 Provider，implementation 不返回依赖对象，嵌套声明单独写。
+    implementation libs.protobuf.java
+    include libs.protobuf.java
+    implementation libs.tomlj
+    include libs.tomlj
+    implementation libs.antlr.runtime
+    include libs.antlr.runtime
+    testImplementation libs.junit4
 }
 
 test { useJUnit() }
@@ -54,11 +57,8 @@ tasks.named('remapJar') {
     dependsOn clearNestedJarCache
 }
 
-apply from: '../../Kizuna-Meridian-Mod-Framework/scripts/full-assembly.gradle'
-
-dependencies {
-    modLocalRuntime files('../../Kizuna-Meridian-Door-Breaker-Addon/fabric/build/libs/kizuna-meridian-door-breaker-addon-fabric-0.1.0-SNAPSHOT.jar')
-}
+// 破门斩等高层附属只在运行时需要，由完整装配按清单读文件，避免本构建反过来组合高层仓库。
+apply from: new File(kizunaWorkspace.directory('framework'), 'scripts/full-assembly.gradle')
 
 loom {
     mods {
