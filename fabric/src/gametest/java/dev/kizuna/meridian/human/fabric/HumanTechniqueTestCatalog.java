@@ -11,6 +11,8 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Category;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Impulse;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ImpulseDirection;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ModuleKind;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.PresentationDuration;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.PresentationEffect;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.QiCost;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.QiDistribution;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Quantity;
@@ -28,7 +30,11 @@ import java.util.List;
 
 /** 仅供游戏测试的最小人体功法；正式内容包不携带具体功法。 */
 public final class HumanTechniqueTestCatalog implements TechniqueRegistryEntrypoint {
+    static final double MOVEMENT_MULTIPLIER = 0.4;
     static final String TECHNIQUE_ID = "human_test:breath_step";
+    static final String LOCKED_TECHNIQUE_ID = "human_test:locked_step";
+    static final String TARGETED_TECHNIQUE_ID = "human_test:targeted_step";
+    static final long PRESENTATION_START_MILLIS = 400;
     static final long WARMUP_MILLIS = 100;
     static final long ACTIVE_MILLIS = 100;
     static final long RECOVERY_MILLIS = 100;
@@ -49,11 +55,13 @@ public final class HumanTechniqueTestCatalog implements TechniqueRegistryEntrypo
                 .setNamespace("human_test")
                 .addBindingTemplates(template)
                 .addDefinitions(definition())
+                .addDefinitions(lockedDefinition())
+                .addDefinitions(targetedDefinition())
                 .build();
         return TechniqueRegistry.load(addons(), List.of(catalog));
     }
 
-    private static AddonRegistry addons() {
+    static AddonRegistry addons() {
         // 明确列出测试宿主实现的框架能力，不伪造标签或模块定义。
         var host = AddonHostProfile.newBuilder()
                 .setHostId("meridian:fabric")
@@ -128,6 +136,33 @@ public final class HumanTechniqueTestCatalog implements TechniqueRegistryEntrypo
                 .build();
     }
 
+    private static TechniqueDefinition lockedDefinition() {
+        // 锁定式沿用相同身体费用，起手播放表现并在无输入时向后冲量。
+        var presentation = PresentationEffect.newBuilder()
+                .setId("human_test:locked_step")
+                .setDuration(PresentationDuration.UNTIL_RECOVERY_END)
+                .setStartMillis(PRESENTATION_START_MILLIS)
+                .build();
+        var start = TechniqueEffect.newBuilder()
+                .setAtMillis(0)
+                .setPresentation(presentation)
+                .build();
+        var impulse = movement().getImpulse().toBuilder()
+                .setInputDefaultDirection(ImpulseDirection.BACKWARD)
+                .build();
+        var backward = TechniqueEffect.newBuilder()
+                .setAtMillis(WARMUP_MILLIS)
+                .setImpulse(impulse)
+                .build();
+        return definition().toBuilder()
+                .setId(LOCKED_TECHNIQUE_ID)
+                .setMovementSpeedMultiplier(MOVEMENT_MULTIPLIER)
+                .clearEffects()
+                .addEffects(start)
+                .addEffects(backward)
+                .build();
+    }
+
     private static TechniqueCost cost() {
         // 小额真实费用足以覆盖默认账户释放和组织疲劳，不依赖调试造元。
         var qi = QiCost.newBuilder()
@@ -144,6 +179,17 @@ public final class HumanTechniqueTestCatalog implements TechniqueRegistryEntrypo
                 .setDuration(quantity(WORK_SECONDS, Unit.SECOND))
                 .build();
         return TechniqueCost.newBuilder().addQi(qi).addWork(work).build();
+    }
+
+    private static TechniqueDefinition targetedDefinition() {
+        // 朝目标冲量用于验证实体消失时的真实业务拒绝和取消清理。
+        TechniqueDefinition locked = lockedDefinition();
+        Impulse impulse = locked.getEffects(1).getImpulse().toBuilder()
+                .setDirection(ImpulseDirection.TOWARD_TARGET)
+                .clearInputDefaultDirection()
+                .build();
+        TechniqueEffect effect = locked.getEffects(1).toBuilder().setImpulse(impulse).build();
+        return locked.toBuilder().setId(TARGETED_TECHNIQUE_ID).setEffects(1, effect).build();
     }
 
     private static TechniqueEffect movement() {

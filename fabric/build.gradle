@@ -15,6 +15,7 @@ dependencies {
     modImplementation 'net.fabricmc:fabric-loader:0.16.10'
     modImplementation 'net.fabricmc.fabric-api:fabric-api:0.92.3+1.20.1'
     modImplementation files('../../Kizuna-Players-Animation/build/libs/kizuna-players-animation-0.1.0-SNAPSHOT.jar')
+    modImplementation files('../../Kizuna-Meridian-Vanilla-Damage-Addon/fabric/build/libs/kizuna-meridian-vanilla-damage-addon-fabric-0.1.0-SNAPSHOT.jar')
     modImplementation files('../../Kizuna-Meridian-Progression-Addon/fabric/build/libs/kizuna-meridian-progression-addon-fabric-0.1.0-SNAPSHOT.jar')
     modImplementation files('../../Kizuna-Inventory-UI-Framework/server/build/libs/kizuna-inventory-ui-framework-server-0.1.0-SNAPSHOT.jar')
     implementation files('../../Kizuna-Meridian-Progression-Addon/shared/build/libs/kizuna-meridian-progression-addon-shared-0.1.0-SNAPSHOT.jar',
@@ -44,7 +45,20 @@ processResources {
     filesMatching('fabric.mod.json') { expand version: project.version }
 }
 
+// Loom 只按坐标复用 modprocessing 里的嵌套 JAR，SNAPSHOT 坐标不变时会把旧 server/shared JAR 打进发布 JAR；
+// 每次打发布 JAR 前清掉该缓存，让 include 的 JAR 按当前产物重新生成。
+def clearNestedJarCache = tasks.register('clearNestedJarCache', Delete) {
+    delete layout.buildDirectory.dir('loom-cache/temp/modprocessing')
+}
+tasks.named('remapJar') {
+    dependsOn clearNestedJarCache
+}
+
 apply from: '../../Kizuna-Meridian-Mod-Framework/scripts/full-assembly.gradle'
+
+dependencies {
+    modLocalRuntime files('../../Kizuna-Meridian-Door-Breaker-Addon/fabric/build/libs/kizuna-meridian-door-breaker-addon-fabric-0.1.0-SNAPSHOT.jar')
+}
 
 loom {
     mods {
@@ -80,6 +94,36 @@ loom {
             runDir 'build/gametest'
             vmArg '-Dfabric-api.gametest'
             vmArg '-Dfabric-api.gametest.report-file=build/gametest-results.xml'
+        }
+        spawnProtection {
+            server()
+            name 'Human Dedicated Spawn Protection Test'
+            source sourceSets.gametest
+            runDir 'build/spawn-protection'
+            vmArg '-Dmeridian.human.spawnProtectionTest=true'
+        }
+    }
+}
+
+tasks.named('runSpawnProtection') {
+    doFirst {
+        def runDirectory = file('build/spawn-protection')
+        runDirectory.mkdirs()
+        new File(runDirectory, 'eula.txt').text = 'eula=true\n'
+        new File(runDirectory, 'server.properties').text = '''online-mode=false
+server-ip=127.0.0.1
+server-port=0
+spawn-protection=16
+level-type=minecraft:flat
+generate-structures=false
+view-distance=2
+simulation-distance=2
+'''
+        new File(runDirectory, 'result.txt').text = ''
+    }
+    doLast {
+        if (file('build/spawn-protection/result.txt').text.trim() != 'PASS') {
+            throw new GradleException('出生点保护专用服务端验证未通过')
         }
     }
 }

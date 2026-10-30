@@ -466,16 +466,24 @@ public class HumanPlayerBodyTest {
 
     private static void unlock(HumanPlayerBody body) {
         // 行为回归显式建立已读条件，不能靠测试宿主绕过正式授权。
-        body.writeProgress(body.progress().toBuilder().setQiNotesRead(true)
-                .setGatheringScrollRead(true).setMiddleJiaoScrollRead(true).build());
+        body.writeProgress(body.progress().toBuilder()
+                .setQiNotesRead(true /* value */)
+                .setGatheringScrollRead(true /* value */)
+                .setMiddleJiaoScrollRead(true /* value */)
+                .setInnerVisionScrollRead(true /* value */)
+                .build());
     }
 
     @Test
-    public void threeScrollsGateSeparateServerOperationsAndSurviveSave() {
+    public void fourScrollsGateSeparateServerOperationsAndSurviveSave() {
         // 札记只授权修炼页，旧客户端直接发自动或手动意图仍被服务器拒绝。
         HumanPlayerBody body = born();
         body.writeProgress(body.progress().toBuilder().setQiNotesRead(true).build());
         body.connectGathering(0, response -> {});
+        assertFalse(body.canIntrospect(body.snapshot().id().value()));
+        body.writeProgress(body.progress().toBuilder()
+                .setInnerVisionScrollRead(true /* value */)
+                .build());
         assertTrue(body.canIntrospect(body.snapshot().id().value()));
         assertEquals(FailureCode.ACCESS_DENIED, breath(body, 0, 1, BreathAction.BEGIN_BREATHING).getFailure().getCode());
         for (var operation : List.of(
@@ -500,6 +508,7 @@ public class HumanPlayerBodyTest {
         assertTrue(saved.progress().getQiNotesRead());
         assertFalse(saved.progress().getGatheringScrollRead());
         assertTrue(saved.progress().getMiddleJiaoScrollRead());
+        assertTrue(saved.progress().getInnerVisionScrollRead());
     }
 
     @Test

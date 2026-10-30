@@ -1,0 +1,34 @@
+# 部位系数绑定身体模板；改配置后重启服务端，已有身体同样使用新规则。
+[entities]
+default_enabled = true
+"minecraft:player" = true
+"minecraft:villager" = true
+"minecraft:wandering_trader" = true
+"minecraft:pillager" = true
+"minecraft:vindicator" = true
+"minecraft:evoker" = true
+"minecraft:witch" = true
+"minecraft:illusioner" = true
+
+[templates."human:adult"]
+# 改造新增部位没有单独条目时采用此值，仍按其实际上限 HP 参与接收。
+default_multiplier = 1.0
+
+[templates."human:adult".parts]
+head = 1.0
+neck = 1.0
+chest = 1.0
+abdomen = 1.5
+pelvis = 1.0
+left_upper_arm = 0.7
+right_upper_arm = 0.7
+left_forearm = 0.7
+right_forearm = 0.7
+left_hand = 0.7
+right_hand = 0.7
+left_thigh = 1.0
+right_thigh = 1.0
+left_lower_leg = 1.0
+right_lower_leg = 1.0
+left_foot = 1.0
+right_foot = 1.0

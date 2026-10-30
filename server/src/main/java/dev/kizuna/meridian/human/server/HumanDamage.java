@@ -5,15 +5,45 @@ import dev.kizuna.meridian.protocol.pb.BodyMessages.BodySnapshot;
 import dev.kizuna.meridian.protocol.pb.BodyMessages.HealthTarget;
 import dev.kizuna.meridian.protocol.pb.HealthMessages.DamageKind;
 import dev.kizuna.meridian.protocol.pb.HealthMessages.DamageResolution;
+import dev.kizuna.meridian.protocol.pb.HealthMessages.DamageSpillover;
 import dev.kizuna.meridian.protocol.pb.HealthMessages.HpLoss;
 import dev.kizuna.meridian.server.BodyDamageHandler;
 import dev.kizuna.meridian.server.DefaultBodyDamageHandler;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** 人体伤害：按致伤机制分配局部损伤，并根据部位总量与头部状态裁定死亡。 */
 public final class HumanDamage implements BodyDamageHandler {
+    private static final double DEATH_HP_RATIO = 0.2;
+    private static HumanDamageRules configuredRules = HumanDamageRules.defaults();
+    private final HumanDamageRules rules;
+    private final String entityType;
+
+    public HumanDamage() {
+        this("minecraft:player");
+        // 无 Fabric 的人体内容调用使用玩家类型，仍读取相同的模板配置。
+    }
+
+    public HumanDamage(String entityType) {
+        this(configuredRules, entityType);
+        // 宿主只传实体类型，不提供客户端可控的伤害策略开关。
+    }
+
+    public HumanDamage(HumanDamageRules rules, String entityType) {
+        // 每个宿主固定启动时的规则；测试可注入独立配置而不影响其他身体。
+        this.rules = rules;
+        this.entityType = entityType;
+    }
+
+    public static void configure(Path file) {
+        // 在身体宿主开始工作之前读取一次服务端配置。
+        configuredRules = HumanDamageRules.load(file);
+    }
+
     @Override
     public byte[] resolve(byte[] payload) {
         // 读取固定快照与可信伤害；未指定命中时复用框架选点，输出仍由框架逐目标校验。
@@ -24,19 +54,58 @@ public final class HumanDamage implements BodyDamageHandler {
 
         // 部位记录总体损伤，内部账户记录不同机制的局部反应；总体 HP 不重复累加这些账户。
         var losses = new ArrayList<HpLoss>();
-        losses.add(HpLoss.newBuilder().setTarget(hit).setHp(damage.getDamageHp()).build());
+        DamageSpillover spillover = partLosses(body, hit, damage.getDamageHp(), losses);
         if (hit.hasPartId() && damage.getKind() != DamageKind.CUSTOM) {
             distributeLocalDamage(body, hit.getPartId(), damage.getKind(), damage.getDamageHp(), losses);
         }
 
-        // 精确命中组织或器官时只伤该目标；人体特有的部位致死规则仍统一在此判断。
+        boolean lethal = lethal(body, losses);
+        var result = DamageResolution.newBuilder()
+                .setLethal(lethal)
+                .addAllLosses(losses);
+        if (spillover != null) {
+            result.setSpillover(spillover);
+        }
+        return HealthProtobuf.encodeResolution(result.build());
+    }
+
+    private DamageSpillover partLosses(BodySnapshot body, HealthTarget hit, double hp, List<HpLoss> losses) {
+        // 精确组织/器官命中不跨部位；开关关闭时沿用 Framework 的单目标过量裁剪。
+        String templateId = body.getTemplate().getId();
+        if (!hit.hasPartId() || !rules.enabled(entityType, templateId)) {
+            losses.add(HpLoss.newBuilder().setTarget(hit).setHp(hp).build());
+            return null;
+        }
+        double available = body.getPartStatesList().stream()
+                .filter(part -> part.getId().equals(hit.getPartId()))
+                .findFirst().orElseThrow().getHp();
+        double direct = Math.min(hp, available);
+        if (direct > 0) {
+            losses.add(HumanDamageSpillover.loss(hit.getPartId(), direct));
+        }
+        double overflow = hp - direct;
+        if (overflow == 0) {
+            return null;
+        }
+        double multiplier = rules.multiplier(templateId, hit.getPartId());
+        DamageSpillover spillover = HumanDamageSpillover.distribute(body, hit, overflow, multiplier);
+        losses.addAll(spillover.getLossesList());
+        return spillover;
+    }
+
+    private static boolean lethal(BodySnapshot body, List<HpLoss> losses) {
+        // 将所有明确部位剂量一起投影后使用原有死亡规则，组织和器官不重复计入总 HP。
+        Map<String, Double> partLosses = new HashMap<>();
+        for (HpLoss loss : losses) {
+            if (loss.getTarget().hasPartId()) {
+                partLosses.put(loss.getTarget().getPartId(), loss.getHp());
+            }
+        }
         var projectedPartHp = new ArrayList<Double>();
         boolean headDestroyed = false;
         for (var part : body.getPartStatesList()) {
-            double remainingHp = part.getHp();
-            if (hit.hasPartId() && part.getId().equals(hit.getPartId())) {
-                remainingHp = Math.max(0, remainingHp - damage.getDamageHp());
-            }
+            double loss = partLosses.getOrDefault(part.getId(), 0.0);
+            double remainingHp = Math.max(0, part.getHp() - loss);
             projectedPartHp.add(remainingHp);
             if (part.getId().equals("head") && remainingHp == 0) {
                 headDestroyed = true;
@@ -49,10 +118,7 @@ public final class HumanDamage implements BodyDamageHandler {
                 .mapToDouble(part -> part.getMaxHp()).sum();
 
         // 总部位 HP 严格低于 20% 或头部归零才死亡，器官归零先表达为该器官失能。
-        boolean lethal = headDestroyed || totalPartHp < maximumPartHp * 0.2;
-        var result = DamageResolution.newBuilder().setLethal(lethal)
-                .addAllLosses(losses).build();
-        return HealthProtobuf.encodeResolution(result);
+        return headDestroyed || totalPartHp < maximumPartHp * DEATH_HP_RATIO;
     }
 
     private static void distributeLocalDamage(BodySnapshot body, String partId, DamageKind kind,

@@ -15,16 +15,37 @@ import dev.kizuna.meridian.human.server.HumanCultivationNumbers;
 import dev.kizuna.meridian.human.server.HumanDamage;
 import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.human.server.HumanOpening;
+import dev.kizuna.meridian.human.server.HumanRevival;
 import dev.kizuna.meridian.progression.ProgressionProtocol;
 import dev.kizuna.meridian.progression.pb.ProgressionMessages.PlayerProgress;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.MeridianProtocol;
 import dev.kizuna.meridian.protocol.pb.ActivityMessages;
-import dev.kizuna.meridian.protocol.pb.AddonMessages.*;
+import dev.kizuna.meridian.protocol.pb.AddonMessages.AddonHostProfile;
+import dev.kizuna.meridian.protocol.pb.AddonMessages.AddonRegistration;
 import dev.kizuna.meridian.protocol.pb.BodyMessages;
-import dev.kizuna.meridian.protocol.pb.BreathingMessages.*;
-import dev.kizuna.meridian.protocol.pb.GatheringMessages.*;
-import dev.kizuna.meridian.protocol.pb.MeridianMessages.*;
+import dev.kizuna.meridian.protocol.pb.BreathingMessages.BreathAction;
+import dev.kizuna.meridian.protocol.pb.BreathingMessages.BreathControl;
+import dev.kizuna.meridian.protocol.pb.BreathingMessages.BreathingView;
+import dev.kizuna.meridian.protocol.pb.GatheringMessages.GatheringRequest;
+import dev.kizuna.meridian.protocol.pb.GatheringMessages.GatheringResponse;
+import dev.kizuna.meridian.protocol.pb.GatheringMessages.GatheringView;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.AdvanceTime;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.BodyCommand;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.CommandReceipt;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.DebugQi;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.ExertTissue;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.ExertTissues;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.FillModuleTags;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.RequestEnvelope;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.RequestFailure;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.ResponseEnvelope;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.SetAddonProgress;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.StartAction;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.StopAction;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.TimeAdvanceMode;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.TimeAdvancePlan;
 import dev.kizuna.meridian.protocol.pb.OpeningMessages;
 import dev.kizuna.meridian.server.AddonRegistry;
 import dev.kizuna.meridian.server.BodyCommandHandler;
@@ -35,7 +56,6 @@ import dev.kizuna.meridian.server.OpeningSession;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostRequest;
 import dev.kizuna.meridian.technique.server.TechniqueErrors;
 import dev.kizuna.meridian.technique.server.TechniqueHost;
-import dev.kizuna.meridian.technique.server.TechniqueRecoveryHost;
 
 import java.util.HashSet;
 import java.util.List;
@@ -43,13 +63,15 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
 /** 单玩家的可信运动编排；账本、占用与恢复只由框架命令处理器修改。 */
-final class HumanPlayerBody implements TechniqueRecoveryHost {
+final class HumanPlayerBody {
     static final String MOVEMENT_INSTANCE = "human.minecraft.locomotion";
     static final double WALK_ENDURANCE_SECONDS = 300;
     static final double SPRINT_ENDURANCE_SECONDS = 75;
+    private static final double MILLIS_PER_SECOND = 1000;
     private static final AddonRegistry CONTENT = installContent();
 
     enum Motion {
@@ -78,6 +100,7 @@ final class HumanPlayerBody implements TechniqueRecoveryHost {
     private OpeningSession<String> openingSession;
     private Consumer<GatheringResponse> gatheringOutput;
     private Consumer<QiInventory> releaseSink = released -> { /* 独立身体测试无需世界路由。 */ };
+    private DoubleSupplier movementLoad = () -> HumanMovementLoads.UNLOADED;
     private final Set<String> breathingActions = new HashSet<>();
     private boolean debugAuthorized;
     private BreathingView lastBreathing = BreathingView.getDefaultInstance();
@@ -109,7 +132,7 @@ final class HumanPlayerBody implements TechniqueRecoveryHost {
                 store, (caller, receipt, before, after) -> { /* 保存由宿主在事件完成后统一标脏。 */ },
                 CONTENT.recipes(), (caller, body, plan) -> Optional.ofNullable(sourceId),
                 CONTENT.actions(), CONTENT.openings(),
-                caller -> debugAuthorized && caller.equals(id.value()), new HumanDamage());
+                caller -> debugAuthorized && caller.equals(id.value()), new HumanDamage("minecraft:player"));
         migrateModuleTags();
         if (!saved.addonProgress().containsKey(ProgressionProtocol.PROGRESS_KEY)) {
             // 新身体与尚无进度字段的存档都从未读开始，并写入同一身体事务。
@@ -169,7 +192,8 @@ final class HumanPlayerBody implements TechniqueRecoveryHost {
 
     boolean canIntrospect(String bodyId) {
         // 内观订阅同时校验身体归属和已读事实，客户端隐藏入口不能代替服务端授权。
-        return id.value().equals(bodyId) && progress().getQiNotesRead();
+        PlayerProgress progress = progress();
+        return id.value().equals(bodyId) && progress.getQiNotesRead() && progress.getInnerVisionScrollRead();
     }
 
     void writeProgress(PlayerProgress progress) {
@@ -248,15 +272,7 @@ final class HumanPlayerBody implements TechniqueRecoveryHost {
         // 每 tick 只比较动作和下一边界；持续做功及空闲恢复最多每秒结算一次。
         boolean stoppedBreathing = moved && lastBreathing.getActive() && !lastBreathing.getAutomatic();
         if (stoppedBreathing) {
-            // 与界面结束按钮使用同一个 END_BREATHING 意图，先结清气流并解除呼吸占用。
-            GatheringResponse stopped = gather(millis, GatheringRequest.newBuilder().setProtocolVersion(1)
-                    .setRequestId(UUID.randomUUID().toString()).setBodyId(id.value())
-                    .setBreath(BreathControl.newBuilder().setAction(BreathAction.END_BREATHING)
-                            .setSequence(lastBreathing.getSequence() + 1)).build());
-            if (stopped.hasFailure()) {
-                throw HumanErrors.hostRejected(stopped.getFailure().getCode());
-            }
-            gatheringOutput.accept(stopped);
+            stopBreathingForMovement(millis);
         }
         if (observed == motion && millis < nextBoundaryMillis && !stoppedBreathing) {
             return false;
@@ -267,19 +283,51 @@ final class HumanPlayerBody implements TechniqueRecoveryHost {
             nextBoundaryMillis = Long.MAX_VALUE;
             return true;
         }
-        if (observed != motion) {
+        if (observed != motion || (observed != Motion.IDLE && !hasMovementAction())) {
             // 先结清旧动作整个区间，再停止旧占用和建立新占用，防止边走边恢复。
             if (hasMovementAction()) {
-                execute(BodyCommand.newBuilder().setStopAction(StopAction.newBuilder().setInstanceId(MOVEMENT_INSTANCE)));
+                StopAction stop = StopAction.newBuilder().setInstanceId(MOVEMENT_INSTANCE).build();
+                execute(BodyCommand.newBuilder().setStopAction(stop));
             }
             if (observed != Motion.IDLE) {
-                execute(BodyCommand.newBuilder().setStartAction(StartAction.newBuilder().setInstanceId(MOVEMENT_INSTANCE)
-                        .setActionId(observed.actionId).setActionVersion(1)));
+                startMovement(observed);
             }
             motion = observed;
         }
         scheduleNextBoundary();
         return true;
+    }
+
+    private void stopBreathingForMovement(long millis) {
+        // 与界面结束按钮使用同一个意图，先结清气流并解除呼吸占用。
+        BreathControl control = BreathControl.newBuilder()
+                .setAction(BreathAction.END_BREATHING)
+                .setSequence(lastBreathing.getSequence() + 1)
+                .build();
+        GatheringRequest request = GatheringRequest.newBuilder()
+                .setProtocolVersion(1)
+                .setRequestId(UUID.randomUUID().toString())
+                .setBodyId(id.value())
+                .setBreath(control)
+                .build();
+        GatheringResponse stopped = gather(millis, request);
+        if (stopped.hasFailure()) {
+            throw HumanErrors.hostRejected(stopped.getFailure().getCode());
+        }
+        gatheringOutput.accept(stopped);
+    }
+
+    private void startMovement(Motion observed) {
+        // 肢体损毁是动作不可用，不能因此暂停身体；其他拒绝仍交给宿主诊断。
+        StartAction action = StartAction.newBuilder()
+                .setInstanceId(MOVEMENT_INSTANCE)
+                .setActionId(observed.actionId)
+                .setActionVersion(1)
+                .build();
+        ResponseEnvelope response = executeCommand(BodyCommand.newBuilder().setStartAction(action));
+        if (response.hasFailure() && response.getFailure().getCode() != FailureCode.MODULE_UNAVAILABLE) {
+            throw HumanErrors.hostRejected(response.getFailure().getCode());
+        }
     }
 
     boolean breathingActive() {
@@ -307,30 +355,11 @@ final class HumanPlayerBody implements TechniqueRecoveryHost {
         if (millis < accountedMillis) {
             throw HumanErrors.invalid(HumanErrors.INVALID_MOVEMENT_TIME);
         }
-        double elapsedSeconds = (millis - accountedMillis) / 1000.0;
+        double elapsedSeconds = (millis - accountedMillis) / MILLIS_PER_SECOND;
         targetMillis = millis;
         advanceTime();
-        if (elapsedSeconds > 0 && motion != Motion.IDLE && !snapshot().vitality().dead()) {
-            // 行走按基础耐力的 1/300 每秒、疾跑按 1/75 每秒申请做功；伤势和疲劳仍限制实际能力。
-            double enduranceSeconds = motion == Motion.SPRINT ? SPRINT_ENDURANCE_SECONDS : WALK_ENDURANCE_SECONDS;
-            BodySnapshot body = snapshot();
-            var loads = ExertTissues.newBuilder();
-            var action = CONTENT.actions().find(motion.actionId, 1).orElseThrow();
-            for (String tissueId : action.getTissueIdsList()) {
-                Anatomy.TissueDefinition definition = body.structure().tissues().stream()
-                        .filter(tissue -> tissue.id().value().equals(tissueId)).findFirst().orElseThrow();
-                Anatomy.TissueCapacity available = TissueCapabilities.available(body, definition.id());
-                double desiredWatts = definition.capacity().enduranceJoules() / enduranceSeconds;
-                double payableWatts = Math.min(desiredWatts, available.burstWatts());
-                payableWatts = Math.min(payableWatts, available.enduranceJoules() / elapsedSeconds);
-                if (payableWatts > 0) {
-                    loads.addLoads(ExertTissue.newBuilder().setTissueId(tissueId).setForceNewtons(0)
-                            .setPowerWatts(payableWatts).setDurationSeconds(elapsedSeconds));
-                }
-            }
-            if (loads.getLoadsCount() > 0) {
-                execute(BodyCommand.newBuilder().setExertTissues(loads));
-            }
+        if (elapsedSeconds > 0 && hasMovementAction() && !snapshot().vitality().dead()) {
+            exertMovement(elapsedSeconds);
         }
         accountedMillis = millis;
         boolean cultivationDue = !snapshot().addonProgress().containsKey(HumanCultivation.PROGRESS)
@@ -342,7 +371,37 @@ final class HumanPlayerBody implements TechniqueRecoveryHost {
         scheduleNextBoundary();
     }
 
-    @Override
+    private void exertMovement(double elapsedSeconds) {
+        // 仅已建立的运动占用收费，伤势和疲劳共同限制每块肌肉的实际做功。
+        double enduranceSeconds = motion == Motion.SPRINT ? SPRINT_ENDURANCE_SECONDS : WALK_ENDURANCE_SECONDS;
+        // 负荷倍率每个结算区间读取一次，只放大目标功率，仍受下方爆发与剩余耐力截断。
+        double loadMultiplier = movementLoad.getAsDouble();
+        BodySnapshot body = snapshot();
+        var loads = ExertTissues.newBuilder();
+        var action = CONTENT.actions().find(motion.actionId, 1).orElseThrow();
+        for (String tissueId : action.getTissueIdsList()) {
+            Anatomy.TissueDefinition definition = body.structure().tissues().stream()
+                    .filter(tissue -> tissue.id().value().equals(tissueId)).findFirst().orElseThrow();
+            Anatomy.TissueCapacity available = TissueCapabilities.available(body, definition.id());
+            double desiredWatts = definition.capacity().enduranceJoules() / enduranceSeconds * loadMultiplier;
+            double burstLimitedWatts = Math.min(desiredWatts, available.burstWatts());
+            double payableWatts = Math.min(burstLimitedWatts, available.enduranceJoules() / elapsedSeconds);
+            if (payableWatts > 0) {
+                ExertTissue load = ExertTissue.newBuilder()
+                        .setTissueId(tissueId)
+                        .setForceNewtons(0)
+                        .setPowerWatts(payableWatts)
+                        .setDurationSeconds(elapsedSeconds)
+                        .build();
+                loads.addLoads(load);
+            }
+        }
+        if (loads.getLoadsCount() > 0) {
+            ExertTissues exertion = loads.build();
+            execute(BodyCommand.newBuilder().setExertTissues(exertion));
+        }
+    }
+
     public BodySnapshot snapshot() {
         // 暴露不可变权威事实供保存和展示，不提供外部写入入口。
         return store.find(id).orElseThrow();
@@ -538,7 +597,6 @@ final class HumanPlayerBody implements TechniqueRecoveryHost {
         return response;
     }
 
-    @Override
     public long submitRecovery(String requestId, BodyCommand command) {
         // 恢复只接收功法服务生成的命令，可信进度与活动仍经过 Framework 授权和版本校验。
         RequestEnvelope envelope = RequestEnvelope.newBuilder()
@@ -594,6 +652,36 @@ final class HumanPlayerBody implements TechniqueRecoveryHost {
         scheduleNextBoundary();
         publishGathering();
         return response.hasFailure() ? response.getFailure().getCode() : FailureCode.FAILURE_CODE_UNSPECIFIED;
+    }
+
+    ResponseEnvelope applyExertion(long millis, RequestEnvelope request) {
+        // 身体身份已由宿主核对；普通命令保留原请求与版本。
+        // 能力不足时直接返回业务拒绝。
+        settle(millis);
+        byte[] payload = MeridianProtocol.encodeRequest(request);
+        ResponseEnvelope response = MeridianProtocol.decodeResponse(captureRelease(
+                () -> commands.handle(id.value(), payload)));
+        scheduleNextBoundary();
+        publishGathering();
+        return response;
+    }
+
+    void revive(long millis) {
+        // 死态不推进生理时间；复活命令直接使用当前宿主时刻并只扣一次寿元。
+        var command = BodyCommand.newBuilder()
+                .setBodyId(id.value())
+                .setExpectedRevision(snapshot().revision())
+                .setReviveBody(HumanRevival.request("human:respawn"))
+                .build();
+        var request = RequestEnvelope.newBuilder()
+                .setProtocolVersion(MeridianProtocol.VERSION)
+                .setRequestId(UUID.randomUUID().toString())
+                .setBodyCommand(command)
+                .build();
+        ResponseEnvelope response = applyHealth(millis, request);
+        if (response.hasFailure()) {
+            throw HumanErrors.hostRejected(response.getFailure().getCode());
+        }
     }
 
     ResponseEnvelope applyHealth(long millis, RequestEnvelope request) {
@@ -658,6 +746,11 @@ final class HumanPlayerBody implements TechniqueRecoveryHost {
         releaseSink = java.util.Objects.requireNonNull(sink);
     }
 
+    void bindMovementLoad(DoubleSupplier load) {
+        // 世界宿主按实时玩家实体读取负荷；独立身体测试保持无负荷倍率。
+        movementLoad = java.util.Objects.requireNonNull(load);
+    }
+
     private <T> T captureRelease(Supplier<T> operation) {
         // 串行宿主按实际命令或会话划定增量，即使后续步骤失败也归位已经提交的释放。
         QiInventory before = store.environmentQi();
@@ -715,13 +808,25 @@ final class HumanPlayerBody implements TechniqueRecoveryHost {
 
     private void execute(BodyCommand.Builder command) {
         // 每笔内部意图有独立身份和当前版本；收到明确成功后才继续下一步编排。
-        var request = RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId(UUID.randomUUID().toString())
-                .setBodyCommand(command.setBodyId(id.value()).setExpectedRevision(snapshot().revision())).build();
-        ResponseEnvelope response = MeridianProtocol.decodeResponse(captureRelease(
-                () -> commands.handle(id.value(), request.toByteArray())));
+        ResponseEnvelope response = executeCommand(command);
         if (response.hasFailure()) {
             throw HumanErrors.hostRejected(response.getFailure().getCode());
         }
+    }
+
+    private ResponseEnvelope executeCommand(BodyCommand.Builder command) {
+        // 先固定身体版本，再提交一次；业务拒绝由对应动作决定如何处理。
+        BodyCommand operation = command
+                .setBodyId(id.value())
+                .setExpectedRevision(snapshot().revision())
+                .build();
+        RequestEnvelope request = RequestEnvelope.newBuilder()
+                .setProtocolVersion(MeridianProtocol.VERSION)
+                .setRequestId(UUID.randomUUID().toString())
+                .setBodyCommand(operation)
+                .build();
+        return MeridianProtocol.decodeResponse(captureRelease(
+                () -> commands.handle(id.value(), request.toByteArray())));
     }
 
     private void scheduleNextBoundary() {

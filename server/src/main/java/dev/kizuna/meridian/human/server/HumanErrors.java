@@ -4,6 +4,8 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 
 /** 人体内容工具的错误集中定义；身体业务拒绝仍由框架协议表达。 */
 public final class HumanErrors {
+    public static final String INVALID_REVIVAL = "人体复活寿元费用数据缺失或无效";
+    public static final String REVIVAL_MESSAGE = "大难不死，元气大伤，折损%s寿元";
     public static final String INVALID_TECHNIQUE_OPERATION = "功法宿主操作无效";
     public static final String TECHNIQUE_HOST_FAILED = "功法宿主请求处理失败";
     public static final String ENVIRONMENT_HOST_FAILED = "环境宿主请求处理失败";
@@ -13,6 +15,8 @@ public final class HumanErrors {
     public static final String INVALID_CULTIVATION = "周天进度或人体模块配置无效";
     public static final String INVALID_PROGRESS = "身体内的修炼进度类型或版本无效";
     public static final String INVALID_DAMAGE_KIND = "人体伤害需要已知的致伤机制";
+    public static final String INVALID_SPILLOVER = "人体伤害蔓延配置或剂量无效";
+    public static final String SPILLOVER_LOAD_FAILED = "人体伤害蔓延配置读取失败";
     public static final String DEBUG_PERMISSION = "真元调试需要管理员权限等级 2";
     public static final String DIFFUSION_ENTRY_MISSING = "当前身体不存在指定经脉或有效摄入出口";
 
@@ -38,6 +42,8 @@ public final class HumanErrors {
     public static final String BODY_MISSING = "当前玩家尚未绑定人体";
     public static final String TISSUE_MISSING = "当前人体不存在此组织";
     public static final String HOST_FAILED = "人体宿主结算失败，已暂停该身体";
+    public static final String HOST_RECOVERY = HOST_FAILED + "。请退出世界后重新加入以重新认领；身体数据不会重置。"
+            + "若仍失败，请保留日志联系服主。";
     public static final String INVALID_GATHERING_RESPONSE = "吐纳核心返回了无法解码的响应";
     public static final String UI_CHANNEL_MISSING = "客户端缺少必需的 Meridian UI 接收通道";
 

@@ -20,6 +20,7 @@ import java.util.UUID;
 
 /** 经过真实登录、频道协商和断线事件的测试玩家，网络输出记录在内存中。 */
 final class HumanTechniqueTestPlayer implements AutoCloseable {
+    private static final int NAME_ID_LENGTH = 8;
     final ServerPlayerEntity player;
     final RecordingConnection connection;
 
@@ -30,9 +31,25 @@ final class HumanTechniqueTestPlayer implements AutoCloseable {
 
     HumanTechniqueTestPlayer(TestContext context, UUID playerId) {
         // 只替换传输层，玩家列表、Human 登录和 Fabric 网络事件均使用正式实现。
-        var server = context.getWorld().getServer();
-        var profile = new GameProfile(playerId, "tech_" + playerId.toString().substring(0, 8));
-        player = new ServerPlayerEntity(server, context.getWorld(), profile);
+        this(context, playerId, ServerPlayerEntity::new);
+    }
+
+    HumanTechniqueTestPlayer(TestContext context, UUID playerId, PlayerFactory factory) {
+        // 允许观察实际实体速度入口，不替换登录、网络处理或身体宿主。
+        this(context.getWorld(), playerId, factory);
+    }
+
+    HumanTechniqueTestPlayer(net.minecraft.server.world.ServerWorld world) {
+        // 专用服务端验证沿用相同登录夹具，不依赖 TestServer。
+        this(world, UUID.randomUUID(), ServerPlayerEntity::new);
+    }
+
+    private HumanTechniqueTestPlayer(net.minecraft.server.world.ServerWorld world,
+                                     UUID playerId, PlayerFactory factory) {
+        // 网络传输留在内存，世界、玩家管理器与身体宿主仍为真实实例。
+        var server = world.getServer();
+        var profile = new GameProfile(playerId, "tech_" + playerId.toString().substring(0, NAME_ID_LENGTH));
+        player = factory.create(server, world, profile);
         connection = new RecordingConnection();
         var channels = ((ChannelInfoHolder) (ClientConnection) connection).getPendingChannelsNames();
         channels.addAll(List.of(new Identifier("meridian:body_view"),
@@ -42,6 +59,12 @@ final class HumanTechniqueTestPlayer implements AutoCloseable {
         server.getPlayerManager().onPlayerConnect(connection, player);
         player.changeGameMode(GameMode.CREATIVE);
         player.setNoGravity(true /* noGravity */);
+    }
+
+    @FunctionalInterface
+    interface PlayerFactory {
+        ServerPlayerEntity create(net.minecraft.server.MinecraftServer server,
+                                  net.minecraft.server.world.ServerWorld world, GameProfile profile);
     }
 
     HumanPlayerBody body() {

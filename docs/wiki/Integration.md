@@ -33,9 +33,11 @@ Human 不携带具体功法目录，不复制协议或新增战斗 UI 频道。
 
 Progression 是必装依赖。`SERVER_STARTING` 安装当前服务器的 `ProgressionStore`；读取和写入定位 UUID 绑定的同一 `HumanPlayerBody`。`meridian_progression:progress` 使用 `PlayerProgress` Any 保存在身体，初始版本 1、未读；写入通过 Framework 的可信附属事务，随 Human 世界存档标脏保存，重启和玩家实体替换保留。
 
-吐纳和开脉在实际 `HumanPlayerBody` 请求入口独立检查已读状态，未读返回 `ACCESS_DENIED`。内观在 `meridian:body_view_request` 的 `BodyViewRequest` 订阅入口校验同一进度，未授权不发布开脉规则与操作卡。基础身体检视、出生 0.36 元、自然扩散、普通运动与 OP 真元调试保持各自业务流程。
+吐纳和开脉在实际 `HumanPlayerBody` 请求入口独立检查已读状态，未读返回 `ACCESS_DENIED`。内观在 `meridian:body_view_request` 的 `BodyViewRequest` 订阅入口同时校验身体归属、札记和内观残卷，未授权不发布开脉规则与操作卡。整个检视窗口包含体表也需内观卷；出生 0.36 元、自然扩散、普通运动与 OP 真元调试保持各自业务流程。
 
 重置在服务器主线程结束吐纳、暂停开脉、解除动作占用、停止打坐动画并撤销内观订阅，再发布权威进度与新快照。没有第二份解锁布尔值或独立存档。客户端隐藏入口和关窗由 UI 使用 Progression 投影完成。
+
+四卷进度仍保存为 schema 1；新字段 `inner_vision_scroll_read=5` 在旧存档中默认为未读，沿用登录、重生和身体事务同步。单独 `/meridian progression reset inner_vision` 仅撤销检视订阅和客户端窗口，不中断其他卷活动；单卷重新解锁后，必须重新发起内部订阅，旧订阅不会复活。
 
 ## 玩家真元调试命令
 
@@ -55,6 +57,12 @@ Minecraft 入口由本包必装 Fabric 宿主注册，实际入账算子、协�
 建议先用 `diffuse 0.2` 观察肺经到全身的流动，再用 `fill` 准备开脉。游炁时全身内腔稳定体积为 2000，启动线为 1600；普通目标脉初始体积为 50，启动线为 40。按游离态密度 `ρ = 0.01`，后者相当于 0.4 元；可用 `fill left_lung_meridian 0.45` 在目标仍有空位时测试局部门槛。`diffuse` 模拟炼化后入脉，不模拟环境扣账、肺加工或近期摄入证明；需要持续吐纳的规则仍须真实吐纳。
 
 调试只操作当前玩家，通过框架唯一命令路径、去重回执与世界持久化；执行后刷新同一身体快照。调试创造的真元不计入吐纳「累计纳入」，可在其悬浮总账或本查询命令查看。
+
+## 调试入口
+
+调试用途，不进正式玩法。`HumanDebugHost.debugQi(ServerPlayerEntity, DebugQi)` 是调试附属改写玩家真元库存的唯一公开入口，权限检查留在调用方命令层。它与上面的 OP 命令走同一路径：先按主世界时间结算，再以临时调试授权提交 `DebugQi`，随后标记世界存档并推送同一身体快照。返回 Framework 失败码，成功为 `FAILURE_CODE_UNSPECIFIED`；非主线程为 `ACCESS_DENIED`，世界未绑定、身体未加载或加载失败为 `BODY_NOT_FOUND`。
+
+只读身体快照、疲劳调试事务与复活走公开的 `meridian_health_host` 协议（inspect、exertion、effect），功法宿主状态走功法库 `TechniqueHostEntrypoint`；本入口不重复暴露这些能力，也不开放字段或私有方法。
 
 ## 独立仓库与依赖
 
@@ -83,7 +91,7 @@ Java 编译、测试、内容导出与演示均使用 17。框架自己的构建
 - `server/build/libs/kizuna-meridian-human-addon-server-0.1.0-SNAPSHOT.jar`：人体定义与出生候选，内含 `META-INF/kizuna_meridian/addons/human.pb`。
 - `server/build/generated/human-content/META-INF/kizuna_meridian/addons/human.pb`：同一内容的独立二进制文件，其他语言宿主也可读取。
 
-单独 `client/server` 内容 JAR 不内嵌框架或运行库。另有 `fabric/build/libs/kizuna-meridian-human-addon-fabric-0.1.0-SNAPSHOT.jar` 安装包，通过 Loom 嵌套原始内容、框架与运行依赖 JAR。它的 `meridian_human_host` 入口负责 Minecraft 适配，客户端资源仍由 `meridian_human` 容器提供；内容库没有 UI 反向依赖。
+单独 `client/server` 内容 JAR 不内嵌框架或运行库。另有 `fabric/build/libs/kizuna-meridian-human-addon-fabric-0.1.0-SNAPSHOT.jar` 安装包，通过 Loom 嵌套原始内容、框架与运行依赖 JAR。`fabric/build.gradle` 的 `clearNestedJarCache` 在每次 `remapJar` 前删除 `fabric/build/loom-cache/temp/modprocessing`：Loom 只按坐标复用这里的嵌套 JAR，SNAPSHOT 坐标不变时会把旧 server/shared JAR 打进发布 JAR。它的 `meridian_human_host` 入口负责 Minecraft 适配，客户端资源仍由 `meridian_human` 容器提供；内容库没有 UI 反向依赖。
 
 ## 内容前置
 
@@ -130,15 +138,27 @@ Java 宿主将 `HumanDamage` 装配为框架 `BodyDamageHandler`；必装 Fabric
 
 Fabric 宿主通过 `meridian_health_host` entrypoint 提供 Framework `BodyHealthHost`：交换 `HealthHostRequest` / `HealthHostResponse` Protobuf 字节，只允许服务端主线程操作在线且实际绑定的玩家。查询先结算可信模拟时间，效果保留调用方请求 ID 和预期 revision；成功效果附带由同一请求回执读取的 `HealthResult`，供效果附属核验保命事实，查询不附带。幂等重试返回当前身体与原始固定事实；宿主暂停或拒绝时返回原失败码，不能转由另一套账本处理。身体、回执与释放账户仍保存于同一个世界状态。
 
-Minecraft 原版事件由独立 Meridian Vanilla Damage Addon 接线：护甲阶段先固定命中部位，用 TOML 覆盖关系与单件护甲/韧性公式取代全局护甲，随后保留原版抗性、全身保护附魔与吸收生命，再将完整结算剂量映射到身体。身体因伤判死时同步实体死亡，原版死亡以 `ConfirmBodyDeath` 确认。Human 只提供人体处理器和上述宿主入口，不直接监听原版伤害或保存装备覆盖规则。死亡确认保留局部伤势；原版重生不自动治疗、补真元或创建新身体，复活规则另定。具体人体分配见[人体定义](Human-Definition.md)。旧存档不迁移；已有身体加载时保持原构型，不自动补入新增骨组。
+同一入口接受 `exertion`：先核对实际绑定玩家与命令身体 ID，再由 `HumanPlayerBody.applyExertion` 结算可信时间，保留原请求 ID 和预期 revision，交 Framework 普通 `BodyCommandHandler.handle` 执行 `ExertTissues`。成功返回当前身体，不附带健康效果专用 `HealthResult`；成功请求重放不重复扣疲劳。能力不足等业务拒绝返回原始失败码，不记宿主故障、不暂停玩家身体；跨身体请求返回 `ACCESS_DENIED`。伤害附属据此使用攻击者肌肉做功，Human 不计算武器伤害或肌肉伤害系数。
+
+Minecraft 原版事件由独立 Meridian Vanilla Damage Addon 接线：护甲阶段先固定命中部位，用 TOML 覆盖关系与单件护甲/韧性公式取代全局护甲，随后保留原版抗性、全身保护附魔与吸收生命，再将完整结算剂量映射到身体。身体因伤判死时同步实体死亡，原版死亡以 `ConfirmBodyDeath` 确认。Human 只提供人体处理器和上述宿主入口，不直接监听原版伤害或保存装备覆盖规则。死亡确认保留局部伤势；玩家死亡重生由 Human 显式复活同一身体，不补真元、不创建新身体，见下节。具体人体分配见[人体定义](Human-Definition.md)。旧存档不迁移；已有身体加载时保持原构型，不自动补入新增骨组。
 
 必装 Vanilla Healing Addon 将原版治疗通过上述宿主均分到部位 HP，原版血条只显示身体比例；全局吸收改为各部位独立黄心。图腾通过可信 `DamageBody.death_protection` 在死亡清账前提供保命下限，不需要 Human 内置图腾逻辑，也不复活已经死亡的身体。普通治疗不清除独立组织、器官损伤；生命提升的可配置上限增量也由 Healing 附属声明并撤销。
+
+## 死亡与重生
+
+`ServerPlayerEvents.AFTER_RESPAWN` 的 `alive=false` 分支对原 UUID 的死态身体提交 Framework `ReviveBody`。部位、组织和器官 HP 至少恢复到上限的 10%，原本较高的保留；全身有做功能力的肌肉疲劳置满，随后按既有曲线自然恢复。模型没有独立流血、骨折字段；经脉结构损伤和开合、境界、功法与残卷进度保留，死亡已释放的真元不会补回。Healing 随后同步红心，Damage 可继续命中。
+
+费用在 `server/src/main/resources/meridian-human-revival.toml` 的 `lifespan_cost_years`，初值 `1.0` 年，一年为 `31557600` 生理秒。重生一次提示「大难不死，元气大伤，折损一年寿元」。寿元不足仍复活、余额扣到零，下一次时间推进会寿尽判死。换维度或 `alive=true` 不复活、不扣费；类人生物死亡不自动复活。Debug 的 `revive [targets]` 复用同一份 Human 费用和可信命令。
+
+Human-UI 的检视信息显示「年龄 / 寿元」，读取同一权威快照，年单位保留一位小数。自然年龄不因死亡等待而补算；复活时只增加额外寿元支出。
 
 ## 整体验证
 
 `HumanGatheringTest` 保留交付 JAR/依赖关系、五行及左右肺聚气与守恒、36 脉自然储元与连续聚气、全身满载及授权/容量失败、加工/在途保存恢复、幂等重试与手动吐纳整体回归。中焦周天回归仅保留游炁八脉之间的连接，逐边验证真实扩散与守恒，并核对保留脾→心主干后的 24 条正经大环。人中光迹坐标和客户端表现测试归独立 Human-UI 仓库。动作覆盖行走和吐纳并存、停气释放、指数恢复以及外部版本变化后的占用清理；框架内部算法测试不在人体仓库逐项复制。
 
 `HumanHealthTest` 保护实际人体模板出生后的独立皮肤、骨骼、肌肉、器官和部位 HP，八类机制的局部反应与缺层处理，随机命中接入，以及头部归零、总体严格低于 20% 的人体判死边界。展示回归核对模型绑定的独立组织均存在于实际模板。
+
+`HumanExertionGameTest.exertionChargesOnceRejectsCapacityAndChecksBoundIdentity` 通过真实在线测试玩家与正式健康宿主验证做功、幂等重放、能力不足原码、拒绝不修改身体及跨身体身份校验。
 
 新增自定义宿主、改变模板或配方后，应重跑 `build` 与 `demo`。`HumanPlayerBodyTest` 保护运动切换结算、局部占用、指数恢复、并发动作保留、存档重载与耗尽。专服多人和 Bong 的独立部署验收仍需分别完成。
 
@@ -155,11 +175,13 @@ python3 "scripts/check_docs.py"
 
 身体模型窗口使用必装的 Meridian UI、Human-UI、Inventory UI 和 owo。进世界按 `I` 打开工作台，进入“检视”，选择肌肉查看基础力量、爆发、耐力、疲劳、动作占用和恢复半衰期。已连接客户端缺少必需接收通道时明确报错并暂停身体，不静默丢弃推送。
 
+真正暂停时，健康与功法宿主均返回 `BODY_PAUSED`，聊天只提示一次。玩家退出世界后重新加入即可重新认领原身体；不会重置伤势、真元或其他已保存状态。若重登仍失败，保留日志并检查必装模组与通道，不能通过新建身体覆盖错误。
+
 “经脉”窗口通过 `meridian:opening_request` 提交框架 `MeridianOpeningRequest`，`meridian:opening_response` 返回 `ResponseEnvelope`。宿主绑定当前玩家、在服务器线程串行执行，与吐纳共享每秒 40 包额度；格式异常只拒绝该包，旧连接消息丢弃。首次 `meridian:body_view` 附带 Human 规则选项，后续按身体 revision 推送变化；客户端不上传时间或开脉结果。断线暂停开脉并清除连接回执缓存，已完成成长仍由原身体保存。
 
 | 命令 | 用途 |
 |---|---|
-| `/meridian status` | 当前动作、下肢最小余力、身体 revision |
+| `/meridian status` | 当前动作、下肢最小余力、身体 revision；注册了行走负荷提供者时末尾追加一行负荷说明 |
 | `/meridian watch on` / `off` | 开关快捷栏上方的实时下肢余力 |
 | `/meridian tissue left_rectus_femoris` | 左股直肌实际疲劳、当前耐力/力量/功率；ID 支持补全 |
 
@@ -169,11 +191,19 @@ python3 "scripts/check_docs.py"
 
 每 tick 只采样；动作切换和已有事件边界先结清旧区间，持续运动/有疲劳时最多每模拟秒常规结算一次，满恢复静止后停止该轮询。打开 UI 的渲染帧不扣资源。时间取主世界累计 tick，`/time set` 不改变它；单机暂停停止计时。
 
+八块必需肌肉中任一组织 HP 或其所属部位 HP 归零时，框架以 `MODULE_UNAVAILABLE` 拒绝行走、疾跑占用。宿主只拒绝该次运动动作，健康与功法仍可使用；未建立占用不扣运动疲劳。持续移动在后续结算边界重试，常规周期为每模拟秒，组织恢复可用后自动恢复占用，不要求先停步。动画仍读取真实移动观测。
+
 位置数据包可能隔 tick 到达，运动观察器保留两 tick 停步确认，第三个连续静止样本才切回静止，避免持续走跑逐 tick 重启。真实位移信号独立保留，吐纳期间移动仍在首次实际位移时正式结束会话。2026-10-21 Windows 完整装配已验证走路→疾跑→停止、正式吐纳与开脉附着、转头不结束吐纳以及移动结束后切行走。
 
 `data/meridian_human.dat` 同时保存 Protobuf 身体、成功回执和释放账户。重连只推进离线世界模拟时间对应的寿命，疲劳冻结；停止残留移动实例，但保留其他附属动作。存档加载失败暂停人体功能并保留文件，不自动新建覆盖。当前复用框架内存参考 Store，回执没有 TTL，长期大服须另接具有保留策略的持久化 Store。
 
-运动绑定实际肌肉消耗、恢复及只读观察；尚未用疲劳调整原版移速或饥饿条。原版生命映射通过必装 Vanilla Damage Addon 接入，死亡/重生不重建框架身体，复活规则另定。
+### 行走负荷提供者
+
+2026-10-30 源码新增服务端接入点，JUnit 已覆盖倍率与爆发截断。可信附属在模组初始化阶段调用一次 `HumanMovementLoads.register(HumanMovementLoad)`；第二次注册抛出 `IllegalStateException`，避免两个附属争用同一规则。`HumanMovementLoad.multiplier(ServerPlayerEntity)` 返回当前负荷倍率，`status(ServerPlayerEntity)` 返回 `/meridian status` 总览末尾追加的一行，返回空则不追加。
+
+宿主在玩家加入和重生绑定释放回调时，同时把实时玩家实体绑定为负荷来源；每个运动结算区间在服务器主线程读取一次倍率。行走与疾跑每块肌肉的目标功率乘以倍率，再照旧受爆发和剩余耐力截断。倍率必须是不小于 1 的有限数，否则该次结算失败并按上文宿主故障暂停该玩家身体，不会静默改成 1。没有提供者时倍率为 1，状态命令不追加行。Kizuna Meridian Burden 附属按 BS3D Weights 的有效负重注册该提供者。
+
+运动绑定实际肌肉消耗、恢复及只读观察；尚未用疲劳调整原版移速或饥饿条。原版生命映射通过必装 Vanilla Damage Addon 接入，死亡/重生不重建框架身体，玩家复活规则见上文。
 
 ## Minecraft 真实玩家吐纳
 

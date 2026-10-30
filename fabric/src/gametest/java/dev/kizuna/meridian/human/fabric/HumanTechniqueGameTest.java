@@ -22,6 +22,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HorizontalDirection;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Impulse;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ImpulseDirection;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LastCast;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.PresentationAction;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.PresentationIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
@@ -183,25 +184,25 @@ public final class HumanTechniqueGameTest implements FabricGameTest {
     }
 
     private static void verifyDirections(TestContext context, HumanTechniqueTestPlayer fixture) {
-        // 朝向、垂直、极大输入及同世界目标都采用归一化方向，失败不改变速度。
+        // 朝向、垂直、极大输入及同世界目标都采用归一化方向，正交分量不会互相覆盖。
         fixture.player.setYaw(0);
         exchange(impulse(fixture.player.getUuid(), "human_test_forward", ImpulseDirection.FORWARD));
         assertVelocity(context, fixture, new Vec3d(0, 0, EXPECTED_SPEED_PER_TICK));
         exchange(impulse(fixture.player.getUuid(), "human_test_up", ImpulseDirection.UP));
-        assertVelocity(context, fixture, new Vec3d(0, EXPECTED_SPEED_PER_TICK, 0));
+        assertVelocity(context, fixture, new Vec3d(0, EXPECTED_SPEED_PER_TICK, EXPECTED_SPEED_PER_TICK));
         var request = impulse(fixture.player.getUuid(), "human_test_large_input", ImpulseDirection.INPUT);
         var diagonal = HorizontalDirection.newBuilder().setX(Double.MAX_VALUE).setZ(Double.MAX_VALUE).build();
         var diagonalEffect = request.getEffect().toBuilder().setDirection(diagonal).build();
         exchange(request.toBuilder().setEffect(diagonalEffect).build());
         double component = EXPECTED_SPEED_PER_TICK * DIAGONAL_COMPONENT;
-        assertVelocity(context, fixture, new Vec3d(component, 0, component));
+        assertVelocity(context, fixture, new Vec3d(component, EXPECTED_SPEED_PER_TICK, component));
         var target = context.spawnEntity(EntityType.VILLAGER, 0, 1, 0);
-        target.setPosition(fixture.player.getPos().add(0, 1, 0));
+        target.setPosition(fixture.player.getPos().add(0, 1, 1));
         var toward = impulse(fixture.player.getUuid(), "human_test_target", ImpulseDirection.TOWARD_TARGET);
         var towardEffect = toward.getEffect().toBuilder().setTargetId(target.getUuidAsString()).build();
         context.assertTrue(exchange(toward.toBuilder().setEffect(towardEffect).build()).getEffectAccepted(),
                 "同世界目标未定位");
-        assertVelocity(context, fixture, new Vec3d(0, EXPECTED_SPEED_PER_TICK, 0));
+        assertVelocity(context, fixture, new Vec3d(0, EXPECTED_SPEED_PER_TICK, EXPECTED_SPEED_PER_TICK));
     }
 
     @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
@@ -280,12 +281,12 @@ public final class HumanTechniqueGameTest implements FabricGameTest {
             context.assertTrue(cast(fixture, "disconnect").getPhase() == CastPhase.WARMUP, "没有开始施放");
             var body = fixture.body();
             double paidBalance = body.snapshot().totalQi();
-            var cooldowns = TechniqueState.read(body.snapshot()).getCooldownsMap();
+            var paid = TechniqueState.read(body.snapshot());
             fixture.close();
             var progress = TechniqueState.read(body.snapshot());
             context.assertTrue(!progress.hasActiveCast() && body.snapshot().actions().isEmpty(), "断线未取消");
             context.assertTrue(Math.abs(body.snapshot().totalQi() - paidBalance) < EPSILON, "断线错误退费");
-            context.assertTrue(progress.getCooldownsMap().equals(cooldowns), "断线清除了冷却");
+            assertStoppedProgress(context, body, paid);
             var restored = HumanWorldState.read(fixture.state().writeNbt(new NbtCompound()));
             context.assertTrue(!TechniqueState.read(restored.find(fixture.player.getUuid()).snapshot())
                     .hasActiveCast(), "保存重载恢复了已取消施放");
@@ -303,8 +304,9 @@ public final class HumanTechniqueGameTest implements FabricGameTest {
             var saved = fixture.state().writeNbt(new NbtCompound());
             var restored = HumanWorldState.read(saved).find(fixture.player.getUuid());
             context.assertTrue(TechniqueState.read(restored.snapshot()).hasActiveCast(), "存档未保存当前施放");
-            var cooldowns = TechniqueState.read(restored.snapshot()).getCooldownsMap();
-            TechniqueFabric.service().recoverOnLoad(fixture.player.getUuid(), restored);
+            var paid = TechniqueState.read(restored.snapshot());
+            TechniqueFabric.service().recoverOnLoad(fixture.player.getUuid(),
+                    HumanTechniqueHost.recovery(fixture.player, restored));
             context.assertTrue(!TechniqueState.read(restored.snapshot()).hasActiveCast(),
                     "真实读档身体未清除残留施放");
             context.assertTrue(restored.snapshot().actions().isEmpty(), "读档恢复遗留动作");
@@ -315,7 +317,7 @@ public final class HumanTechniqueGameTest implements FabricGameTest {
             context.assertTrue(exchange(inspect(fixture.player.getUuid())).hasBody(), "恢复后未重新认领");
             var progress = TechniqueState.read(body.snapshot());
             context.assertTrue(!progress.hasActiveCast() && body.snapshot().actions().isEmpty(), "残留施放未取消");
-            context.assertTrue(progress.getCooldownsMap().equals(cooldowns), "恢复取消清除了冷却");
+            assertStoppedProgress(context, body, paid);
             context.assertTrue(Math.abs(body.snapshot().totalQi() - balance) < EPSILON, "恢复取消错误退费");
             assertVelocity(context, fixture, Vec3d.ZERO);
         }
@@ -377,7 +379,8 @@ public final class HumanTechniqueGameTest implements FabricGameTest {
             context.assertTrue(TechniqueState.read(body.snapshot()).hasActiveCast(), "没有形成残留施放");
             var restoredState = HumanWorldState.read(fixture.state().writeNbt(new NbtCompound()));
             var restored = restoredState.join(fixture.player, now(fixture));
-            TechniqueFabric.service().recoverOnLoad(fixture.player.getUuid(), restored);
+            TechniqueFabric.service().recoverOnLoad(fixture.player.getUuid(),
+                    HumanTechniqueHost.recovery(fixture.player, restored));
             assertStoppedProgress(context, restored, paid);
             var reloaded = HumanWorldState.read(restoredState.writeNbt(new NbtCompound()));
             context.assertTrue(!TechniqueState.read(reloaded.find(fixture.player.getUuid()).snapshot())
@@ -409,10 +412,26 @@ public final class HumanTechniqueGameTest implements FabricGameTest {
     }
 
     private static void assertStoppedProgress(TestContext context, HumanPlayerBody body, TechniqueProgress paid) {
-        // 取消或死亡恢复只清理当前施放，不改变可信知识、冷却和其他功法进度。
-        context.assertTrue(TechniqueState.read(body.snapshot()).equals(paid.toBuilder().clearActiveCast().build()),
-                "施放未清除或费用冷却事实被修改");
-        context.assertTrue(body.snapshot().actions().isEmpty(), "清理后仍有动作占用");
+        // 取消或死亡恢复保留知识和曲线，按实际终止时刻计算冷却并记录取消历史。
+        var snapshot = body.snapshot();
+        var active = paid.getActiveCast();
+        var request = active.getRequest();
+        var history = LastCast.newBuilder()
+                .setTechnique(request.getTechnique())
+                .setCastId(request.getCastId())
+                .setActiveEndMillis(active.getActiveEndMillis())
+                .setRecoveryEndMillis(active.getRecoveryEndMillis())
+                .setEnding(CastPhase.CANCELLED)
+                .build();
+        long cooldownStart = Math.min(snapshot.settledAt().elapsedMillis(), active.getRecoveryEndMillis());
+        long cooldownEnd = cooldownStart + HumanTechniqueTestCatalog.COOLDOWN_MILLIS;
+        var expected = paid.toBuilder()
+                .clearActiveCast()
+                .setLastCast(history)
+                .putCooldowns(request.getTechnique().getId(), cooldownEnd)
+                .build();
+        context.assertTrue(TechniqueState.read(snapshot).equals(expected), "取消进度或冷却事实不一致");
+        context.assertTrue(snapshot.actions().isEmpty(), "清理后仍有动作占用");
     }
 
     @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)

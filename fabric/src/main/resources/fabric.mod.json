@@ -7,6 +7,7 @@
   "authors": ["Kizunad"],
   "license": "PolyForm-Noncommercial-1.0.0",
   "environment": "*",
+  "mixins": ["meridian-human.mixins.json"],
   "entrypoints": {
     "main": ["dev.kizuna.meridian.human.fabric.HumanFabric"],
     "meridian_technique_host": ["dev.kizuna.meridian.human.fabric.HumanTechniqueHost"],
