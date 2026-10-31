@@ -163,7 +163,7 @@ Framework 尚无复活规则，原版重生不会创建新身体或恢复 HP；�
 
 `bash "gradlew" :fabric:runSpawnProtection` 使用真实专用服务端验证出生点保护：
 普通玩家劈门被拒，授予管理员权限后同一把工具可劈开同一扇门；结果写入 `fabric/build/spawn-protection/result.txt`。
-GameTest 的 TestServer 不实现该权限，不能替代这项独立验证。
+GameTest 的 GameTestServer 不实现该权限，不能替代这项独立验证。
 动画客户端的 `hit` 帧视觉对齐及打断淡出也需真实客户端验收；以上时序测试检查服务端目录时刻和实际世界效果。
 朝目标冲量先将目标位移投影到水平面再归一化，目标高低差不会削减声明的水平速度；
 UP 独立更新竖直分量，纯竖直目标没有有效水平推进方向，保持 `INVALID_REQUEST` 拒绝。

@@ -39,7 +39,7 @@ final class HumanTechniqueTestPlayer implements AutoCloseable {
     }
 
     HumanTechniqueTestPlayer(net.minecraft.server.level.ServerLevel world) {
-        // 专用服务端验证沿用相同登录夹具，不依赖 TestServer。
+        // 专用服务端验证沿用相同登录夹具，不依赖 GameTestServer。
         this(world, UUID.randomUUID(), ServerPlayer::new);
     }
 

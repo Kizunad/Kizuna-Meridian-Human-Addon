@@ -20,7 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
 
-/** 专用服务端的出生点保护回归；TestServer 不实现该权限语义。 */
+/** 专用服务端的出生点保护回归；GameTestServer 不实现该权限语义。 */
 public final class HumanSpawnProtectionTest implements ModInitializer {
     private static final int TEST_HEIGHT = 64;
     private static final int DOOR_DISTANCE = 2;
