@@ -15,6 +15,8 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.GameType;
 import java.util.List;
 
+import static dev.kizuna.meridian.human.fabric.HumanGameTestTicks.DEFAULT_TIMEOUT;
+
 /** 整体回归：游戏服务端加载真实人体内容，并由玩家宿主执行新拓扑扩散和存档恢复。 */
 public final class HumanMeridianGameTest {
     private static final int RELEASE_COORDINATE = -1;
@@ -24,7 +26,7 @@ public final class HumanMeridianGameTest {
     private static final double GAS_RELEASE_DENSITY = 0.01;
     private static final double LIQUID_RELEASE_DENSITY = 0.1;
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void regionReleaseSurvivesSaveAndCreditsOnlyAtWindowBoundary(GameTestHelper context) {
         // 真实世界首次查询生成区域，后续查询与排队释放均不得重抽库存或提前改版。
         var world = context.getLevel();
@@ -80,7 +82,7 @@ public final class HumanMeridianGameTest {
                 .getInventory()).equals(expected), "重启或续窗重复入账");
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void defaultReleasedAccountReturnsWithoutCreatingQi(GameTestHelper context) {
         // 真实玩家死亡先进入默认账户和位置队列，重启后在续窗从原账户扣转。
         var player = context.makeMockServerPlayerInLevel();
@@ -138,7 +140,7 @@ public final class HumanMeridianGameTest {
         }
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void nonOverworldReleaseStaysInDefaultAccountAndInvalidInventoryIsRejected(GameTestHelper context) {
         // 存在的非主世界不生成区域，外部释放仍须排队并随同一存档恢复。
         var nether = context.getLevel().getServer().getLevel(net.minecraft.world.level.Level.NETHER);
@@ -194,7 +196,7 @@ public final class HumanMeridianGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void environmentHostRejectsUnboundAndOffThreadCalls(GameTestHelper context) throws Exception {
         // 暂时解除实际宿主后立即恢复，验证加载阶段以合法协议返回 unbound。
         var field = HumanEnvironmentHost.class.getDeclaredField("delegate");
@@ -231,7 +233,7 @@ public final class HumanMeridianGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void movementPacketGapsKeepAnimationUntilConfirmedStop(GameTestHelper context) {
         // 真实网络会短暂缺少位置包，不能因此停止循环，再以新请求重新播放。
         var observer = new HumanMovementObserver();
@@ -254,7 +256,7 @@ public final class HumanMeridianGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void playerHostRunsCircuitAndCancelsOnReset(GameTestHelper context) {
         // 游戏宿主完成开脉、手动推力和冲关；撤权必须归还在途并解除动作。
         var player = context.makeMockPlayer(GameType.SURVIVAL);
@@ -303,7 +305,7 @@ public final class HumanMeridianGameTest {
                 .setSequence(sequence).setOperation(operation).setKeyTick(now / 50).build();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void playerHostDiffusesThroughCrossedMiddleJiaoCycle(GameTestHelper context) {
         // 使用游戏创建的玩家身份，身体与推进均走正式宿主及唯一权威账本。
         var player = context.makeMockPlayer(GameType.SURVIVAL);

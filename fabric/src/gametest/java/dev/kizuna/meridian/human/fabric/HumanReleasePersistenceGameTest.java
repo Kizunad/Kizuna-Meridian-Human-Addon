@@ -20,6 +20,8 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 
+import static dev.kizuna.meridian.human.fabric.HumanGameTestTicks.DEFAULT_TIMEOUT;
+
 /** 释放交接的整体回归：真实文件、合并保存、故障重试及持久遗忘。 */
 public final class HumanReleasePersistenceGameTest {
     private static final long WINDOW_MILLIS = 30_000;
@@ -38,7 +40,7 @@ public final class HumanReleasePersistenceGameTest {
 
     private record RoundingFixture(HumanWorldState state, RegionView first, RegionView second) { }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void crossRegionRoundingTailReturnsAndSurvivesReload(GameTestHelper context) throws Exception {
         // 旧存档的区域合并与共享账户采用不同求和顺序，最后一笔不能永远留在队列。
         var fixture = roundingFixture(context, 0);
@@ -64,7 +66,7 @@ public final class HumanReleasePersistenceGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void roundingAllocationPreservesRegionWindowAndPendingAcrossReload(GameTestHelper context) {
         // 较晚创建的区域尚未到期时不能提前入账；重载后继续使用实际余额处理尾笔。
         var fixture = roundingFixture(context, HALF_WINDOW_MILLIS);
@@ -121,7 +123,7 @@ public final class HumanReleasePersistenceGameTest {
         return entry;
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void memoryAcceptanceAndDuplicateDoNotConfirmDisk(GameTestHelper context) throws Exception {
         // 先保存旧状态，模拟首次受理与重复受理后均未触发世界保存就退出。
         Fixture fixture = fixture(context);
@@ -140,7 +142,7 @@ public final class HumanReleasePersistenceGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void durableReleaseSurvivesRepeatedReloadAndCreditsOnce(GameTestHelper context) throws Exception {
         // 接收端先落盘、响应丢失及发送端旧文件反复重放，都只保留一笔待入账事实。
         Fixture fixture = fixture(context);
@@ -167,7 +169,7 @@ public final class HumanReleasePersistenceGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void failedWriteKeepsOldFileAndDuplicateMustRetryDisk(GameTestHelper context) throws Exception {
         // 用同名目录阻止临时文件写入，确保首次失败及内存 duplicate 都不能确认持久化。
         Fixture fixture = fixture(context);
@@ -196,7 +198,7 @@ public final class HumanReleasePersistenceGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void failedAtomicReplacementDoesNotConfirmDisk(GameTestHelper context) throws Exception {
         // 非空目标目录使原子替换失败，不能把临时文件已写完当作提交完成。
         Fixture fixture = fixture(context);
@@ -210,7 +212,7 @@ public final class HumanReleasePersistenceGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void unresolvedReleaseSurvivesSevenDaysAndRejectsConflictingContent(GameTestHelper context) throws Exception {
         // 没有发送端持久删除证明时，已入账 ID 也不能按时间回收。
         Fixture fixture = fixture(context);
@@ -241,7 +243,7 @@ public final class HumanReleasePersistenceGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void batchAndWorldSaveShareOneAttemptPerTick(GameTestHelper context) throws Exception {
         // 多笔释放共用快照，普通世界保存也不能绕过同 tick 的次数限制。
         Fixture fixture = fixture(context);
@@ -268,7 +270,7 @@ public final class HumanReleasePersistenceGameTest {
         });
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void failedBatchOnlyRetriesNextTick(GameTestHelper context) throws Exception {
         // 失败也消耗本 tick 的保存机会，磁盘恢复后须等下一 tick，避免故障时重复重写。
         Fixture fixture = fixture(context);
@@ -292,7 +294,7 @@ public final class HumanReleasePersistenceGameTest {
         });
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void unsupportedDirectorySyncStillConfirmsPersistence(GameTestHelper context) throws Exception {
         // 走 Windows 的目录能力路径，保存完整文件后仍应返回真实确认。
         Fixture fixture = fixture(context, new HumanWorldState(DurableStateFile.DirectorySync.UNSUPPORTED));
@@ -306,7 +308,7 @@ public final class HumanReleasePersistenceGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void forgetWaitsForCreditAndDurableDeletionThenReclaimsHistory(GameTestHelper context) throws Exception {
         // 待入账时不删除；删除写入失败和响应丢失都能用旧文件恢复并安全重试。
         Fixture fixture = fixture(context);

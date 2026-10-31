@@ -40,6 +40,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import static dev.kizuna.meridian.human.fabric.HumanGameTestTicks.DEFAULT_TIMEOUT;
+
 /** 从学习、绑定、费用到玩家世界效果的真实服务链。 */
 public final class HumanCombatServiceGameTest {
     private static final long MILLIS_PER_TICK = 50;
@@ -78,7 +80,7 @@ public final class HumanCombatServiceGameTest {
     private static final int JOIN_INVULNERABILITY_TICKS = 61;
     private static final int STAGGER_TEST_TIMEOUT = 150;
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void doorAnimationsFollowSelectedHandAndOriginalStartTick(GameTestHelper context) throws Exception {
         // 真实学习、选手与宿主播放经过同一服务链，最终检查发往玩家的 Protobuf 包。
         for (String move : List.of("knock", "cleave", "ram")) {
@@ -117,7 +119,7 @@ public final class HumanCombatServiceGameTest {
                 "玩家没有收到正确的 PA 片段和原始起点：" + clip + " / " + plays);
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void handsRejectEmptyAndContainersAndSelectByCategoryWearThenMain(GameTestHelper context) {
         // 同一真实施放入口覆盖拒绝码及选手，失败不能偷偷扣费或留下活动。
         try (var fixture = prepared(context)) {
@@ -201,7 +203,7 @@ public final class HumanCombatServiceGameTest {
         });
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void warmupInterruptionDoesNotWearWeapon(GameTestHelper context) {
         // 起手成功扣费后被僵直打断，尚未发生末击就不能提前扣物品。
         try (var fixture = prepared(context)) {

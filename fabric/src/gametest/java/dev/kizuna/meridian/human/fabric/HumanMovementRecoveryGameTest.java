@@ -22,6 +22,8 @@ import net.minecraft.world.level.GameType;
 import java.util.List;
 import java.util.UUID;
 
+import static dev.kizuna.meridian.human.fabric.HumanGameTestTicks.DEFAULT_TIMEOUT;
+
 /** 损毁下肢只拒绝运动动作，宿主真正暂停时可以重连恢复同一身体。 */
 public final class HumanMovementRecoveryGameTest {
     private static final String LOWER_LEG = "left_lower_leg";
@@ -29,7 +31,7 @@ public final class HumanMovementRecoveryGameTest {
     private static final long MILLIS_PER_TICK = 50;
     private static final long PAUSE_OBSERVATION_TICKS = 3;
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void destroyedLegRejectsWalkingAndSprintingWithoutPausingBody(GameTestHelper context) {
         // 生存玩家部位归零后直接走试玩失败的 observe 路径，健康与功法宿主仍须可用。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
@@ -44,7 +46,7 @@ public final class HumanMovementRecoveryGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void destroyedLegTissueAlsoRejectsOnlyMovement(GameTestHelper context) {
         // 组织账户可独立损毁；部位仍有血时也不能建立需要该组织的运动占用。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
@@ -73,7 +75,7 @@ public final class HumanMovementRecoveryGameTest {
         context.assertTrue(body.snapshot().tissueStates().equals(before), "被拒运动仍扣组织疲劳");
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void missingRequiredChannelPausesOnceAndReconnectPreservesBody(GameTestHelper context) {
         // 缺少必装 UI 接线是真实宿主故障，模拟客户端撤销通道触发正式 tick 的暂停路径。
         var fixture = new HumanTechniqueTestPlayer(context);

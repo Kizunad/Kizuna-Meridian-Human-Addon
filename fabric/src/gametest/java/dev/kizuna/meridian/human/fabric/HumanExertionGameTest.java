@@ -13,11 +13,13 @@ import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import java.util.UUID;
 
+import static dev.kizuna.meridian.human.fabric.HumanGameTestTicks.DEFAULT_TIMEOUT;
+
 /** 玩家健康宿主使用真实在线绑定转发普通做功命令。 */
 public final class HumanExertionGameTest {
     private static final double EXCESSIVE_POWER = 1_000_000;
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void exertionChargesOnceRejectsCapacityAndChecksBoundIdentity(GameTestHelper context) {
         // 原子做功、成功重试和能力不足都通过正式宿主，不替换玩家或核心账本。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {

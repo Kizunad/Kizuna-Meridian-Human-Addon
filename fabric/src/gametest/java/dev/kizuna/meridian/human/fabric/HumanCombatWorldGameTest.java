@@ -26,6 +26,8 @@ import net.minecraft.world.phys.Vec3;
 import java.util.List;
 import java.util.UUID;
 
+import static dev.kizuna.meridian.human.fabric.HumanGameTestTicks.DEFAULT_TIMEOUT;
+
 /** 正式破门斩数据经 Human 协议执行后，核对真实实体和世界副作用。 */
 public final class HumanCombatWorldGameTest {
     private static final double HOOK_MULTIPLIER = 1.2;
@@ -49,7 +51,7 @@ public final class HumanCombatWorldGameTest {
     private static final int OTHER_WEAR_MULTIPLIER = 3;
     private static final float FACING_ATTACKER_YAW = 180;
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void damageCategoriesDoseAndKnockBluntUseRealDamageChain(GameTestHelper context) {
         // 新玩家使每个剂量样本都从健康未疲劳手臂起步，额外核对实际扣血。
         List<DamageCase> cases = List.of(new DamageCase(Items.IRON_AXE, IRON_AXE_DAMAGE, "cutting"),
@@ -81,7 +83,7 @@ public final class HumanCombatWorldGameTest {
         }
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void changedCategoryTagsChangeDamageWithoutItemSpecialCases(GameTestHelper context) {
         // 替换规则引用的真实标签，证明类别由数据驱动而非硬编码铁斧。
         try (var fixture = new HumanCombatFixture(context)) {
@@ -103,7 +105,7 @@ public final class HumanCombatWorldGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void durabilityMultipliersBreakageUnbreakingAndCreativeMatchVanilla(GameTestHelper context) {
         // 空挥也消耗末击耐久，分别覆盖四档材料、原版附魔与损坏。
         Item[] items = {Items.IRON_AXE, Items.DIAMOND_AXE, Items.IRON_SWORD, Items.DIAMOND_SWORD};
@@ -148,7 +150,7 @@ public final class HumanCombatWorldGameTest {
         context.assertTrue(enchanted.getDamageValue() == damage, "无法破坏物品扣了耐久");
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void disposableLastStrikeConsumesOnceEvenOnMissAndRetry(GameTestHelper context) {
         // 三刀只在最后一次挥空时扣一个，新请求号重放同一效果不能再扣。
         try (var fixture = new HumanCombatFixture(context)) {
@@ -170,7 +172,7 @@ public final class HumanCombatWorldGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void twoHandDoseAndOffhandDamageChargeCorrectArms(GameTestHelper context) {
         // 双手类型让 Damage 分摊两臂；副手类型必须只消耗左臂。
         try (var fixture = new HumanCombatFixture(context)) {
@@ -206,7 +208,7 @@ public final class HumanCombatWorldGameTest {
                 .mapToDouble(state -> state.getFatigue()).sum();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void sweepHitsBothHalvesOnceAndSharesFiveTargetBudget(GameTestHelper context) {
         // 前半圈四个、后半圈四个，重叠目标转身后仍不能再次占用预算。
         try (var fixture = new HumanCombatFixture(context)) {
@@ -231,19 +233,19 @@ public final class HumanCombatWorldGameTest {
         context.succeed();
     }
 
-    @GameTest(environment = "meridian_human_test:shield_axe")
+    @GameTest(environment = "meridian_human_test:shield_axe", maxTicks = DEFAULT_TIMEOUT)
     public void axeBreaksShieldBeforeDamage(GameTestHelper context) {
         // 斧必须先让盾失效，本击直接进入真实伤害链。
         shield(context, Items.IRON_AXE, SHIELD_AXE_TICKS);
     }
 
-    @GameTest(environment = "meridian_human_test:shield_sword")
+    @GameTest(environment = "meridian_human_test:shield_sword", maxTicks = DEFAULT_TIMEOUT)
     public void swordBlocksThenCoolsShield(GameTestHelper context) {
         // 剑保留本击格挡，随后才给盾两秒冷却。
         shield(context, Items.IRON_SWORD, SHIELD_SWORD_TICKS);
     }
 
-    @GameTest(environment = "meridian_human_test:shield_block")
+    @GameTest(environment = "meridian_human_test:shield_block", maxTicks = DEFAULT_TIMEOUT)
     public void blockItemDoesNotDisableShield(GameTestHelper context) {
         // 方块击中举盾玩家不会产生破盾冷却。
         shield(context, Items.DIRT, 0);
@@ -299,7 +301,7 @@ public final class HumanCombatWorldGameTest {
         }
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void woodenDoorsDropAndIronAndNonToolsRefuse(GameTestHelper context) {
         // 对真实方块逐项执行劈门，检查木门掉落与类别限制。
         try (var fixture = new HumanCombatFixture(context)) {
@@ -316,7 +318,7 @@ public final class HumanCombatWorldGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void offhandAxeBreaksDoorWithoutMovingItemsOrExtraWear(GameTestHelper context) {
         // 主手剑不能阻止副手斧劈门，两个手位和末击之外的耐久保持不变。
         var offHand = TechniqueMessages.Hand.OFF_HAND;
@@ -335,7 +337,7 @@ public final class HumanCombatWorldGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void playerDoorRuleDisablesBreaking(GameTestHelper context) {
         // 服主总开关经过真实 gamerule 命令切换，测试结束恢复原设置；26.2 规则名须为小写命名空间 ID。
         try (var fixture = new HumanCombatFixture(context)) {

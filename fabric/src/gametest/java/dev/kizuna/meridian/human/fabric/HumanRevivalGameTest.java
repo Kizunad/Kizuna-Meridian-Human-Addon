@@ -39,6 +39,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import static dev.kizuna.meridian.human.fabric.HumanGameTestTicks.DEFAULT_TIMEOUT;
+
 /** 真实玩家死亡、重生、健康投影和腿力恢复共用原来的权威身体。 */
 public final class HumanRevivalGameTest {
     private static final long MILLIS_PER_TICK = 50;
@@ -71,7 +73,7 @@ public final class HumanRevivalGameTest {
         }
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void livingEntityReplacementAndDimensionTravelDoNotSpendLifespan(GameTestHelper context) {
         // 存活换实体与跨维度事件均使用正式 Fabric 回调，不应扣费或清掉真元。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {

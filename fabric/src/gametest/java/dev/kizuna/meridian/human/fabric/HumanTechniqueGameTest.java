@@ -53,6 +53,8 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Predicate;
 
+import static dev.kizuna.meridian.human.fabric.HumanGameTestTicks.DEFAULT_TIMEOUT;
+
 /** 真实玩家宿主的协议、施放、世界效果、归位及断线整体回归。 */
 public final class HumanTechniqueGameTest {
     private static final long MILLIS_PER_TICK = 50;
@@ -63,7 +65,7 @@ public final class HumanTechniqueGameTest {
     private static final double DIAGONAL_COMPONENT = Math.sqrt(0.5);
     private static final String OPEN_MERIDIAN = "left_large_intestine_meridian";
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void legacyBodyLoadsMigratesAndCastsWithHandAndFootBindings(GameTestHelper context) {
         // 启动前准备的真实旧文件由正式宿主加载；登录、命令学习和施放不替换任何服务。
         try (var fixture = new HumanTechniqueTestPlayer(context, HumanLegacyBodyTestBootstrap.PLAYER_ID)) {
@@ -84,7 +86,7 @@ public final class HumanTechniqueGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void claimsOnlyOnlinePlayersAndSettlesClock(GameTestHelper context) {
         // 真实入口只认领完成登录的在线玩家，其他实体和离线 UUID 均明确未认领。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
@@ -105,7 +107,7 @@ public final class HumanTechniqueGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void activityPreservesRevisionFailureAndDurableReplay(GameTestHelper context) {
         // 同一活动走 Framework 的持久回执，过期版本与不同内容不能覆盖权威状态。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
@@ -136,7 +138,7 @@ public final class HumanTechniqueGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void impulseConvertsSpeedSynchronizesAndDeduplicates(GameTestHelper context) {
         // 服务端速度、同步标记、实际本人和观察者速度包必须沿原版跟踪器一致生效。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
@@ -235,7 +237,7 @@ public final class HumanTechniqueGameTest {
         assertVelocity(context, fixture, new Vec3(0, EXPECTED_SPEED_PER_TICK, EXPECTED_SPEED_PER_TICK));
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void commandLearnCastFinishAndReleasedQiReturnsOnce(GameTestHelper context) throws Exception {
         // 管理命令、真实服务 tick、身体投影和默认释放账户贯穿一次完整施放。
         var fixture = prepared(context);
@@ -305,7 +307,7 @@ public final class HumanTechniqueGameTest {
         return total;
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void disconnectCancelsBeforeUnbindWithoutRefund(GameTestHelper context) {
         // 真实断线事件必须在身体访问撤销前清除施放，保留冷却和已经扣除的费用。
         try (var fixture = prepared(context)) {
@@ -325,7 +327,7 @@ public final class HumanTechniqueGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void abandonedSavedCastCancelsBeforeReclaimWithoutEffects(GameTestHelper context) {
         // 异常退出没有断线回调；重新认领前必须清理保存中的施放且不能补发冲量。
         try (var fixture = prepared(context)) {
@@ -355,7 +357,7 @@ public final class HumanTechniqueGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void nativeDeathCancelsBeforeBodyDeath(GameTestHelper context) {
         // 原版死亡前先取消存活身体的施放，随后死亡确认不会留下 active_cast。
         try (var fixture = prepared(context)) {
@@ -371,7 +373,7 @@ public final class HumanTechniqueGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void healthDeathClearsCastWithoutRewritingDamageRevision(GameTestHelper context) {
         // 健康命令先按原版本致死，再用可信进度清理；不能为了取消而改写伤害版本。
         try (var fixture = prepared(context)) {
@@ -399,7 +401,7 @@ public final class HumanTechniqueGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void deadSavedResidualLoadsAndReconnectsWithoutPausing(GameTestHelper context) {
         // 保存真实的死体残留，读档和在线重新认领均使用服务统一入口，不把 BODY_DEAD 当恢复失败。
         try (var fixture = prepared(context)) {
@@ -465,7 +467,7 @@ public final class HumanTechniqueGameTest {
         context.assertTrue(snapshot.actions().isEmpty(), "清理后仍有动作占用");
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void breathingAndCastShareTissueUntilTheirOwnStop(GameTestHelper context) {
         // Framework 按实例保留组织占用；功法收势只能停止自己的实例。
         var fixture = prepared(context);

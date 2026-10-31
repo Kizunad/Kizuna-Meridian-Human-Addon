@@ -52,6 +52,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 
+import static dev.kizuna.meridian.human.fabric.HumanGameTestTicks.DEFAULT_TIMEOUT;
+
 /** 真实玩家的双手事实、移动属性、表现意图及未认领恢复回归。 */
 public final class HumanTechnique6aGameTest {
     private static final long MILLIS_PER_TICK = 50;
@@ -75,7 +77,7 @@ public final class HumanTechnique6aGameTest {
         });
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void inspectIncludesEmptyHandsOffhandAndContainerContents(GameTestHelper context) {
         // 事实经过正式字节入口，同时核对空消息、物品标签及显式布尔字段。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
@@ -106,7 +108,7 @@ public final class HumanTechnique6aGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void castSlowsSynchronizesAllowsMovementAndImpulseThenFinishes(GameTestHelper context) {
         // 起手立即同步限速，主动移动与冲量仍可执行，收势恢复属性并停止表现。
         var fixture = prepared(context);
@@ -145,7 +147,7 @@ public final class HumanTechnique6aGameTest {
         });
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void staggerAndDisconnectUnlockAndStop(GameTestHelper context) {
         // 僵直打断和正式断线回调都在宿主撤销认领前完成实体清理；打断后只剩僵直减速。
         try (var fixture = prepared(context); var observer = new Presentations(fixture)) {
@@ -168,7 +170,7 @@ public final class HumanTechnique6aGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void backwardAndZeroInputDefaultWorkWhileSlowed(GameTestHelper context) {
         // 零输入默认向后，显式向后与非零世界输入分别核对，限速不缩放冲量。
         try (var fixture = prepared(context)) {
@@ -189,7 +191,7 @@ public final class HumanTechnique6aGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void orthogonalImpulsesCombineInEitherOrderAndRetryIsIdempotent(GameTestHelper context) {
         // 同刻水平与竖直冲量各自保留正交分量，重放成功效果不能改写外部速度。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
@@ -232,7 +234,7 @@ public final class HumanTechnique6aGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void elevatedTargetKeepsFullHorizontalImpulseAndVerticalSpeed(GameTestHelper context) {
         // 错层目标只决定水平方向，不能把声明速度耗在随后被丢弃的竖直分量上。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
@@ -258,7 +260,7 @@ public final class HumanTechnique6aGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void movementIdentityAndPresentationRetriesAreIdempotent(GameTestHelper context) {
         // 多个施放的属性身份独立，效果身份去重覆盖不同请求号，冲突保留原始失败码。
         try (var fixture = new HumanTechniqueTestPlayer(context); var observer = new Presentations(fixture)) {
@@ -284,7 +286,7 @@ public final class HumanTechnique6aGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void startCallbackCancelsAfterDeliveryWithoutRecursion(GameTestHelper context) {
         // 同步 START 取消必须先退出回调，再交付唯一 STOP 和解锁。
         try (var fixture = prepared(context); var observer = new Presentations(fixture)) {
@@ -307,7 +309,7 @@ public final class HumanTechnique6aGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void synchronousResubmissionDistinguishesExecutingFromSucceeded(GameTestHelper context) {
         // 执行中不返回成功，冲突仍拒绝；外层失败后同身份必须可以重新执行。
         try (var fixture = new HumanTechniqueTestPlayer(context); var observer = new Presentations(fixture)) {
@@ -337,7 +339,7 @@ public final class HumanTechnique6aGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void disappearedTargetCancelsAndUnlocksRealPlayer(GameTestHelper context) {
         // 起手后销毁真实目标，冲量拒绝仍须完成身体、移动属性和表现清理。
         var fixture = prepared(context, HumanTechniqueTestCatalog.TARGETED_TECHNIQUE_ID);
@@ -359,7 +361,7 @@ public final class HumanTechnique6aGameTest {
         });
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void unclaimedRecoveryRetriesStopBeforeClearingProgress(GameTestHelper context) {
         // 模拟无断线回调的残留，未认领时失败不清进度，重试先清实体再提交身体。
         try (var fixture = prepared(context); var observer = new Presentations(fixture)) {
@@ -396,7 +398,7 @@ public final class HumanTechnique6aGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void deadRecoveryCleansEntityAndRejectsStartOrImpulse(GameTestHelper context) {
         // 死体进度通过可信入口清除，实体适配器仍执行停止与解锁，禁止恢复开始效果。
         try (var fixture = prepared(context); var observer = new Presentations(fixture)) {

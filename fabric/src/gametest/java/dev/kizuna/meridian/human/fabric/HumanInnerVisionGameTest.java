@@ -27,12 +27,14 @@ import net.minecraft.world.item.ItemStack;
 import java.io.IOException;
 import java.util.UUID;
 
+import static dev.kizuna.meridian.human.fabric.HumanGameTestTicks.DEFAULT_TIMEOUT;
+
 /** 通过实际玩家、统一握手、右键物品和网络订阅验证内观授权闭环。 */
 public final class HumanInnerVisionGameTest {
     private static final int RESET_SETTLE_TICKS = 3;
     private static final String UNLOCK_MESSAGE = "message.meridian_progression.inner_vision_unlocked";
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void readingUnlocksInspectionAndResetRevokesSubscription(GameTestHelper context) {
         // 札记已读也不能跳过内观卷；整个回归使用玩家真实身体而非独立存储夹具。
         var fixture = new HumanTechniqueTestPlayer(context);
