@@ -37,15 +37,19 @@ final class HumanCombatFixture implements AutoCloseable {
     static final double TARGET_DISTANCE = 2;
     static final long MILLIS_PER_TICK = 50;
     private static final int PLAYER_HEIGHT = 2;
+    /** Fabric 空结构 8×8 的中心列；前后左右各留几格，目标不贴近结构边界。 */
+    private static final int STRUCTURE_CENTER = 4;
     final HumanTechniqueTestPlayer human;
     final GameTestHelper context;
     final List<Target> targets = new ArrayList<>();
 
     HumanCombatFixture(GameTestHelper context) {
         // 每次测试隔离玩家与空间，使用生存模式覆盖实际磨损与做功。
+        // 26.2 的 GameTest 会用屏障把结构四周围起来（1.20.1 自动运行时不围），玩家站在结构中心，
+        // 身后两格的目标才不会落进屏障墙里挡住视线。
         this.context = context;
         human = new HumanTechniqueTestPlayer(context, UUID.randomUUID(), ObservedPlayer::new);
-        var relative = new BlockPos(1, PLAYER_HEIGHT, 1);
+        var relative = new BlockPos(STRUCTURE_CENTER, PLAYER_HEIGHT, STRUCTURE_CENTER);
         Vec3 position = Vec3.atBottomCenterOf(context.absolutePos(relative));
         human.player.snapTo(position.x, position.y, position.z, 0, 0);
         human.player.setGameMode(GameType.SURVIVAL);
