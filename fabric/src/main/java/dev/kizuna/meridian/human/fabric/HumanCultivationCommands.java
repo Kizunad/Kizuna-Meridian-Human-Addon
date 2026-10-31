@@ -1,64 +1,71 @@
 package dev.kizuna.meridian.human.fabric;
 
-import com.mojang.brigadier.CommandDispatcher;
-import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import dev.kizuna.meridian.fabric.MeridianCommands;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.*;
+import java.util.Collection;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
-import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 
-/** 仅 OP 的开脉完成和精确密度调试，始终进入 Framework 权威事务。 */
+/** 仅 OP 的开脉完成调试，始终进入 Framework 权威事务。 */
 final class HumanCultivationCommands {
+    private static final String ALL_MERIDIANS = "all";
+
     private HumanCultivationCommands() {
         // 调试不暴露为客户端能力，也不授予残卷进度。
     }
 
-    static void register(CommandDispatcher<CommandSourceStack> dispatcher,
-                         Function<ServerPlayer, HumanPlayerBody> bodies, Consumer<ServerPlayer> changed) {
-        // 参数明确指定玩家，服务端控制台也可调试；all 是该账户全身总量。
-        dispatcher.register(Commands.literal("meridian").then(Commands.literal("opening")
-                .then(Commands.literal("complete").requires(source -> source.hasPermission(2))
-                        .then(Commands.argument("player", EntityArgument.player())
-                                .then(Commands.argument("meridian", StringArgumentType.word()).executes(context -> {
-                                    var player = EntityArgument.getPlayer(context, "player");
-                                    var body = bodies.apply(player);
-                                    if (body == null) {
-                                        return 0;
+    static void register(Function<ServerPlayer, HumanPlayerBody> bodies, Consumer<ServerPlayer> changed) {
+        // /meridian opening complete [<targets>] <meridian|all>：省略目标时完成执行者本人的开拓；控制台需指定目标。
+        MeridianCommands.register(MeridianCommands.Branch.OPENING, "complete", MeridianCommands.GAMEMASTER,
+                (node, context) -> MeridianCommands.optionalPlayers(node, (parent, targets) -> parent.then(
+                        Commands.argument("meridian", StringArgumentType.word())
+                                .suggests((command, builder) -> {
+                                    // 补全 all 与第一个目标实际身体的经脉；目标还解析不出来时只给 all。
+                                    builder.suggest(ALL_MERIDIANS);
+                                    HumanPlayerBody body;
+                                    try {
+                                        body = bodies.apply(targets.resolve(command).iterator().next());
+                                    } catch (CommandSyntaxException unresolved) {
+                                        body = null;
                                     }
-                                    FailureCode result = body.completeOpening(now(player), StringArgumentType.getString(context, "meridian"));
-                                    changed.accept(player);
-                                    context.getSource().sendSuccess(() -> Component.literal("开脉完成：" + result), false);
-                                    return result == FailureCode.FAILURE_CODE_UNSPECIFIED ? 1 : 0;
-                                }))))));
-        var set = Commands.literal("set").requires(source -> source.hasPermission(2));
-        var player = Commands.argument("player", EntityArgument.player());
-        for (String account : java.util.List.of("lumen", "wall")) {
-            player.then(Commands.literal(account)
-                    .then(Commands.argument("meridian", StringArgumentType.word())
-                            .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0))
-                                    .then(Commands.argument("density", DoubleArgumentType.doubleArg(.01)).executes(context -> {
-                                        ServerPlayer target = EntityArgument.getPlayer(context, "player");
-                                        HumanPlayerBody body = bodies.apply(target);
-                                        if (body == null) {
-                                            return 0;
+                                    if (body != null) {
+                                        for (var meridian : body.snapshot().structure().meridians()) {
+                                            if (meridian.id().value().startsWith(builder.getRemaining())) {
+                                                builder.suggest(meridian.id().value());
+                                            }
                                         }
-                                        String id = StringArgumentType.getString(context, "meridian");
-                                        DebugQi request = DebugQi.newBuilder().setMode(DebugQiMode.SET_INVENTORY)
-                                                .setMeridianId(id.equals("all") ? "" : id).setWall(account.equals("wall"))
-                                                .setAmount(DoubleArgumentType.getDouble(context, "amount"))
-                                                .setDensity(DoubleArgumentType.getDouble(context, "density")).build();
-                                        FailureCode result = body.debugQi(now(target), request);
-                                        changed.accept(target);
-                                        context.getSource().sendSuccess(() -> Component.literal("密度调试：" + result), false);
-                                        return result == FailureCode.FAILURE_CODE_UNSPECIFIED ? 1 : 0;
-                                    })))));
+                                    }
+                                    return builder.buildFuture();
+                                })
+                                .executes(command -> complete(command.getSource(), bodies, changed,
+                                        targets.resolve(command),
+                                        StringArgumentType.getString(command, "meridian"))))));
+    }
+
+    private static int complete(CommandSourceStack source, Function<ServerPlayer, HumanPlayerBody> bodies,
+                                Consumer<ServerPlayer> changed, Collection<ServerPlayer> targets, String meridian) {
+        // 逐个目标完成开拓；all 是该身体全部经脉。没有身体的目标跳过，不计入成功数。
+        int completed = 0;
+        for (ServerPlayer player : targets) {
+            HumanPlayerBody body = bodies.apply(player);
+            if (body == null) {
+                continue;
+            }
+            FailureCode result = body.completeOpening(now(player), meridian);
+            changed.accept(player);
+            source.sendSuccess(() -> Component.translatable(HumanLang.OPENING_COMPLETE, player.getDisplayName(),
+                    String.valueOf(result)), false);
+            if (result == FailureCode.FAILURE_CODE_UNSPECIFIED) {
+                completed++;
+            }
         }
-        dispatcher.register(Commands.literal("meridian").then(Commands.literal("purity").then(set.then(player))));
+        return completed;
     }
 
     private static long now(ServerPlayer player) {

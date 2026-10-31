@@ -9,7 +9,7 @@
 - 人体剪影、骨架、肌肉、器官模型和单脉几何归本包，使用框架 Protobuf 展示契约绑定实际身体 ID。人体周天光迹与专属客户端表现归 Human-UI；UI 附属只实现通用展示，人体内容源码不反向依赖 UI；模型本身不增加身体状态或生命值。
 - 对外通信复用框架 `.proto` 的 protoc 生成消息，依赖通过 Gradle composite build 接入。不复制框架源码、协议或生成类，不另建 JSON 通信。
 - 新通信语义确有需要时先设计 Protobuf 契约；通用算子归框架，人体数值、构型和固有配方归本仓库，功法学习与 3D 内景不混入人体附属。
-- 运行时异常和文案集中在 `server/src/main/java/dev/kizuna/meridian/human/server/HumanErrors.java`；框架拒绝保持其原始 Protobuf 失败码。
+- 运行时异常和文案集中在 `server/src/main/java/dev/kizuna/meridian/human/server/HumanErrors.java`；框架拒绝保持其原始 Protobuf 失败码。指令反馈与登录提示用 `fabric/src/main/resources/assets/meridian_human_host/lang`，键名集中在 `HumanLang`。
 - 只保留必要整体回归，覆盖独立内容注册、真实请求链、守恒、失败与重试、恢复和产物；临时验证通过后清理。
 - 文档编辑源为 `docs/wiki/`，README 仅作为入口。行为或内容契约变化同步更新文档，交付前运行 `./gradlew build`、`./gradlew demo` 与文档检查。
 - 用 patch/Edit 修改文件，命令路径使用双引号。保留用户修改，不强推、不改历史；提交、推送与远端建仓分别按用户授权执行。

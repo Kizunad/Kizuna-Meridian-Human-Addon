@@ -34,13 +34,7 @@
 
 ## OP 命令与验证
 
-权限等级2，可从控制台指定玩家：
-
-```text
-/meridian opening complete <玩家> <经脉ID|all>
-/meridian purity set <玩家> lumen <经脉ID|all> <数量> <密度>
-/meridian purity set <玩家> wall <经脉ID|all> <数量> <密度>
-```
+权限等级 2，可从控制台指定玩家：开脉完成用 `/meridian opening complete`（本包登记），按经脉设定内腔或外壁的真元数量与密度用 `/meridian qi set` 的带参数形式（Debug 登记，经本包的调试入口提交）。写法见 [Framework 指令页](https://github.com/Kizunad/Kizuna-Meridian-Mod-Framework/wiki/Commands)。
 
 完成 `all` 指全部现存经脉；只测游炁应逐条指定八脉。已开经脉不重复扩容。真元 `all` 的数量是全身总量，按扣除在途预约后的可用体积分配，0可清空；不能挤超体积或在途预约。调试不授予残卷或熟练度。
 

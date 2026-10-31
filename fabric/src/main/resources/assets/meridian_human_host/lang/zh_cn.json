@@ -1,0 +1,12 @@
+{
+  "message.meridian_human_host.body_bound": "人体已绑定：/meridian body status 查看动作，/meridian watch body on 实时观察下肢余力。",
+  "commands.meridian_human_host.target_not_player": "%s 不是玩家，没有人体",
+  "commands.meridian_human_host.status.no_body": "%s 没有可查看的身体",
+  "commands.meridian_human_host.watch.body.on": "已开启下肢余力实时观察",
+  "commands.meridian_human_host.watch.body.off": "已关闭实时观察",
+  "commands.meridian_human_host.qi.submitted": "真元调试已提交（%s）：%s；内腔 %s → %s 元。",
+  "commands.meridian_human_host.qi.all_meridians": "全身经脉",
+  "commands.meridian_human_host.qi.meridian": "%s：内腔 %s / 稳定容量 %s 元，%s",
+  "commands.meridian_human_host.qi.body": "身体总量 %s 元；经脉内腔 %s 元；外壁 %s 元；在途 %s 元。",
+  "commands.meridian_human_host.opening.complete": "开脉完成（%s）：%s"
+}

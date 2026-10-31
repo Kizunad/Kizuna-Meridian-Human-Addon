@@ -484,7 +484,7 @@ public final class HumanTechniqueGameTest implements FabricGameTest {
         // 旧身体与新身体都通过同一公开命令写入可信学习记录。
         var server = fixture.player.getServer();
         int learned = server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),
-                "meridian_technique learn " + fixture.player.getStringUUID() + " "
+                "meridian technique learn " + fixture.player.getStringUUID() + " "
                         + HumanTechniqueTestCatalog.TECHNIQUE_ID);
         context.assertTrue(learned == 1 && TechniqueFabric.service().known(fixture.player.getUUID()).size() == 1,
                 "学会命令未写入可信知识");

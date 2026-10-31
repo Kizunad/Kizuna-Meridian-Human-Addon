@@ -43,14 +43,7 @@ Progression 是必装依赖。`SERVER_STARTING` 安装当前服务器的 `Progre
 
 Minecraft 入口由本包必装 Fabric 宿主注册，实际入账算子、协议、容量校验和事务在 Meridian Framework。必须同步更新两个产物。
 
-| 指令 | 用途 |
-|---|---|
-| `/meridian zhenyuan` | 查看全身内腔、外壁、在途及身体总账 |
-| `/meridian zhenyuan get <经脉ID>` | 查看指定脉的内腔、稳定容量和开拓状态 |
-| `/meridian zhenyuan fill` | 补满全身经脉内腔 |
-| `/meridian zhenyuan fill <经脉ID>` | 补满指定脉 |
-| `/meridian zhenyuan fill <经脉ID> <目标总量>` | 补足至指定储量，已有更多时不扣除 |
-| `/meridian zhenyuan diffuse <新增量> [经脉ID]` | 从单个入口注入，按真实通路逐步扩散；省略入口时取肺出口实际连接的经脉 |
+本包在 `/meridian qi` 下登记 `get`（全身分账或指定脉的内腔、稳定容量和开拓状态）和 `diffuse`（从单个入口注入，按真实通路逐步扩散；省略入口时取肺出口实际连接的经脉）。补满内腔的 `qi fill` 与设定库存的 `qi set` 由 Debug 登记，经 `HumanDebugHost` 进入同一提交路径。写法见 [Framework 指令页](https://github.com/Kizunad/Kizuna-Meridian-Mod-Framework/wiki/Commands)。
 
 写入需要权限等级 2（单机开启作弊或服务器管理员），ID 支持 Tab 补全。默认只注入密度 `0.01` 的游离态无属性真元，保留在途、外壁、其他属性、开拓与疲劳；扣除预约后的体积不足会整笔拒绝，不截断剂量。开脉运行中同样受稳定体积限制。
 
@@ -179,11 +172,11 @@ python3 "scripts/check_docs.py"
 
 “经脉”窗口通过 `meridian:opening_request` 提交框架 `MeridianOpeningRequest`，`meridian:opening_response` 返回 `ResponseEnvelope`。宿主绑定当前玩家、在服务器线程串行执行，与吐纳共享每秒 40 包额度；格式异常只拒绝该包，旧连接消息丢弃。首次 `meridian:body_view` 附带 Human 规则选项，后续按身体 revision 推送变化；客户端不上传时间或开脉结果。断线暂停开脉并清除连接回执缓存，已完成成长仍由原身体保存。
 
-| 命令 | 用途 |
-|---|---|
-| `/meridian status` | 当前动作、下肢最小余力、身体 revision；注册了行走负荷提供者时末尾追加一行负荷说明 |
-| `/meridian watch on` / `off` | 开关快捷栏上方的实时下肢余力 |
-| `/meridian tissue left_rectus_femoris` | 左股直肌实际疲劳、当前耐力/力量/功率；ID 支持补全 |
+本包登记 `/meridian body status`（当前动作、下肢最小余力、身体 revision；注册了行走负荷提供者时末尾追加一行负荷说明）、`/meridian body tissue`（单个组织的实际疲劳、当前耐力/力量/功率，ID 支持补全）和观察频道 `/meridian watch body`（快捷栏上方的实时下肢余力），写法见 [Framework 指令页](https://github.com/Kizunad/Kizuna-Meridian-Mod-Framework/wiki/Commands)。
+
+`body status` 是本包的三级节点，其他附属经公开入口 `HumanBodyStatus` 挂入：`registerView` 登记非玩家目标的身体视图（Threatening 的类人生物快照），按登记顺序询问，第一个认领目标的视图负责输出；`registerDetail` 登记 `full` 完整明细（Debug），只能登记一次。没有登记明细时不出现 `full`。
+
+指令反馈与登录提示使用 `fabric/src/main/resources/assets/meridian_human_host/lang` 的键（键名集中在 `HumanLang`）；部位、组织、器官与经脉名沿用解剖数据中文名，不加键。
 
 识别基于服务端实际水平位移、地面状态和疾跑标志。静止按住疾跑不占用；乘坐、飞行、游泳、明显传送与受击区间过滤。它是基础可信适配，不是完整移动反作弊；宿主仍可提供自己的位置校验。
 
@@ -199,7 +192,7 @@ python3 "scripts/check_docs.py"
 
 ### 行走负荷提供者
 
-2026-10-30 源码新增服务端接入点，JUnit 已覆盖倍率与爆发截断。可信附属在模组初始化阶段调用一次 `HumanMovementLoads.register(HumanMovementLoad)`；第二次注册抛出 `IllegalStateException`，避免两个附属争用同一规则。`HumanMovementLoad.multiplier(ServerPlayer)` 返回当前负荷倍率，`status(ServerPlayer)` 返回 `/meridian status` 总览末尾追加的一行，返回空则不追加。
+2026-10-30 源码新增服务端接入点，JUnit 已覆盖倍率与爆发截断。可信附属在模组初始化阶段调用一次 `HumanMovementLoads.register(HumanMovementLoad)`；第二次注册抛出 `IllegalStateException`，避免两个附属争用同一规则。`HumanMovementLoad.multiplier(ServerPlayer)` 返回当前负荷倍率，`status(ServerPlayer)` 返回 `/meridian body status` 总览末尾追加的一行，返回空则不追加。
 
 宿主在玩家加入和重生绑定释放回调时，同时把实时玩家实体绑定为负荷来源；每个运动结算区间在服务器主线程读取一次倍率。行走与疾跑每块肌肉的目标功率乘以倍率，再照旧受爆发和剩余耐力截断。倍率必须是不小于 1 的有限数，否则该次结算失败并按上文宿主故障暂停该玩家身体，不会静默改成 1。没有提供者时倍率为 1，状态命令不追加行。Kizuna Meridian Burden 附属按 BS3D Weights 的有效负重注册该提供者。
 

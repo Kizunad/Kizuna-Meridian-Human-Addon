@@ -1,0 +1,12 @@
+{
+  "message.meridian_human_host.body_bound": "Human body bound: /meridian body status shows your actions, /meridian watch body on shows remaining leg endurance live.",
+  "commands.meridian_human_host.target_not_player": "%s is not a player and has no human body",
+  "commands.meridian_human_host.status.no_body": "%s has no body to inspect",
+  "commands.meridian_human_host.watch.body.on": "Live leg endurance watch enabled",
+  "commands.meridian_human_host.watch.body.off": "Live watch disabled",
+  "commands.meridian_human_host.qi.submitted": "Qi debug submitted (%s): %s; lumen %s → %s yuan.",
+  "commands.meridian_human_host.qi.all_meridians": "all meridians",
+  "commands.meridian_human_host.qi.meridian": "%s: lumen %s / stable capacity %s yuan, %s",
+  "commands.meridian_human_host.qi.body": "Body total %s yuan; meridian lumens %s yuan; walls %s yuan; in transit %s yuan.",
+  "commands.meridian_human_host.opening.complete": "Opening completed (%s): %s"
+}

@@ -477,7 +477,7 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
         context.assertTrue(fixture.body().completeOpening(now, "left_large_intestine_meridian")
                 == FailureCode.FAILURE_CODE_UNSPECIFIED, "开脉失败");
         int learned = server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),
-                "meridian_technique learn " + fixture.player.getStringUUID() + " "
+                "meridian technique learn " + fixture.player.getStringUUID() + " "
                         + techniqueId);
         context.assertTrue(learned == 1, "学习失败");
         return fixture;

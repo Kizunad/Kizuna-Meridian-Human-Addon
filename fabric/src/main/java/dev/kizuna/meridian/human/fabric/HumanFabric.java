@@ -1,6 +1,8 @@
 package dev.kizuna.meridian.human.fabric;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import dev.kizuna.meridian.fabric.MeridianCommands;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.EnvironmentHostRequest;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.EnvironmentHostResponse;
 import dev.kizuna.meridian.human.server.HumanContent;
@@ -31,7 +33,6 @@ import dev.kizuna.meridian.protocol.pb.PresentationMessages.BodyViewUpdate;
 import dev.kizuna.meridian.protocol.pb.PresentationMessages.MeridianOpeningOptions;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
-import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerEntityWorldChangeEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
@@ -41,6 +42,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
@@ -48,11 +50,13 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.storage.LevelResource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Files;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -326,18 +330,16 @@ public final class HumanFabric implements ModInitializer {
                 }
             });
         });
-        CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) ->
-                HumanCultivationCommands.register(dispatcher,
-                        player -> state == null || failed.contains(player.getUUID()) ? null : state.find(player.getUUID()),
-                        player -> state.setDirty()));
-        CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) ->
-                HumanQiCommands.register(dispatcher,
-                        player -> state == null || failed.contains(player.getUUID()) ? null : state.find(player.getUUID()),
-                        player -> {
-                            // 命令提交和身体推送沿用唯一世界存档，下一 tick 的版本推送会刷新全部页面。
-                            state.setDirty();
-                            state.find(player.getUUID()).publishGathering();
-                        }));
+        HumanCultivationCommands.register(
+                player -> state == null || failed.contains(player.getUUID()) ? null : state.find(player.getUUID()),
+                player -> state.setDirty());
+        HumanQiCommands.register(
+                player -> state == null || failed.contains(player.getUUID()) ? null : state.find(player.getUUID()),
+                player -> {
+                    // 命令提交和身体推送沿用唯一世界存档，下一 tick 的版本推送会刷新全部页面。
+                    state.setDirty();
+                    state.find(player.getUUID()).publishGathering();
+                });
     }
 
     private void join(ServerPlayer player, MinecraftServer server) {
@@ -354,7 +356,7 @@ public final class HumanFabric implements ModInitializer {
             sentRevisions.remove(player.getUUID());
             failed.remove(player.getUUID());
             ProgressionFabric.publishProgress(player);
-            player.displayClientMessage(Component.literal("人体已绑定：/meridian status 查看动作，/meridian watch on 实时观察下肢余力。"), false);
+            player.displayClientMessage(Component.translatable(HumanLang.BODY_BOUND), false);
         } catch (RuntimeException failure) {
             fail(player, failure);
         }
@@ -740,73 +742,101 @@ public final class HumanFabric implements ModInitializer {
     }
 
     private void registerCommands() {
-        // 数值命令只能查看自己的身体；没有设置疲劳或自报动作的普通玩家命令。
-        CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) -> dispatcher.register(
-                Commands.literal("meridian")
-                        .then(Commands.literal("status").executes(context -> inspect(context.getSource().getPlayerOrException(), null)))
-                        .then(Commands.literal("opening")
-                                .executes(context -> opening(context.getSource().getPlayerOrException(), "status", null))
-                                .then(Commands.literal("pause")
-                                        .executes(context -> opening(context.getSource().getPlayerOrException(), "pause", null)))
-                                .then(Commands.literal("start").then(Commands.argument("meridian", StringArgumentType.word())
-                                        .suggests((context, builder) -> {
-                                            // 补全来自当前身体，经脉替换后不会继续显示不存在的目标。
-                                            HumanPlayerBody body = state == null ? null : state.find(context.getSource().getPlayerOrException().getUUID());
-                                            if (body != null) {
-                                                for (var meridian : body.snapshot().structure().meridians()) {
-                                                    if (meridian.id().value().startsWith(builder.getRemaining())) {
-                                                        builder.suggest(meridian.id().value());
-                                                    }
-                                                }
-                                            }
-                                            return builder.buildFuture();
-                                        }).executes(context -> opening(context.getSource().getPlayerOrException(), "start",
-                                                StringArgumentType.getString(context, "meridian"))))))
-                        .then(Commands.literal("tissue").then(Commands.argument("id", StringArgumentType.word())
-                                .suggests((context, builder) -> {
-                                    // 用实际身体组织 ID 提供补全，未来改造后自动反映新的构型。
-                                    HumanPlayerBody body = state == null ? null
-                                            : state.find(context.getSource().getPlayerOrException().getUUID());
-                                    if (body != null) {
-                                        for (var tissue : body.snapshot().structure().tissues()) {
-                                            if (tissue.id().value().startsWith(builder.getRemaining())) {
-                                                builder.suggest(tissue.id().value());
-                                            }
-                                        }
+        // body status/tissue、opening 与 watch body 挂在 Framework 的 /meridian 注册点；玩家查看自己的身体为权限 0，
+        // 查看他人另要权限 2。没有设置疲劳或自报动作的普通玩家命令。
+        MeridianCommands.register(MeridianCommands.Branch.BODY, "status", MeridianCommands.PLAYER, (node, context) ->
+                MeridianCommands.optionalEntity(node, (parent, target) -> {
+                    parent.executes(command -> status(command.getSource(), target.resolve(command)));
+                    HumanBodyStatus.attachDetail(parent, target);
+                }));
+        MeridianCommands.register(MeridianCommands.Branch.BODY, "tissue", MeridianCommands.PLAYER, (node, context) -> {
+            // 组织 ID 在前、可选目标在后（对照表 #5）；补全用执行者实际身体的组织，改造后自动反映新构型。
+            var tissue = Commands.argument("id", StringArgumentType.word()).suggests((command, builder) -> {
+                HumanPlayerBody body = state == null || command.getSource().getPlayer() == null ? null
+                        : state.find(command.getSource().getPlayer().getUUID());
+                if (body != null) {
+                    for (var definition : body.snapshot().structure().tissues()) {
+                        if (definition.id().value().startsWith(builder.getRemaining())) {
+                            builder.suggest(definition.id().value());
+                        }
+                    }
+                }
+                return builder.buildFuture();
+            });
+            MeridianCommands.optionalEntity(tissue, (parent, target) -> parent.executes(command -> inspect(
+                    command.getSource(), target.resolve(command), StringArgumentType.getString(command, "id"))));
+            node.then(tissue);
+        });
+
+        // 开脉：/meridian opening 本身显示状态，start/pause 只作用于执行者本人。
+        MeridianCommands.registerBranchCommand(MeridianCommands.Branch.OPENING, MeridianCommands.PLAYER,
+                command -> opening(command.getSource(), "status", null));
+        MeridianCommands.register(MeridianCommands.Branch.OPENING, "pause", MeridianCommands.PLAYER, (node, context) ->
+                node.executes(command -> opening(command.getSource(), "pause", null)));
+        MeridianCommands.register(MeridianCommands.Branch.OPENING, "start", MeridianCommands.PLAYER, (node, context) ->
+                node.then(Commands.argument("meridian", StringArgumentType.word())
+                        .suggests((command, builder) -> {
+                            // 补全来自当前身体，经脉替换后不会继续显示不存在的目标。
+                            HumanPlayerBody body = state == null || command.getSource().getPlayer() == null ? null
+                                    : state.find(command.getSource().getPlayer().getUUID());
+                            if (body != null) {
+                                for (var meridian : body.snapshot().structure().meridians()) {
+                                    if (meridian.id().value().startsWith(builder.getRemaining())) {
+                                        builder.suggest(meridian.id().value());
                                     }
-                                    return builder.buildFuture();
-                                }).executes(context -> inspect(context.getSource().getPlayerOrException(), StringArgumentType.getString(context, "id")))))
-                        .then(Commands.literal("watch")
-                                .then(Commands.literal("on").executes(context -> watch(context.getSource().getPlayerOrException(), true)))
-                                .then(Commands.literal("off").executes(context -> watch(context.getSource().getPlayerOrException(), false))))));
+                                }
+                            }
+                            return builder.buildFuture();
+                        }).executes(command -> opening(command.getSource(), "start",
+                                StringArgumentType.getString(command, "meridian")))));
+
+        // 下肢余力实时观察登记为 watch 的 body 频道，开关与可选目标由注册点生成。
+        MeridianCommands.registerWatchChannel("body", MeridianCommands.PLAYER, this::watch);
     }
 
-    private int inspect(ServerPlayer player, String tissueId) {
-        // 查看时把尚未结算的最后一个区间结清，使显示值对应本次服务端模拟时间。
+    private int status(CommandSourceStack source, Entity target) throws CommandSyntaxException {
+        // 玩家目标显示人体摘要；其他实体交给登记的身体视图（类人生物由 Threatening 提供）。
+        if (target instanceof ServerPlayer player) {
+            return inspect(source, player, null);
+        }
+        if (HumanBodyStatus.showOther(source, target)) {
+            return 1;
+        }
+        source.sendFailure(Component.translatable(HumanLang.STATUS_NO_BODY, target.getDisplayName()));
+        return 0;
+    }
+
+    private int inspect(CommandSourceStack source, Entity target, String tissueId) {
+        // 人体数值只属于玩家；查看时把尚未结算的最后一个区间结清，使显示值对应本次服务端模拟时间。
+        if (!(target instanceof ServerPlayer player)) {
+            source.sendFailure(Component.translatable(HumanLang.TARGET_NOT_PLAYER, target.getDisplayName()));
+            return 0;
+        }
         HumanPlayerBody body = state == null ? null : state.find(player.getUUID());
         if (body == null || failed.contains(player.getUUID())) {
-            player.displayClientMessage(Component.literal(HumanErrors.BODY_MISSING), false);
+            source.sendSystemMessage(Component.literal(HumanErrors.BODY_MISSING));
             return 0;
         }
         try {
             body.settle(millis(player.getServer()));
             state.setDirty();
-            player.displayClientMessage(Component.literal(tissueId == null ? HumanNumbers.summary(body)
-                    : HumanNumbers.tissue(body.snapshot(), tissueId)), false);
+            source.sendSystemMessage(Component.literal(tissueId == null ? HumanNumbers.summary(body)
+                    : HumanNumbers.tissue(body.snapshot(), tissueId)));
             if (tissueId == null) {
-                // 总览末尾附加行走负荷提供者的说明；查看单个组织时不附加。
+                // 总览末尾附加目标玩家行走负荷提供者的说明；查看单个组织时不附加。
                 HumanMovementLoads.status(player)
-                        .ifPresent(line -> player.displayClientMessage(Component.literal(line), false /* overlay */));
+                        .ifPresent(line -> source.sendSystemMessage(Component.literal(line)));
             }
             return 1;
         } catch (IllegalArgumentException failure) {
-            player.displayClientMessage(Component.literal(failure.getMessage()), false);
+            source.sendSystemMessage(Component.literal(failure.getMessage()));
             return 0;
         }
     }
 
-    private int opening(ServerPlayer player, String operation, String meridianId) {
+    private int opening(CommandSourceStack source, String operation, String meridianId) throws CommandSyntaxException {
         // 玩家入口只选择规则和目标，所有资源与条件都由 Framework 权威检查。
+        ServerPlayer player = source.getPlayerOrException();
         HumanPlayerBody body = state == null ? null : state.find(player.getUUID());
         if (body == null || failed.contains(player.getUUID())) {
             player.displayClientMessage(Component.literal(HumanErrors.BODY_MISSING), false);
@@ -835,16 +865,32 @@ public final class HumanFabric implements ModInitializer {
         }
     }
 
-    private int watch(ServerPlayer player, boolean enabled) {
-        // 实时观察仅选择输出，不触发额外做功或建立另一份玩家状态。
-        if (enabled) {
-            watching.add(player.getUUID());
-        } else {
-            watching.remove(player.getUUID());
-            player.displayClientMessage(Component.empty(), true);
+    private int watch(CommandSourceStack source, Collection<? extends Entity> targets,
+                      MeridianCommands.WatchSwitch watchSwitch) {
+        // 实时观察仅选择输出，不触发额外做功或建立另一份玩家状态；只有玩家有动作栏，非玩家目标跳过。
+        int changed = 0;
+        for (Entity target : targets) {
+            if (!(target instanceof ServerPlayer player)) {
+                continue;
+            }
+            if (watchSwitch == MeridianCommands.WatchSwitch.ON) {
+                watching.add(player.getUUID());
+            } else {
+                watching.remove(player.getUUID());
+                player.displayClientMessage(Component.empty(), true);
+            }
+            changed++;
         }
-        player.displayClientMessage(Component.literal(enabled ? "已开启下肢余力实时观察" : "已关闭实时观察"), false);
-        return 1;
+
+        // 一个玩家都没有选中时报告第一个目标，避免静默成功。
+        if (changed == 0) {
+            source.sendFailure(Component.translatable(HumanLang.TARGET_NOT_PLAYER,
+                    targets.iterator().next().getDisplayName()));
+            return 0;
+        }
+        source.sendSystemMessage(Component.translatable(watchSwitch == MeridianCommands.WatchSwitch.ON
+                ? HumanLang.WATCH_BODY_ON : HumanLang.WATCH_BODY_OFF));
+        return changed;
     }
 
     private void fail(ServerPlayer player, RuntimeException failure) {
