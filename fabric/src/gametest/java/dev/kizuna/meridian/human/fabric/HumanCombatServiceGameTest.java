@@ -18,29 +18,30 @@ import dev.kizuna.meridian.technique.server.TechniqueService;
 import dev.kizuna.meridian.technique.server.TechniqueState;
 import dev.kizuna.playeranimation.network.AnimationPackets;
 import dev.kizuna.playeranimation.protocol.pb.PlayerAnimationProtocol.PlayRequest;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
-import net.minecraft.gametest.framework.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.gametest.framework.GameTestHelper;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket;
-import net.minecraft.network.protocol.game.ServerboundInteractPacket;
+import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
+import net.minecraft.network.protocol.game.ServerboundAttackPacket;
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.entity.monster.Zombie;
+import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ItemStackTemplate;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.BundleContents;
+import net.minecraft.world.item.component.ItemContainerContents;
 import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 /** 从学习、绑定、费用到玩家世界效果的真实服务链。 */
-public final class HumanCombatServiceGameTest implements FabricGameTest {
+public final class HumanCombatServiceGameTest {
     private static final long MILLIS_PER_TICK = 50;
     private static final int KNOCK_HIT_TICKS = 34;
     private static final int KNOCK_END_TICKS = 60;
@@ -77,7 +78,7 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
     private static final int JOIN_INVULNERABILITY_TICKS = 61;
     private static final int STAGGER_TEST_TIMEOUT = 150;
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void doorAnimationsFollowSelectedHandAndOriginalStartTick(GameTestHelper context) throws Exception {
         // 真实学习、选手与宿主播放经过同一服务链，最终检查发往玩家的 Protobuf 包。
         for (String move : List.of("knock", "cleave", "ram")) {
@@ -103,10 +104,11 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
                                               String clip, long startTick) throws Exception {
         // 解析实际网络输出，不能只断言映射函数返回了预期字符串。
         var plays = new ArrayList<PlayRequest>();
-        for (var packet : fixture.human.connection.packets) {
-            if (packet instanceof ClientboundCustomPayloadPacket payload
-                    && payload.getIdentifier().equals(AnimationPackets.PLAY)) {
-                plays.add(AnimationPackets.read(payload.getData(), PlayRequest.parser()));
+        for (var packet : fixture.human.connection.packets()) {
+            if (packet instanceof ClientboundCustomPayloadPacket custom
+                    && custom.payload() instanceof AnimationPackets.Payload payload
+                    && payload.type().equals(AnimationPackets.PLAY)) {
+                plays.add(AnimationPackets.read(payload, PlayRequest.parser()));
             }
         }
         context.assertTrue(plays.stream().anyMatch(play -> play.getAnimationId().equals(clip)
@@ -115,7 +117,7 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
                 "玩家没有收到正确的 PA 片段和原始起点：" + clip + " / " + plays);
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void handsRejectEmptyAndContainersAndSelectByCategoryWearThenMain(GameTestHelper context) {
         // 同一真实施放入口覆盖拒绝码及选手，失败不能偷偷扣费或留下活动。
         try (var fixture = prepared(context)) {
@@ -145,7 +147,7 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = SHORT_TEST_TIMEOUT)
+    @GameTest(maxTicks = SHORT_TEST_TIMEOUT)
     public void switchingSelectedHandItemChangesHitAndEmptyHandMissStillPays(GameTestHelper context) {
         // 起手固定手但不固定物品，改成泥土和变空分别在真实生效 tick 检查。
         var changed = prepared(context);
@@ -173,7 +175,7 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = SHORT_TEST_TIMEOUT)
+    @GameTest(maxTicks = SHORT_TEST_TIMEOUT)
     public void castingBlocksRealAttackAndSwingPacketsThenResetsCooldown(GameTestHelper context) {
         // 真正走服务端攻击包与挥手包，取消期间不能伤害目标或重复记做功。
         var fixture = prepared(context);
@@ -182,8 +184,7 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
         double originalSpeed = fixture.human.player.getAttributeValue(Attributes.MOVEMENT_SPEED);
         accepted(context, cast(fixture, "knock", CastEntry.AUTO));
         var tissues = fixture.human.body().snapshot().tissueStates();
-        var packet = ServerboundInteractPacket.createAttackPacket(target, false /* playerSneaking */);
-        fixture.human.player.connection.handleInteract(packet);
+        fixture.human.player.connection.handleAttack(new ServerboundAttackPacket(target.getId()));
         fixture.human.player.connection.handleAnimate(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
         context.assertTrue(target.doses.isEmpty(), "原版左键穿过了施放锁");
         context.assertTrue(fixture.human.body().snapshot().tissueStates().equals(tissues), "原版挥手重复做功");
@@ -200,7 +201,7 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void warmupInterruptionDoesNotWearWeapon(GameTestHelper context) {
         // 起手成功扣费后被僵直打断，尚未发生末击就不能提前扣物品。
         try (var fixture = prepared(context)) {
@@ -213,7 +214,7 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = STAGGER_TEST_TIMEOUT)
+    @GameTest(maxTicks = STAGGER_TEST_TIMEOUT)
     public void cleaveWarmupInterruptedOnlyByStaggeringHit(GameTestHelper context) {
         // 真实生物攻击经伤害附属换算：轻击低于僵直门槛不打断破门起手，重击打断、减速并拒绝新式。
         var attacker = attacker(context);
@@ -224,11 +225,11 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
                 fixture.hold(Items.IRON_AXE, Items.AIR);
                 double originalSpeed = player.getAttributeValue(Attributes.MOVEMENT_SPEED);
                 accepted(context, cast(fixture, "cleave", CastEntry.AUTO));
-                player.hurt(player.damageSources().mobAttack(attacker), LIGHT_HIT);
+                player.hurtServer(player.level(), player.damageSources().mobAttack(attacker), LIGHT_HIT);
                 context.assertTrue(HumanTechniqueHost.isCasting(player.getUUID()), "低于门槛的轻击打断了起手");
                 context.assertTrue(staggerMillis(player) == 0, "轻击产生了僵直");
                 player.invulnerableTime = 0;
-                player.hurt(player.damageSources().mobAttack(attacker), HEAVY_HIT);
+                player.hurtServer(player.level(), player.damageSources().mobAttack(attacker), HEAVY_HIT);
                 context.assertTrue(!HumanTechniqueHost.isCasting(player.getUUID()), "僵直重击没有打断起手");
                 context.assertTrue(staggerMillis(player) > 0, "重击没有僵直");
                 assertSpeed(context, player, originalSpeed * STAGGER_MOVEMENT, "僵直移动倍率错误");
@@ -240,7 +241,7 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = STAGGER_TEST_TIMEOUT)
+    @GameTest(maxTicks = STAGGER_TEST_TIMEOUT)
     public void staggerHalvesMovementUntilExpiry(GameTestHelper context) {
         // 未施放时受重击也僵直：移动速度乘 0.5，身体时钟到期后恢复原速。
         var attacker = attacker(context);
@@ -248,7 +249,7 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
         var player = fixture.human.player;
         double originalSpeed = player.getAttributeValue(Attributes.MOVEMENT_SPEED);
         context.runAfterDelay(JOIN_INVULNERABILITY_TICKS, () -> {
-            player.hurt(player.damageSources().mobAttack(attacker), HEAVY_HIT);
+            player.hurtServer(player.level(), player.damageSources().mobAttack(attacker), HEAVY_HIT);
             attacker.discard();
             context.assertTrue(staggerMillis(player) > 0, "未施放时重击没有僵直");
             assertSpeed(context, player, originalSpeed * STAGGER_MOVEMENT, "僵直未减速");
@@ -262,7 +263,7 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = TIMELINE_TEST_TIMEOUT)
+    @GameTest(maxTicks = TIMELINE_TEST_TIMEOUT)
     public void sevenStandaloneStrikesUseCatalogTicksAndChainCanRehit(GameTestHelper context) {
         // 七式同时放到彼此隔离的位置，记录真实伤害时刻而非只比对目录字段。
         var runs = new ArrayList<Timeline>();
@@ -294,7 +295,7 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = SHORT_TEST_TIMEOUT)
+    @GameTest(maxTicks = SHORT_TEST_TIMEOUT)
     public void followUpShortensWarmupAndEndsPredecessorWithinWindow(GameTestHelper context) {
         // 过早显式承接被拒，收势后半段进入新式并沿用原式正常冷却边界。
         var fixture = prepared(context);
@@ -327,7 +328,7 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = EXHAUSTION_TEST_TIMEOUT)
+    @GameTest(maxTicks = EXHAUSTION_TEST_TIMEOUT)
     public void finaleRequiresFollowUpAndEarlyInterruptionStillExhaustsThenRecovers(GameTestHelper context) {
         // 真正承接终式并在起跳前打断，已原子提交的手臂曲线仍进入虚脱和恢复。
         var fixture = prepared(context);
@@ -350,7 +351,7 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = FINALE_TEST_TIMEOUT)
+    @GameTest(maxTicks = FINALE_TEST_TIMEOUT)
     public void finaleHitsAtShortenedTickInsideArmPeak(GameTestHelper context) {
         // 承接终式实际跃起并命中，检查伤害链发生在曲线峰顶并成功支付挥手做功。
         var fixture = prepared(context);
@@ -414,7 +415,7 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
 
     private static Zombie attacker(GameTestHelper context) {
         // 静止僵尸只提供真实生物攻击来源，徒手命中按钝击换算僵直。
-        Zombie zombie = context.spawn(EntityType.ZOMBIE, ATTACKER_OFFSET, ATTACKER_HEIGHT, ATTACKER_OFFSET);
+        Zombie zombie = context.spawn(EntityTypes.ZOMBIE, ATTACKER_OFFSET, ATTACKER_HEIGHT, ATTACKER_OFFSET);
         zombie.setNoAi(true /* aiDisabled */);
         return zombie;
     }
@@ -422,7 +423,7 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
     private static HumanCombatFixture prepared(GameTestHelper context) {
         // 学习和开脉走实际服务；测试目录仍支付小额真实气与组织做功。
         var fixture = new HumanCombatFixture(context);
-        long now = fixture.human.player.getServer().overworld().getGameTime() * MILLIS_PER_TICK;
+        long now = fixture.human.player.level().getServer().overworld().getGameTime() * MILLIS_PER_TICK;
         context.assertTrue(fixture.human.body().completeOpening(now, "left_large_intestine_meridian")
                 == FailureCode.FAILURE_CODE_UNSPECIFIED, "开脉失败");
         for (String volume : List.of("upper", "middle", "lower")) {
@@ -460,24 +461,20 @@ public final class HumanCombatServiceGameTest implements FabricGameTest {
     }
 
     private static ItemStack container(Item item) {
-        // 保留实际 NBT 库存，空容器不应触发这一拒绝。
+        // 放入真实库存，空容器不应触发这一拒绝；26.2 潜影盒与收纳袋分别存于容器组件和收纳袋组件。
         var stack = new ItemStack(item);
-        var items = new ListTag();
-        items.add(new ItemStack(Items.STONE).save(new CompoundTag()));
-        CompoundTag inventory;
         if (item == Items.SHULKER_BOX) {
-            inventory = stack.getOrCreateTagElement("BlockEntityTag");
+            stack.set(DataComponents.CONTAINER, ItemContainerContents.fromItems(List.of(new ItemStack(Items.STONE))));
         } else {
-            inventory = stack.getOrCreateTag();
+            stack.set(DataComponents.BUNDLE_CONTENTS, new BundleContents(List.of(new ItemStackTemplate(Items.STONE))));
         }
-        inventory.put("Items", items);
         return stack;
     }
 
     private static void moveAside(HumanCombatFixture fixture, int index) {
         // 在独立高度隔离并发施放，避免横向落进其他测试结构或玩家的搜索范围。
         Vec3 pos = fixture.human.player.position().add(0, (index + 1) * ISOLATION_DISTANCE, 0);
-        fixture.human.player.moveTo(pos.x, pos.y, pos.z, 0, 0);
+        fixture.human.player.snapTo(pos.x, pos.y, pos.z, 0, 0);
     }
 
     private static List<Long> expectedHits(Timeline run) {

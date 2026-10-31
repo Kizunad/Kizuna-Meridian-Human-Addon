@@ -1,5 +1,5 @@
 plugins {
-    id 'fabric-loom'
+    id 'net.fabricmc.fabric-loom'
 }
 
 description = '人体内容的 Minecraft 玩家适配；身体结算仍调用经脉框架。'
@@ -10,25 +10,25 @@ repositories {
 }
 
 dependencies {
+    // 26.x 不混淆：直接用官方名编译，没有映射，模组依赖也不经重映射。
     minecraft libs.minecraft
-    mappings loom.officialMojangMappings()
-    modImplementation libs.fabric.loader
-    modImplementation libs.fabric.api
+    implementation libs.fabric.loader
+    implementation libs.fabric.api
     // /meridian 指令统一注册点（Framework 的 Fabric 模组 meridian_framework），Framework 组合时自动替换为源码工程。
-    modImplementation 'dev.kizuna.meridian:fabric'
+    implementation 'dev.kizuna.meridian:fabric'
     // 玩家动画、Damage、库存 UI 服务端、功法库与成长附属在 settings 中以源码组合，依赖处写替换坐标。
-    modImplementation 'dev.kizuna:kizuna-players-animation'
-    modImplementation 'dev.kizuna.meridian.vanilla:fabric'
-    modImplementation 'dev.kizuna.inventoryui:server'
-    modImplementation 'dev.kizuna.meridian.technique:fabric'
+    implementation 'dev.kizuna:kizuna-players-animation'
+    implementation 'dev.kizuna.meridian.vanilla:fabric'
+    implementation 'dev.kizuna.inventoryui:server'
+    implementation 'dev.kizuna.meridian.technique:fabric'
     implementation 'dev.kizuna.meridian.technique:server'
     // 与原先读单个 JAR 一致只取成长附属的模块本身，其传递库由完整装配在运行时按同一组件补齐。
-    modImplementation('dev.kizuna.meridian.progression:fabric') { transitive = false }
+    implementation('dev.kizuna.meridian.progression:fabric') { transitive = false }
     implementation('dev.kizuna.meridian.progression:shared') { transitive = false }
     implementation('dev.kizuna.meridian.progression:server') { transitive = false }
     implementation project(':server')
     // 人体资源包的编译期协议已由下方服务端库提供，避免 Loom 再解析一份客户端协议副本。
-    modImplementation(project(':client')) { transitive = false }
+    implementation(project(':client')) { transitive = false }
     // 独立安装产物携带其实际运行依赖；源码与 Protobuf 仍只从各自仓库构建。
     include project(':server')
     include project(':shared')
@@ -74,6 +74,10 @@ sourceSets {
         compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
         runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
     }
+}
+dependencies {
+    // 登录假玩家夹具来自功法库的 testFixtures，与功法 fabric 同经源码组合解析。
+    gametestImplementation testFixtures('dev.kizuna.meridian.technique:fabric')
 }
 loom {
     mods {

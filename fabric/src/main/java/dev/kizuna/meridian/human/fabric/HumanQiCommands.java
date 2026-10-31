@@ -105,14 +105,14 @@ final class HumanQiCommands {
     private static int apply(CommandSourceStack source, ServerPlayer player, HumanPlayerBody body,
                              Consumer<ServerPlayer> changed, DebugQi request) {
         // 执行点再次检查权限，失败只报告业务原因，不把玩家身体标记为故障。
-        if (!source.hasPermission(MeridianCommands.GAMEMASTER)) {
+        if (!Commands.hasPermission(Commands.LEVEL_GAMEMASTERS).test(source)) {
             source.sendFailure(Component.literal(HumanErrors.DEBUG_PERMISSION));
             return 0;
         }
 
         // 提交前后各读一次内腔总量，反馈里给出变化。
         double previous = body.snapshot().lumenQiTotal();
-        long now = Math.multiplyExact(player.getServer().overworld().getGameTime(), 50);
+        long now = Math.multiplyExact(player.level().getServer().overworld().getGameTime(), 50);
         FailureCode failure = body.debugQi(now, request);
         changed.accept(player);
         if (failure != FailureCode.FAILURE_CODE_UNSPECIFIED) {

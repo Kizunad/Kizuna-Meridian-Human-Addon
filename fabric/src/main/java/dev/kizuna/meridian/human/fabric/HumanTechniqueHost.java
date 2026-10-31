@@ -51,6 +51,11 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
         ready.clear();
     }
 
+    static HumanWorldState state() {
+        // 世界状态不再挂在原版存档数据里，同包读取只能经过当前绑定。
+        return binding.state();
+    }
+
     static void reconnect(ServerPlayer player) {
         // 恢复残留施放后才对外认领；没有可靠效果游标时不补发离线效果。
         Binding current = binding;

@@ -33,9 +33,9 @@ Human 为可信服务端宿主提供位置查询、真元释放、交接回收�
 
 ## 写盘确认
 
-已核对 Minecraft 1.20.1 实际字节码：`setDirty()` 只设标记；世界保存经 `ServerLevel.saveLevelData` → `DimensionDataStorage.save` 调用 `SavedData.save(File)`。自动保存每 6000 tick（20 TPS 下约五分钟）执行，正常关服也保存；`noSave` 跳过普通世界保存。原版直接覆盖文件，捕获异常后仍清 dirty，没有刷盘确认。
+已核对 Minecraft 26.2 源码：原版存档数据由服务器级 `SavedDataStorage` 管理，普通保存把 `NbtIo.writeCompressed` 原位覆盖排到 IO 线程池异步执行，只有 flush 保存才等待写完，也没有刷盘确认。Human 因此不登记为原版存档数据，`setDirty()` 只设自己的标记；宿主在 Fabric `ServerLifecycleEvents.AFTER_SAVE`（包住 `MinecraftServer.saveAllChunks`）里写同一文件。自动保存按当前 tick 速率每 300 秒执行（20 TPS 下 6000 tick），正常关服也保存；主世界 `noSave` 时只在强制保存时写入，与原版主世界存档数据的旧行为一致。
 
-两端覆写保存，保留原版 `data` 与 `DataVersion` 封装，依次执行：
+世界保存与交接写盘走同一流程，保留原版 `data` 与 `DataVersion` 封装，依次执行：
 
 1. 写同目录 `.dat.tmp` 并关闭压缩流。
 2. 对临时文件执行 `FileChannel.force(true)`，必须成功。

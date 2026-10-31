@@ -1,5 +1,6 @@
 package dev.kizuna.meridian.human.fabric;
 
+import dev.kizuna.meridian.fabric.MeridianChannels;
 import dev.kizuna.meridian.protocol.HealthHostProtobuf;
 import dev.kizuna.meridian.protocol.pb.BodyMessages.HealthTarget;
 import dev.kizuna.meridian.protocol.pb.HealthHostMessages.HealthHostRequest;
@@ -12,25 +13,23 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.RequestEnvelope;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostRequest;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostResponse;
 import dev.kizuna.meridian.technique.server.TechniqueProtocol;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
-import net.minecraft.gametest.framework.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
+import net.fabricmc.fabric.impl.networking.RegistrationPayload;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
-import net.minecraft.network.protocol.game.ServerboundCustomPayloadPacket;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 import net.minecraft.world.level.GameType;
-import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.UUID;
 
 /** 损毁下肢只拒绝运动动作，宿主真正暂停时可以重连恢复同一身体。 */
-public final class HumanMovementRecoveryGameTest implements FabricGameTest {
+public final class HumanMovementRecoveryGameTest {
     private static final String LOWER_LEG = "left_lower_leg";
     private static final double LOWER_LEG_HP = 18;
     private static final long MILLIS_PER_TICK = 50;
     private static final long PAUSE_OBSERVATION_TICKS = 3;
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void destroyedLegRejectsWalkingAndSprintingWithoutPausingBody(GameTestHelper context) {
         // 生存玩家部位归零后直接走试玩失败的 observe 路径，健康与功法宿主仍须可用。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
@@ -45,7 +44,7 @@ public final class HumanMovementRecoveryGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void destroyedLegTissueAlsoRejectsOnlyMovement(GameTestHelper context) {
         // 组织账户可独立损毁；部位仍有血时也不能建立需要该组织的运动占用。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
@@ -65,7 +64,7 @@ public final class HumanMovementRecoveryGameTest implements FabricGameTest {
     private static void verifyRejectedMovement(GameTestHelper context, HumanTechniqueTestPlayer fixture) {
         // 同一时刻切换动作不会扣费，被拒动作也不能留下占用。
         var body = fixture.body();
-        long now = fixture.player.getServer().overworld().getGameTime() * MILLIS_PER_TICK;
+        long now = fixture.player.level().getServer().overworld().getGameTime() * MILLIS_PER_TICK;
         var before = body.snapshot().tissueStates();
         body.observe(now, HumanPlayerBody.Motion.WALK);
         body.observe(now, HumanPlayerBody.Motion.SPRINT);
@@ -74,19 +73,14 @@ public final class HumanMovementRecoveryGameTest implements FabricGameTest {
         context.assertTrue(body.snapshot().tissueStates().equals(before), "被拒运动仍扣组织疲劳");
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void missingRequiredChannelPausesOnceAndReconnectPreservesBody(GameTestHelper context) {
         // 缺少必装 UI 接线是真实宿主故障，模拟客户端撤销通道触发正式 tick 的暂停路径。
         var fixture = new HumanTechniqueTestPlayer(context);
         damage(context, fixture, HealthTarget.newBuilder().setPartId(LOWER_LEG).build(), 1);
-        var buffer = PacketByteBufs.create();
-        buffer.writeBytes("meridian:body_view".getBytes(StandardCharsets.UTF_8));
-        try {
-            var packet = new ServerboundCustomPayloadPacket(new ResourceLocation("minecraft:unregister"), buffer);
-            fixture.player.connection.handleCustomPayload(packet);
-        } finally {
-            buffer.release();
-        }
+        var unregister = new RegistrationPayload(RegistrationPayload.UNREGISTER,
+                List.of(MeridianChannels.BODY_VIEW.type().id()));
+        fixture.player.connection.handleCustomPayload(new ServerboundCustomPayloadPacket(unregister));
         context.runAfterDelay(PAUSE_OBSERVATION_TICKS, () -> verifyPausedAndReconnect(context, fixture));
     }
 
@@ -100,7 +94,7 @@ public final class HumanMovementRecoveryGameTest implements FabricGameTest {
                     "健康宿主没有明确返回暂停");
             context.assertTrue(technique(fixture).getFailure().getCode() == FailureCode.BODY_PAUSED,
                     "功法宿主没有明确返回暂停");
-            long hints = fixture.connection.packets.stream()
+            long hints = fixture.connection.packets().stream()
                     .filter(ClientboundSystemChatPacket.class::isInstance)
                     .map(ClientboundSystemChatPacket.class::cast)
                     .filter(packet -> packet.content().getString().contains("退出世界后重新加入"))

@@ -30,18 +30,19 @@ import dev.kizuna.meridian.technique.server.TechniqueProtocol;
 import dev.kizuna.meridian.technique.server.TechniqueScheduler;
 import dev.kizuna.meridian.technique.server.TechniqueService;
 import dev.kizuna.meridian.technique.server.TechniqueState;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
-import net.minecraft.gametest.framework.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.gametest.framework.GameTestHelper;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
 import net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ItemStackTemplate;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.BundleContents;
+import net.minecraft.world.item.component.ItemContainerContents;
 import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -52,7 +53,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 /** 真实玩家的双手事实、移动属性、表现意图及未认领恢复回归。 */
-public final class HumanTechnique6aGameTest implements FabricGameTest {
+public final class HumanTechnique6aGameTest {
     private static final long MILLIS_PER_TICK = 50;
     private static final int FINISH_TICKS = 10;
     private static final double EPSILON = 1e-7;
@@ -74,7 +75,7 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void inspectIncludesEmptyHandsOffhandAndContainerContents(GameTestHelper context) {
         // 事实经过正式字节入口，同时核对空消息、物品标签及显式布尔字段。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
@@ -84,7 +85,7 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
                     && empty.getOffHand().equals(HeldItem.getDefaultInstance()), "空手带有物品事实");
             context.assertTrue(empty.getMainHandSide() == HandSide.RIGHT, "主手侧错误");
             var sword = new ItemStack(Items.IRON_SWORD);
-            sword.getOrCreateTag().putBoolean("Unbreakable", true /* unbreakable */);
+            sword.set(DataComponents.UNBREAKABLE, net.minecraft.util.Unit.INSTANCE);
             fixture.player.setItemInHand(InteractionHand.OFF_HAND, sword);
             HeldItem off = inspect(fixture).getHeldItems().getOffHand();
             context.assertTrue(off.getItemId().equals("minecraft:iron_sword")
@@ -105,14 +106,14 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void castSlowsSynchronizesAllowsMovementAndImpulseThenFinishes(GameTestHelper context) {
         // 起手立即同步限速，主动移动与冲量仍可执行，收势恢复属性并停止表现。
         var fixture = prepared(context);
         var observer = new Presentations(fixture);
         double originalSpeed = speed(fixture);
         try {
-            fixture.connection.packets.clear();
+            fixture.connection.packets().clear();
             start(context, fixture);
             assertSlow(context, fixture, originalSpeed);
             context.assertTrue(attributePackets(fixture) > 0, "限速未同步本人属性");
@@ -144,7 +145,7 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void staggerAndDisconnectUnlockAndStop(GameTestHelper context) {
         // 僵直打断和正式断线回调都在宿主撤销认领前完成实体清理；打断后只剩僵直减速。
         try (var fixture = prepared(context); var observer = new Presentations(fixture)) {
@@ -167,7 +168,7 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void backwardAndZeroInputDefaultWorkWhileSlowed(GameTestHelper context) {
         // 零输入默认向后，显式向后与非零世界输入分别核对，限速不缩放冲量。
         try (var fixture = prepared(context)) {
@@ -188,7 +189,7 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void orthogonalImpulsesCombineInEitherOrderAndRetryIsIdempotent(GameTestHelper context) {
         // 同刻水平与竖直冲量各自保留正交分量，重放成功效果不能改写外部速度。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
@@ -231,11 +232,11 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void elevatedTargetKeepsFullHorizontalImpulseAndVerticalSpeed(GameTestHelper context) {
         // 错层目标只决定水平方向，不能把声明速度耗在随后被丢弃的竖直分量上。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
-            var target = context.spawn(EntityType.COW, 1, 1, 1);
+            var target = context.spawn(EntityTypes.COW, 1, 1, 1);
             try {
                 Vec3 position = fixture.player.position();
                 target.setPos(position.add(0, TARGET_HEIGHT_DIFFERENCE, TARGET_HORIZONTAL_DISTANCE));
@@ -257,7 +258,7 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void movementIdentityAndPresentationRetriesAreIdempotent(GameTestHelper context) {
         // 多个施放的属性身份独立，效果身份去重覆盖不同请求号，冲突保留原始失败码。
         try (var fixture = new HumanTechniqueTestPlayer(context); var observer = new Presentations(fixture)) {
@@ -283,7 +284,7 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void startCallbackCancelsAfterDeliveryWithoutRecursion(GameTestHelper context) {
         // 同步 START 取消必须先退出回调，再交付唯一 STOP 和解锁。
         try (var fixture = prepared(context); var observer = new Presentations(fixture)) {
@@ -306,7 +307,7 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void synchronousResubmissionDistinguishesExecutingFromSucceeded(GameTestHelper context) {
         // 执行中不返回成功，冲突仍拒绝；外层失败后同身份必须可以重新执行。
         try (var fixture = new HumanTechniqueTestPlayer(context); var observer = new Presentations(fixture)) {
@@ -336,13 +337,13 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void disappearedTargetCancelsAndUnlocksRealPlayer(GameTestHelper context) {
         // 起手后销毁真实目标，冲量拒绝仍须完成身体、移动属性和表现清理。
         var fixture = prepared(context, HumanTechniqueTestCatalog.TARGETED_TECHNIQUE_ID);
         var observer = new Presentations(fixture);
         double originalSpeed = speed(fixture);
-        var target = context.spawn(EntityType.COW, 1, 2, 1);
+        var target = context.spawn(EntityTypes.COW, 1, 2, 1);
         start(context, fixture, HumanTechniqueTestCatalog.TARGETED_TECHNIQUE_ID, target.getStringUUID());
         target.discard();
         context.runAfterDelay(FINISH_TICKS, () -> {
@@ -358,7 +359,7 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void unclaimedRecoveryRetriesStopBeforeClearingProgress(GameTestHelper context) {
         // 模拟无断线回调的残留，未认领时失败不清进度，重试先清实体再提交身体。
         try (var fixture = prepared(context); var observer = new Presentations(fixture)) {
@@ -395,7 +396,7 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void deadRecoveryCleansEntityAndRejectsStartOrImpulse(GameTestHelper context) {
         // 死体进度通过可信入口清除，实体适配器仍执行停止与解锁，禁止恢复开始效果。
         try (var fixture = prepared(context); var observer = new Presentations(fixture)) {
@@ -450,17 +451,13 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
     }
 
     private static ItemStack container(Item item) {
-        // 使用原版库存 NBT，覆盖潜影盒和收纳袋各自的存储位置。
+        // 使用原版库存组件，覆盖潜影盒（容器组件）和收纳袋（收纳袋组件）各自的存储位置。
         var stack = new ItemStack(item);
-        var content = new ItemStack(Items.STONE).save(new CompoundTag());
-        content.putByte("Slot", (byte) 0);
-        var items = new ListTag();
-        items.add(content);
-        CompoundTag inventory = stack.getOrCreateTag();
         if (item == Items.SHULKER_BOX) {
-            inventory = stack.getOrCreateTagElement("BlockEntityTag");
+            stack.set(DataComponents.CONTAINER, ItemContainerContents.fromItems(List.of(new ItemStack(Items.STONE))));
+        } else {
+            stack.set(DataComponents.BUNDLE_CONTENTS, new BundleContents(List.of(new ItemStackTemplate(Items.STONE))));
         }
-        inventory.put("Items", items);
         return stack;
     }
 
@@ -472,11 +469,11 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
     private static HumanTechniqueTestPlayer prepared(GameTestHelper context, String techniqueId) {
         // 针对不同拒绝路径选择目录中的测试式，身体初始化保持一致。
         var fixture = new HumanTechniqueTestPlayer(context);
-        var server = fixture.player.getServer();
+        var server = fixture.player.level().getServer();
         long now = server.overworld().getGameTime() * MILLIS_PER_TICK;
         context.assertTrue(fixture.body().completeOpening(now, "left_large_intestine_meridian")
                 == FailureCode.FAILURE_CODE_UNSPECIFIED, "开脉失败");
-        int learned = server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),
+        int learned = HumanTestCommands.run(server.createCommandSourceStack(),
                 "meridian technique learn " + fixture.player.getStringUUID() + " "
                         + techniqueId);
         context.assertTrue(learned == 1, "学习失败");
@@ -600,7 +597,8 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
 
     private static long attributePackets(HumanTechniqueTestPlayer fixture) {
         // 连接记录真实属性同步包，旁观者同步继续由原版实体跟踪器负责。
-        return fixture.connection.packets.stream().filter(ClientboundUpdateAttributesPacket.class::isInstance).count();
+        return fixture.connection.packets().stream()
+                .filter(ClientboundUpdateAttributesPacket.class::isInstance).count();
     }
 
     private static void killBody(GameTestHelper context, HumanTechniqueTestPlayer fixture) {
@@ -618,7 +616,7 @@ public final class HumanTechnique6aGameTest implements FabricGameTest {
                 .setRequestId("death_" + subjectId)
                 .setBodyCommand(command)
                 .build();
-        long now = fixture.player.getServer().overworld().getGameTime() * MILLIS_PER_TICK;
+        long now = fixture.player.level().getServer().overworld().getGameTime() * MILLIS_PER_TICK;
         context.assertTrue(body.applyHealth(now, request).hasCommandCommitted(), "死体准备失败");
     }
 

@@ -10,13 +10,10 @@ import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.pb.BodyMessages;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
-import net.minecraft.gametest.framework.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NbtIo;
-import net.minecraft.nbt.Tag;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,7 +21,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /** 释放交接的整体回归：真实文件、合并保存、故障重试及持久遗忘。 */
-public final class HumanReleasePersistenceGameTest implements FabricGameTest {
+public final class HumanReleasePersistenceGameTest {
     private static final long WINDOW_MILLIS = 30_000;
     private static final long AFTER_SEVEN_DAYS_MILLIS = 8_400_001;
     private static final int RESTART_COUNT = 4;
@@ -41,7 +38,7 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
 
     private record RoundingFixture(HumanWorldState state, RegionView first, RegionView second) { }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void crossRegionRoundingTailReturnsAndSurvivesReload(GameTestHelper context) throws Exception {
         // 旧存档的区域合并与共享账户采用不同求和顺序，最后一笔不能永远留在队列。
         var fixture = roundingFixture(context, 0);
@@ -52,13 +49,13 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         assertReturned(context, fixture.first(), first, FIRST_SHARE);
         assertReturned(context, fixture.second(), second, SHARED_RELEASE - FIRST_SHARE);
         var returned = restored.save(new CompoundTag());
-        context.assertTrue(returned.getList("pending_credits", Tag.TAG_COMPOUND).isEmpty(),
+        context.assertTrue(returned.getListOrEmpty("pending_credits").isEmpty(),
                 "浮点尾差使跨区域归位永久滞留");
         context.assertTrue(BodyProtobuf.fromInventory(BodyMessages.QiInventory
-                .parseFrom(returned.getByteArray("released_qi"))).entries().isEmpty(), "共享账户留下尾差");
+                .parseFrom(returned.getByteArray("released_qi").orElseThrow())).entries().isEmpty(), "共享账户留下尾差");
         var reloaded = HumanWorldState.read(returned);
         reloaded.renewEnvironment(WINDOW_MILLIS * 2);
-        context.assertTrue(reloaded.save(new CompoundTag()).getList("pending_credits", Tag.TAG_COMPOUND)
+        context.assertTrue(reloaded.save(new CompoundTag()).getListOrEmpty("pending_credits")
                 .isEmpty(), "重载恢复了已归位队列");
         context.assertTrue(reloaded.query(context.getLevel(), 0, 0, WINDOW_MILLIS * 2).getInventory()
                 .equals(first.getInventory()), "重载重复向第一区域入账");
@@ -67,7 +64,7 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void roundingAllocationPreservesRegionWindowAndPendingAcrossReload(GameTestHelper context) {
         // 较晚创建的区域尚未到期时不能提前入账；重载后继续使用实际余额处理尾笔。
         var fixture = roundingFixture(context, HALF_WINDOW_MILLIS);
@@ -77,14 +74,14 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         assertReturned(context, fixture.first(), first, FIRST_SHARE);
         context.assertTrue(second.getInventory().equals(fixture.second().getInventory()), "未到期区域提前入账");
         var saved = fixture.state().save(new CompoundTag());
-        context.assertTrue(saved.getList("pending_credits", Tag.TAG_COMPOUND).size() == 1,
+        context.assertTrue(saved.getListOrEmpty("pending_credits").size() == 1,
                 "未到期区域的归位意图丢失");
         var reloaded = HumanWorldState.read(saved);
         long secondWindow = WINDOW_MILLIS + HALF_WINDOW_MILLIS;
         reloaded.renewEnvironment(secondWindow);
         var returnedSecond = reloaded.query(context.getLevel(), DISTANT_REGION_BLOCK, 0, secondWindow);
         assertReturned(context, fixture.second(), returnedSecond, SHARED_RELEASE - FIRST_SHARE);
-        context.assertTrue(reloaded.save(new CompoundTag()).getList("pending_credits", Tag.TAG_COMPOUND)
+        context.assertTrue(reloaded.save(new CompoundTag()).getListOrEmpty("pending_credits")
                 .isEmpty(), "跨窗重载后尾笔未能归位");
         context.succeed();
     }
@@ -124,7 +121,7 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         return entry;
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void memoryAcceptanceAndDuplicateDoNotConfirmDisk(GameTestHelper context) throws Exception {
         // 先保存旧状态，模拟首次受理与重复受理后均未触发世界保存就退出。
         Fixture fixture = fixture(context);
@@ -143,7 +140,7 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void durableReleaseSurvivesRepeatedReloadAndCreditsOnce(GameTestHelper context) throws Exception {
         // 接收端先落盘、响应丢失及发送端旧文件反复重放，都只保留一笔待入账事实。
         Fixture fixture = fixture(context);
@@ -170,7 +167,7 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void failedWriteKeepsOldFileAndDuplicateMustRetryDisk(GameTestHelper context) throws Exception {
         // 用同名目录阻止临时文件写入，确保首次失败及内存 duplicate 都不能确认持久化。
         Fixture fixture = fixture(context);
@@ -199,7 +196,7 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void failedAtomicReplacementDoesNotConfirmDisk(GameTestHelper context) throws Exception {
         // 非空目标目录使原子替换失败，不能把临时文件已写完当作提交完成。
         Fixture fixture = fixture(context);
@@ -213,7 +210,7 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void unresolvedReleaseSurvivesSevenDaysAndRejectsConflictingContent(GameTestHelper context) throws Exception {
         // 没有发送端持久删除证明时，已入账 ID 也不能按时间回收。
         Fixture fixture = fixture(context);
@@ -240,11 +237,11 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         assertConflict(context, restored, moved);
         assertConflict(context, restored, changedQi);
         context.assertTrue(restored.save(new CompoundTag())
-                .getList("release_ids", Tag.TAG_COMPOUND).size() == 1, "冲突改变了去重记录");
+                .getListOrEmpty("release_ids").size() == 1, "冲突改变了去重记录");
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void batchAndWorldSaveShareOneAttemptPerTick(GameTestHelper context) throws Exception {
         // 多笔释放共用快照，普通世界保存也不能绕过同 tick 的次数限制。
         Fixture fixture = fixture(context);
@@ -256,7 +253,7 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         }
         state.flushHandoffs(fixture.file());
         context.assertTrue(read(fixture.file()).save(new CompoundTag())
-                .getList("release_ids", Tag.TAG_COMPOUND).size() == BATCH_SIZE, "未合并保存");
+                .getListOrEmpty("release_ids").size() == BATCH_SIZE, "未合并保存");
         byte[] saved = Files.readAllBytes(fixture.file());
         state.release(fixture.release(), context.getLevel(), 1);
         state.flushHandoffs(fixture.file());
@@ -271,7 +268,7 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void failedBatchOnlyRetriesNextTick(GameTestHelper context) throws Exception {
         // 失败也消耗本 tick 的保存机会，磁盘恢复后须等下一 tick，避免故障时重复重写。
         Fixture fixture = fixture(context);
@@ -295,7 +292,7 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void unsupportedDirectorySyncStillConfirmsPersistence(GameTestHelper context) throws Exception {
         // 走 Windows 的目录能力路径，保存完整文件后仍应返回真实确认。
         Fixture fixture = fixture(context, new HumanWorldState(DurableStateFile.DirectorySync.UNSUPPORTED));
@@ -309,7 +306,7 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void forgetWaitsForCreditAndDurableDeletionThenReclaimsHistory(GameTestHelper context) throws Exception {
         // 待入账时不删除；删除写入失败和响应丢失都能用旧文件恢复并安全重试。
         Fixture fixture = fixture(context);
@@ -344,7 +341,7 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         HumanWorldState afterLostResponse = read(fixture.file());
         context.assertTrue(afterLostResponse.forgetRelease(releaseId).getPersisted(), "遗忘重试不幂等");
         context.assertTrue(afterLostResponse.save(new CompoundTag())
-                .getList("release_ids", Tag.TAG_COMPOUND).isEmpty(), "已完成历史未回收");
+                .getListOrEmpty("release_ids").isEmpty(), "已完成历史未回收");
         QiInventory expected = QiAccounting.credit(BodyProtobuf.fromInventory(fixture.original().getInventory()),
                 BodyProtobuf.fromInventory(fixture.release().getReleasedQi()));
         RegionView actual = afterLostResponse.query(context.getLevel(), REGION_COORDINATE,
@@ -362,7 +359,7 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         var world = context.getLevel();
         RegionView original = state.query(world, REGION_COORDINATE, REGION_COORDINATE, 0);
         var position = RegionQuery.newBuilder()
-                .setDimensionId(world.dimension().location().toString())
+                .setDimensionId(world.dimension().identifier().toString())
                 .setBlockX(REGION_COORDINATE)
                 .setBlockZ(REGION_COORDINATE)
                 .build();
@@ -379,7 +376,7 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
 
     private static HumanWorldState read(Path file) throws IOException {
         // 必须读取实际压缩文件，不能用内存 save 冒充重启恢复。
-        return HumanWorldState.read(NbtIo.readCompressed(file.toFile()).getCompound("data"));
+        return HumanWorldState.load(file);
     }
 
     private static void assertWriteFails(GameTestHelper context, Fixture fixture) {

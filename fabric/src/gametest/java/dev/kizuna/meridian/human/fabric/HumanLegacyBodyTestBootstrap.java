@@ -7,7 +7,6 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtUtils;
-import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.storage.LevelResource;
 import java.io.IOException;
@@ -31,16 +30,16 @@ public final class HumanLegacyBodyTestBootstrap implements ModInitializer {
         try {
             HumanWorldState state;
             if (Files.exists(file)) {
-                state = HumanWorldState.read(NbtIo.readCompressed(file.toFile()).getCompound("data"));
+                state = HumanWorldState.load(file);
             } else {
                 state = new HumanWorldState();
             }
             state.join(PLAYER_ID, 0);
             var data = state.save(new CompoundTag());
-            var players = data.getList("players", Tag.TAG_COMPOUND);
+            var players = data.getListOrEmpty("players");
             for (int index = 0; index < players.size(); index++) {
-                var entry = players.getCompound(index);
-                var body = BodyProtobuf.decodeSnapshot(entry.getByteArray("body"));
+                var entry = players.getCompoundOrEmpty(index);
+                var body = BodyProtobuf.decodeSnapshot(entry.getByteArray("body").orElseThrow());
                 if (body.id().value().equals(PLAYER_ID.toString())) {
                     legacyBody = withoutTags(body);
                     entry.putByteArray("body", BodyProtobuf.encodeSnapshot(legacyBody));
@@ -50,7 +49,7 @@ public final class HumanLegacyBodyTestBootstrap implements ModInitializer {
             root.put("data", data);
             NbtUtils.addCurrentDataVersion(root);
             Files.createDirectories(file.getParent());
-            NbtIo.writeCompressed(root, file.toFile());
+            NbtIo.writeCompressed(root, file);
         } catch (IOException failure) {
             throw new IllegalStateException("旧身体夹具写入失败", failure);
         }

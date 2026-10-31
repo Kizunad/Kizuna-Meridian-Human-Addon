@@ -1,13 +1,14 @@
 package dev.kizuna.meridian.human.fabric;
 
-import com.mojang.authlib.GameProfile;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
 import dev.kizuna.meridian.technique.server.TechniqueHost;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.GlobalPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
+import net.minecraft.server.players.NameAndId;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -15,6 +16,7 @@ import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import net.minecraft.world.level.storage.LevelData;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -53,12 +55,12 @@ public final class HumanSpawnProtectionTest implements ModInitializer {
         // 保护区只有在管理员列表非空时启用，测试账号本身初始为非管理员。
         var world = server.overworld();
         var anchor = new BlockPos(0, TEST_HEIGHT, 0);
-        world.setDefaultSpawnPos(anchor, 0);
-        var operator = new GameProfile(UUID.randomUUID(), "protection_admin");
+        world.setRespawnData(new LevelData.RespawnData(GlobalPos.of(world.dimension(), anchor), 0, 0));
+        var operator = new NameAndId(UUID.randomUUID(), "protection_admin");
         server.getPlayerList().op(operator);
         try (var fixture = new HumanTechniqueTestPlayer(world)) {
             fixture.player.setGameMode(GameType.SURVIVAL);
-            fixture.player.moveTo(BLOCK_CENTER, TEST_HEIGHT, BLOCK_CENTER, 0, 0);
+            fixture.player.snapTo(BLOCK_CENTER, TEST_HEIGHT, BLOCK_CENTER, 0, 0);
             fixture.player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.IRON_AXE));
             BlockPos door = anchor.south(DOOR_DISTANCE);
             placeDoor(server, door);
@@ -77,8 +79,8 @@ public final class HumanSpawnProtectionTest implements ModInitializer {
 
     private static void verifyOperator(HumanTechniqueTestPlayer fixture, BlockPos door) {
         // 同一世界同一工具获得管理员权限后应正常破门，证明拒绝来自保护链。
-        var server = fixture.player.getServer();
-        var profile = fixture.player.getGameProfile();
+        var server = fixture.player.level().getServer();
+        var profile = fixture.player.nameAndId();
         server.getPlayerList().op(profile);
         try {
             execute(fixture, "operator");

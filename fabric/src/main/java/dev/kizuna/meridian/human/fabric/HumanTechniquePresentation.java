@@ -40,7 +40,7 @@ public final class HumanTechniquePresentation {
         if (action == null || !action.delivered()) {
             return;
         }
-        long nowMillis = player.getServer().overworld().getGameTime() * MILLIS_PER_TICK;
+        long nowMillis = player.level().getServer().overworld().getGameTime() * MILLIS_PER_TICK;
         long lateness = Math.max(0, nowMillis - effect.getScheduledMillis());
         long offsetTicks = (presentation.getStartMillis() + lateness) / MILLIS_PER_TICK;
         long startTick = Math.max(0, player.level().getGameTime() - offsetTicks);

@@ -3,10 +3,12 @@ package dev.kizuna.meridian.human.fabric;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.core.BlockPos;
-import net.minecraft.gametest.framework.GameTest;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.Registries;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.util.Unit;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
@@ -18,13 +20,14 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import java.util.List;
 import java.util.UUID;
 
 /** 正式破门斩数据经 Human 协议执行后，核对真实实体和世界副作用。 */
-public final class HumanCombatWorldGameTest implements FabricGameTest {
+public final class HumanCombatWorldGameTest {
     private static final double HOOK_MULTIPLIER = 1.2;
     private static final double KNOCK_FIRST_MULTIPLIER = 0.3;
     private static final int KNOCK_LAST_STRIKE = 2;
@@ -33,6 +36,7 @@ public final class HumanCombatWorldGameTest implements FabricGameTest {
     private static final int SHIELD_AXE_TICKS = 100;
     private static final int SHIELD_SWORD_TICKS = 40;
     private static final int JOIN_INVULNERABILITY_TICKS = 60;
+    private static final String BREAK_BLOCKS_RULE = "gamerule meridian_human:technique_player_break_blocks";
     private static final int SWEEP_TARGET_LIMIT = 5;
     private static final int UNBREAKING_LEVEL = 3;
     private static final int WEAR_SAMPLES = 30;
@@ -45,7 +49,7 @@ public final class HumanCombatWorldGameTest implements FabricGameTest {
     private static final int OTHER_WEAR_MULTIPLIER = 3;
     private static final float FACING_ATTACKER_YAW = 180;
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void damageCategoriesDoseAndKnockBluntUseRealDamageChain(GameTestHelper context) {
         // 新玩家使每个剂量样本都从健康未疲劳手臂起步，额外核对实际扣血。
         List<DamageCase> cases = List.of(new DamageCase(Items.IRON_AXE, IRON_AXE_DAMAGE, "cutting"),
@@ -71,13 +75,13 @@ public final class HumanCombatWorldGameTest implements FabricGameTest {
             near(context, target.doses.get(0), expected, "原始剂量");
             context.assertTrue(target.getHealth() < before, "实际伤害链没有扣血");
             String damageId = target.sources.get(0).typeHolder().unwrapKey().orElseThrow()
-                    .location().toString();
+                    .identifier().toString();
             context.assertTrue(damageId.equals("meridian_door_breaker:" + kind + "_main_hand"),
                     "伤害类型或手臂错误：" + damageId);
         }
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void changedCategoryTagsChangeDamageWithoutItemSpecialCases(GameTestHelper context) {
         // 替换规则引用的真实标签，证明类别由数据驱动而非硬编码铁斧。
         try (var fixture = new HumanCombatFixture(context)) {
@@ -99,7 +103,7 @@ public final class HumanCombatWorldGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void durabilityMultipliersBreakageUnbreakingAndCreativeMatchVanilla(GameTestHelper context) {
         // 空挥也消耗末击耐久，分别覆盖四档材料、原版附魔与损坏。
         Item[] items = {Items.IRON_AXE, Items.DIAMOND_AXE, Items.IRON_SWORD, Items.DIAMOND_SWORD};
@@ -129,20 +133,22 @@ public final class HumanCombatWorldGameTest implements FabricGameTest {
         // 固定随机种子后采样多次，能识别绕开原版耐久减免的实现。
         fixture.hold(Items.IRON_AXE, Items.SHIELD);
         ItemStack enchanted = fixture.human.player.getMainHandItem();
-        enchanted.enchant(Enchantments.UNBREAKING, UNBREAKING_LEVEL);
+        var unbreaking = context.getLevel().registryAccess().lookupOrThrow(Registries.ENCHANTMENT)
+                .getOrThrow(Enchantments.UNBREAKING);
+        enchanted.enchant(unbreaking, UNBREAKING_LEVEL);
         fixture.human.player.getRandom().setSeed(1);
         for (int index = 0; index < WEAR_SAMPLES; index++) {
             fixture.submit(HumanCombatFixture.strike("cleave", 0, "enchanted_" + index));
         }
         context.assertTrue(enchanted.getDamageValue() > 0 && enchanted.getDamageValue() < WEAR_SAMPLES * CLEAVE_WEAR,
                 "耐久附魔没有走原版概率减免");
-        enchanted.getOrCreateTag().putBoolean("Unbreakable", true /* unbreakable */);
+        enchanted.set(DataComponents.UNBREAKABLE, Unit.INSTANCE);
         int damage = enchanted.getDamageValue();
         fixture.submit(HumanCombatFixture.strike("cleave", 0, "unbreakable"));
         context.assertTrue(enchanted.getDamageValue() == damage, "无法破坏物品扣了耐久");
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void disposableLastStrikeConsumesOnceEvenOnMissAndRetry(GameTestHelper context) {
         // 三刀只在最后一次挥空时扣一个，新请求号重放同一效果不能再扣。
         try (var fixture = new HumanCombatFixture(context)) {
@@ -164,7 +170,7 @@ public final class HumanCombatWorldGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void twoHandDoseAndOffhandDamageChargeCorrectArms(GameTestHelper context) {
         // 双手类型让 Damage 分摊两臂；副手类型必须只消耗左臂。
         try (var fixture = new HumanCombatFixture(context)) {
@@ -200,7 +206,7 @@ public final class HumanCombatWorldGameTest implements FabricGameTest {
                 .mapToDouble(state -> state.getFatigue()).sum();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void sweepHitsBothHalvesOnceAndSharesFiveTargetBudget(GameTestHelper context) {
         // 前半圈四个、后半圈四个，重叠目标转身后仍不能再次占用预算。
         try (var fixture = new HumanCombatFixture(context)) {
@@ -225,19 +231,19 @@ public final class HumanCombatWorldGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, batch = "human-shield-axe")
+    @GameTest(environment = "meridian_human_test:shield_axe")
     public void axeBreaksShieldBeforeDamage(GameTestHelper context) {
         // 斧必须先让盾失效，本击直接进入真实伤害链。
         shield(context, Items.IRON_AXE, SHIELD_AXE_TICKS);
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, batch = "human-shield-sword")
+    @GameTest(environment = "meridian_human_test:shield_sword")
     public void swordBlocksThenCoolsShield(GameTestHelper context) {
         // 剑保留本击格挡，随后才给盾两秒冷却。
         shield(context, Items.IRON_SWORD, SHIELD_SWORD_TICKS);
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, batch = "human-shield-block")
+    @GameTest(environment = "meridian_human_test:shield_block")
     public void blockItemDoesNotDisableShield(GameTestHelper context) {
         // 方块击中举盾玩家不会产生破盾冷却。
         shield(context, Items.DIRT, 0);
@@ -248,11 +254,12 @@ public final class HumanCombatWorldGameTest implements FabricGameTest {
         var attacker = new HumanCombatFixture(context);
         var defender = new HumanTechniqueTestPlayer(context);
         var server = context.getLevel().getServer();
-        boolean originalPvp = server.isPvpAllowed();
-        server.setPvpAllowed(true /* pvpEnabled */);
+        // 26.2 的 PVP 开关改为游戏规则，测试结束恢复原设置。
+        boolean originalPvp = server.getGameRules().get(GameRules.PVP);
+        server.getGameRules().set(GameRules.PVP, true, server);
         attacker.hold(item, Items.SHIELD);
         Vec3 pos = attacker.human.player.position().add(0, 0, HumanCombatFixture.TARGET_DISTANCE);
-        defender.player.moveTo(pos.x, pos.y, pos.z, FACING_ATTACKER_YAW, 0);
+        defender.player.snapTo(pos.x, pos.y, pos.z, FACING_ATTACKER_YAW, 0);
         defender.player.setGameMode(GameType.SURVIVAL);
         defender.player.setItemInHand(InteractionHand.OFF_HAND, new ItemStack(Items.SHIELD));
         defender.player.startUsingItem(InteractionHand.OFF_HAND);
@@ -272,7 +279,7 @@ public final class HumanCombatWorldGameTest implements FabricGameTest {
                 assertShieldCooldown(context, defender, cooldownTicks);
                 context.succeed();
             } finally {
-                server.setPvpAllowed(originalPvp);
+                server.getGameRules().set(GameRules.PVP, originalPvp, server);
             }
         });
     }
@@ -280,18 +287,19 @@ public final class HumanCombatWorldGameTest implements FabricGameTest {
     private static void assertShieldCooldown(GameTestHelper context, HumanTechniqueTestPlayer defender, int ticks) {
         // 原版冷却器逐 tick 推进，最后一 tick 之前和之后分别断言边界。
         var cooldown = defender.player.getCooldowns();
-        context.assertTrue(cooldown.isOnCooldown(Items.SHIELD) == (ticks > 0), "盾冷却状态错误");
+        var shield = new ItemStack(Items.SHIELD);
+        context.assertTrue(cooldown.isOnCooldown(shield) == (ticks > 0), "盾冷却状态错误");
         for (int tick = 1; tick < ticks; tick++) {
             cooldown.tick();
         }
         if (ticks > 0) {
-            context.assertTrue(cooldown.isOnCooldown(Items.SHIELD), "盾冷却提前结束");
+            context.assertTrue(cooldown.isOnCooldown(shield), "盾冷却提前结束");
             cooldown.tick();
-            context.assertTrue(!cooldown.isOnCooldown(Items.SHIELD), "盾冷却时长错误");
+            context.assertTrue(!cooldown.isOnCooldown(shield), "盾冷却时长错误");
         }
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void woodenDoorsDropAndIronAndNonToolsRefuse(GameTestHelper context) {
         // 对真实方块逐项执行劈门，检查木门掉落与类别限制。
         try (var fixture = new HumanCombatFixture(context)) {
@@ -308,7 +316,7 @@ public final class HumanCombatWorldGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void offhandAxeBreaksDoorWithoutMovingItemsOrExtraWear(GameTestHelper context) {
         // 主手剑不能阻止副手斧劈门，两个手位和末击之外的耐久保持不变。
         var offHand = TechniqueMessages.Hand.OFF_HAND;
@@ -327,16 +335,14 @@ public final class HumanCombatWorldGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void playerDoorRuleDisablesBreaking(GameTestHelper context) {
-        // 服主总开关经过真实 gamerule 命令切换，测试结束恢复原设置。
+        // 服主总开关经过真实 gamerule 命令切换，测试结束恢复原设置；26.2 规则名须为小写命名空间 ID。
         try (var fixture = new HumanCombatFixture(context)) {
             fixture.hold(Items.IRON_AXE, Items.AIR);
-            var server = context.getLevel().getServer();
-            var commands = server.getCommands();
-            var source = server.createCommandSourceStack();
-            int original = commands.performPrefixedCommand(source, "gamerule meridianTechniquePlayerBreakBlocks");
-            commands.performPrefixedCommand(source, "gamerule meridianTechniquePlayerBreakBlocks false");
+            var source = context.getLevel().getServer().createCommandSourceStack();
+            int original = HumanTestCommands.run(source, BREAK_BLOCKS_RULE);
+            HumanTestCommands.run(source, BREAK_BLOCKS_RULE + " false");
             try {
                 assertDoor(context, fixture, Blocks.OAK_DOOR, DoorResult.KEPT);
             } finally {
@@ -344,7 +350,7 @@ public final class HumanCombatWorldGameTest implements FabricGameTest {
                 if (original != 0) {
                     restore = "true";
                 }
-                commands.performPrefixedCommand(source, "gamerule meridianTechniquePlayerBreakBlocks " + restore);
+                HumanTestCommands.run(source, BREAK_BLOCKS_RULE + " " + restore);
             }
         }
         context.succeed();

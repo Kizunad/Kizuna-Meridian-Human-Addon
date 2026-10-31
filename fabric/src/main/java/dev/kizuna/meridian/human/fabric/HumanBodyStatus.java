@@ -66,7 +66,7 @@ public final class HumanBodyStatus {
             return;
         }
         parent.then(Commands.literal("full")
-                .requires(source -> source.hasPermission(MeridianCommands.GAMEMASTER))
+                .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                 .executes(context -> full.full(context.getSource(), target.resolve(context))));
     }
 }

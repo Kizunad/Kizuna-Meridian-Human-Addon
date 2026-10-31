@@ -164,13 +164,13 @@ python3 "scripts/check_docs.py"
 
 ## Minecraft 行走、疾跑与数值查看
 
-先构建完整装配，直接运行 `./gradlew :fabric:runClient`；专服使用 `:fabric:runServer`。`fabric/` 目标 Minecraft 1.20.1、Fabric Loader 0.16.10、Fabric API 0.92.3+1.20.1、Java 17。开发运行统一应用 Framework 的 `scripts/full-assembly.gradle`，按装配清单读取其余仓库的安装产物，已在 settings 中源码组合的模块按坐标装入同一组件；不存在安装开关。正式部署按适用端安装整套产物及其依赖，Items 作为服务端宿主库提供。
+先构建完整装配，直接运行 `./gradlew :fabric:runClient`；专服使用 `:fabric:runServer`。`fabric/` 目标 Minecraft 26.2、Fabric Loader 0.20.1、Fabric API 0.161.0+26.2、Java 25。开发运行统一应用 Framework 的 `scripts/full-assembly.gradle`，按装配清单读取其余仓库的安装产物，已在 settings 中源码组合的模块按坐标装入同一组件；不存在安装开关。正式部署按适用端安装整套产物及其依赖，Items 作为服务端宿主库提供。
 
 身体模型窗口使用必装的 Meridian UI、Human-UI、Inventory UI 和 owo。进世界按 `I` 打开工作台，进入“检视”，选择肌肉查看基础力量、爆发、耐力、疲劳、动作占用和恢复半衰期。已连接客户端缺少必需接收通道时明确报错并暂停身体，不静默丢弃推送。
 
 真正暂停时，健康与功法宿主均返回 `BODY_PAUSED`，聊天只提示一次。玩家退出世界后重新加入即可重新认领原身体；不会重置伤势、真元或其他已保存状态。若重登仍失败，保留日志并检查必装模组与通道，不能通过新建身体覆盖错误。
 
-“经脉”窗口通过 `meridian:opening_request` 提交框架 `MeridianOpeningRequest`，`meridian:opening_response` 返回 `ResponseEnvelope`。宿主绑定当前玩家、在服务器线程串行执行，与吐纳共享每秒 40 包额度；格式异常只拒绝该包，旧连接消息丢弃。首次 `meridian:body_view` 附带 Human 规则选项，后续按身体 revision 推送变化；客户端不上传时间或开脉结果。断线暂停开脉并清除连接回执缓存，已完成成长仍由原身体保存。
+“经脉”窗口通过 `meridian:opening_request` 提交框架 `MeridianOpeningRequest`，`meridian:opening_response` 返回 `ResponseEnvelope`。宿主绑定当前玩家、在服务器线程串行执行，与吐纳共享每秒 40 包额度；格式异常只拒绝该包，旧连接消息丢弃。首次 `meridian:body_view` 附带 Human 规则选项，后续按身体 revision 推送变化；客户端不上传时间或开脉结果。断线暂停开脉并清除连接回执缓存，已完成成长仍由原身体保存。这些 `meridian:*` 频道的 ID、方向与字节上限统一由 Framework 的 `MeridianChannels` 登记，`meridian_human:cultivation` 由本仓 `HumanChannels` 登记；Human 只注册收包处理。
 
 本包登记 `/meridian body status`（当前动作、下肢最小余力、身体 revision；注册了行走负荷提供者时末尾追加一行负荷说明）、`/meridian body tissue`（单个组织的实际疲劳、当前耐力/力量/功率，ID 支持补全）和观察频道 `/meridian watch body`（快捷栏上方的实时下肢余力），写法见 [Framework 指令页](https://github.com/Kizunad/Kizuna-Meridian-Mod-Framework/wiki/Commands)。
 

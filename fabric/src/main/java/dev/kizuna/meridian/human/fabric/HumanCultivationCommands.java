@@ -70,6 +70,6 @@ final class HumanCultivationCommands {
 
     private static long now(ServerPlayer player) {
         // 使用宿主世界模拟时钟，不能按系统时间跳过消耗。
-        return Math.multiplyExact(player.getServer().overworld().getGameTime(), 50);
+        return Math.multiplyExact(player.level().getServer().overworld().getGameTime(), 50);
     }
 }

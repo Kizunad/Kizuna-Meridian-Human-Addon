@@ -26,7 +26,7 @@ subprojects {
         options.encoding = 'UTF-8'
     }
     tasks.withType(JavaExec).configureEach {
-        // 导出和演示也使用 Java 17，不能依赖开发机默认 JDK 的额外能力。
+        // 导出和演示也使用版本目录指定的 Java，不能依赖开发机默认 JDK 的额外能力。
         javaLauncher = javaToolchains.launcherFor {
             languageVersion = JavaLanguageVersion.of(libs.versions.java.get())
         }

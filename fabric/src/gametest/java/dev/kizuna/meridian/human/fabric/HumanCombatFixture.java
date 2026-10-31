@@ -15,13 +15,14 @@ import dev.kizuna.meridian.technique.server.TechniqueProtocol;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageSource;
-import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.entity.animal.Cow;
+import net.minecraft.world.entity.animal.cow.Cow;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.GameType;
@@ -46,15 +47,15 @@ final class HumanCombatFixture implements AutoCloseable {
         human = new HumanTechniqueTestPlayer(context, UUID.randomUUID(), ObservedPlayer::new);
         var relative = new BlockPos(1, PLAYER_HEIGHT, 1);
         Vec3 position = Vec3.atBottomCenterOf(context.absolutePos(relative));
-        human.player.moveTo(position.x, position.y, position.z, 0, 0);
+        human.player.snapTo(position.x, position.y, position.z, 0, 0);
         human.player.setGameMode(GameType.SURVIVAL);
     }
 
     Target target(double x, double z) {
         // 目标只观察伤害入口，仍调用原版伤害链并实际进入服务器世界。
-        var target = new Target(human.player.serverLevel());
+        var target = new Target(human.player.level());
         Vec3 position = human.player.position().add(x, 0, z);
-        target.moveTo(position.x, position.y, position.z, 0, 0);
+        target.snapTo(position.x, position.y, position.z, 0, 0);
         target.setNoAi(true /* aiDisabled */);
         target.setNoGravity(true /* noGravity */);
         context.assertTrue(context.getLevel().addFreshEntity(target), "真实目标生成失败");
@@ -143,26 +144,26 @@ final class HumanCombatFixture implements AutoCloseable {
 
         Target(ServerLevel world) {
             // 不改血量与防御，只固定牛这种无护甲目标的观察入口。
-            super(EntityType.COW, world);
+            super(EntityTypes.COW, world);
         }
 
         @Override
-        public boolean hurt(DamageSource source, float amount) {
-            // 原始剂量与实际扣血分别断言，不能把调用伤害当作已经命中。
+        public boolean hurtServer(ServerLevel level, DamageSource source, float amount) {
+            // 原始剂量与实际扣血分别断言，不能把调用伤害当作已经命中；26.2 服务端伤害统一走这里。
             sources.add(source);
             doses.add(amount);
-            hitMillis.add(level().getGameTime() * MILLIS_PER_TICK);
-            return super.hurt(source, amount);
+            hitMillis.add(level.getGameTime() * MILLIS_PER_TICK);
+            return super.hurtServer(level, source, amount);
         }
     }
 
     static final class ObservedPlayer extends ServerPlayer {
         final List<VelocityChange> velocities = new ArrayList<>();
 
-        ObservedPlayer(MinecraftServer server, ServerLevel world,
-                       GameProfile profile) {
+        ObservedPlayer(MinecraftServer server, ServerLevel world, GameProfile profile,
+                       ClientInformation information) {
             // 只记录原版实体方法调用，所有玩家逻辑仍由父类实现。
-            super(server, world, profile);
+            super(server, world, profile, information);
         }
 
         @Override

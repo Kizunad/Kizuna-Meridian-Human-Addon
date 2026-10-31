@@ -17,7 +17,7 @@ public abstract class TechniqueHandSwingMixin {
     @Inject(method = "handleAnimate", at = @At("HEAD"), cancellable = true)
     private void meridian$blockCastingSwing(ServerboundSwingPacket packet, CallbackInfo callback) {
         // 功法每击自行挥手和做功，客户端原版左键不能再产生第二次出手。
-        if (player.getServer().isSameThread() && HumanTechniqueHost.isCasting(player.getUUID())) {
+        if (player.level().getServer().isSameThread() && HumanTechniqueHost.isCasting(player.getUUID())) {
             callback.cancel();
         }
     }

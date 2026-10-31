@@ -1,5 +1,7 @@
 package dev.kizuna.meridian.human.fabric;
 
+import dev.kizuna.meridian.fabric.MeridianChannels;
+import dev.kizuna.meridian.fabric.ProtobufChannel;
 import dev.kizuna.meridian.human.server.HumanBirth;
 import dev.kizuna.meridian.human.server.HumanRevival;
 import dev.kizuna.meridian.protocol.pb.BodyMessages.HealthTarget;
@@ -20,14 +22,12 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastRequest;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
-import net.minecraft.gametest.framework.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
-import net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket;
+import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
+import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
-import net.minecraft.network.protocol.game.ServerboundCustomPayloadPacket;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.protocol.game.ServerboundClientCommandPacket;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
@@ -36,10 +36,11 @@ import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
 import java.io.IOException;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /** 真实玩家死亡、重生、健康投影和腿力恢复共用原来的权威身体。 */
-public final class HumanRevivalGameTest implements FabricGameTest {
+public final class HumanRevivalGameTest {
     private static final long MILLIS_PER_TICK = 50;
     private static final int RECOVERY_TICKS = 80;
     private static final int TEST_TICK_LIMIT = 160;
@@ -48,10 +49,8 @@ public final class HumanRevivalGameTest implements FabricGameTest {
     private static final double MINIMUM_HP_RATIO = 0.1;
     private static final double TOLERANCE = 0.00001;
     private static final double TEST_QI = 0.2;
-    private static final ResourceLocation VIEW_REQUEST = new ResourceLocation("meridian:body_view_request");
-    private static final ResourceLocation VIEW_UPDATE = new ResourceLocation("meridian:body_view");
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = TEST_TICK_LIMIT)
+    @GameTest(maxTicks = TEST_TICK_LIMIT)
     public void deathRespawnRestoresHealthSpendsLifespanAndRecoversLegWork(GameTestHelper context) {
         // 学习先于死亡，重生必须保留目录进度和开脉，立刻起手只因疲劳被拒。
         var fixture = new HumanTechniqueTestPlayer(context);
@@ -72,16 +71,17 @@ public final class HumanRevivalGameTest implements FabricGameTest {
         }
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void livingEntityReplacementAndDimensionTravelDoNotSpendLifespan(GameTestHelper context) {
         // 存活换实体与跨维度事件均使用正式 Fabric 回调，不应扣费或清掉真元。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
             var before = fixture.body().snapshot();
             ServerPlayerEvents.AFTER_RESPAWN.invoker().afterRespawn(
                     fixture.player, fixture.player, true /* alive */);
-            var destination = fixture.player.getServer().getLevel(Level.NETHER);
+            var destination = fixture.player.level().getServer().getLevel(Level.NETHER);
             fixture.player.teleportTo(destination, fixture.player.getX(), fixture.player.getY(),
-                    fixture.player.getZ(), fixture.player.getYRot(), fixture.player.getXRot());
+                    fixture.player.getZ(), Set.of(), fixture.player.getYRot(), fixture.player.getXRot(),
+                    true /* resetCamera */);
             context.assertTrue(fixture.player.level() == destination, "玩家没有实际换维度");
             var after = fixture.body().snapshot();
             context.assertTrue(before.vitality().spentLifespanSeconds() == after.vitality().spentLifespanSeconds(),
@@ -104,7 +104,7 @@ public final class HumanRevivalGameTest implements FabricGameTest {
     }
 
     private static ServerPlayer killAndRespawn(GameTestHelper context, HumanTechniqueTestPlayer fixture) {
-        // 可信躯干大伤害通过人体蔓延耗尽所有部位，再走原版死亡和玩家管理器重生。
+        // 可信躯干大伤害通过人体蔓延耗尽所有部位，再走原版死亡和客户端重生指令。
         var hit = HealthTarget.newBuilder().setPartId("chest").build();
         var damage = DamageBody.newBuilder()
                 .setSourceId("human_test:revival")
@@ -125,11 +125,14 @@ public final class HumanRevivalGameTest implements FabricGameTest {
                 .build();
         var result = fixture.body().applyHealth(now(fixture.player), request);
         context.assertTrue(result.hasCommandCommitted(), "致死伤害未提交：" + result);
-        fixture.player.hurt(fixture.player.damageSources().genericKill(), LETHAL_DAMAGE);
+        var player = fixture.player;
+        player.hurtServer(player.level(), player.damageSources().genericKill(), LETHAL_DAMAGE);
         context.assertTrue(fixture.body().snapshot().vitality().dead(), "玩家死亡没有记录到身体");
         context.assertTrue(!fixture.player.isAlive(), "原版玩家未死亡");
-        var revived = fixture.player.getServer().getPlayerList().respawn(
-                fixture.player, false /* alive */);
+        // 26.2 死亡后要等客户端重生流程才重新计加载期，直接调玩家管理器会让新玩家一直无敌。
+        player.connection.handleClientCommand(
+                new ServerboundClientCommandPacket(ServerboundClientCommandPacket.Action.PERFORM_RESPAWN));
+        var revived = player.level().getServer().getPlayerList().getPlayer(player.getUUID());
         revived.setNoGravity(true /* noGravity */);
         return revived;
     }
@@ -149,7 +152,7 @@ public final class HumanRevivalGameTest implements FabricGameTest {
         }
         var view = requestView(fixture, revived);
         context.assertTrue(!view.hasFailure(), "UI 身体订阅被拒：" + view);
-        long hints = fixture.connection.packets.stream()
+        long hints = fixture.connection.packets().stream()
                 .filter(ClientboundSystemChatPacket.class::isInstance)
                 .map(ClientboundSystemChatPacket.class::cast)
                 .filter(packet -> packet.overlay() && packet.content().getString().equals(HumanRevival.message()))
@@ -193,7 +196,7 @@ public final class HumanRevivalGameTest implements FabricGameTest {
         try (fixture) {
             float beforeDamage = revived.getHealth();
             revived.invulnerableTime = 0;
-            context.assertTrue(revived.hurt(revived.damageSources().generic(), 1), "重生后不能受伤");
+            context.assertTrue(revived.hurtServer(revived.level(), revived.damageSources().generic(), 1), "重生后不能受伤");
             context.assertTrue(revived.getHealth() < beforeDamage, "重生伤害没有同步红心");
             var outcome = cast(revived);
             context.assertTrue(outcome.getPhase() == CastPhase.WARMUP,
@@ -205,10 +208,10 @@ public final class HumanRevivalGameTest implements FabricGameTest {
     private static void verifyBodyProjection(GameTestHelper context, HumanTechniqueTestPlayer fixture) {
         // 订阅回执只确认授权，下一次服务端 tick 才沿同一通道推送完整身体。
         double expected = fixture.body().snapshot().vitality().spentLifespanSeconds();
-        boolean synchronizedLifespan = fixture.connection.packets.stream()
+        boolean synchronizedLifespan = fixture.connection.packets().stream()
                 .filter(ClientboundCustomPayloadPacket.class::isInstance)
                 .map(ClientboundCustomPayloadPacket.class::cast)
-                .filter(packet -> packet.getIdentifier().equals(VIEW_UPDATE))
+                .filter(packet -> packet.payload().type().equals(MeridianChannels.BODY_VIEW.type()))
                 .map(HumanRevivalGameTest::decodeView)
                 .filter(BodyViewUpdate::hasBody)
                 .anyMatch(update -> update.getBody().getVitality().getSpentLifespanSeconds() == expected);
@@ -237,29 +240,21 @@ public final class HumanRevivalGameTest implements FabricGameTest {
                 .setRequestId(UUID.randomUUID().toString())
                 .setBodyId(player.getStringUUID())
                 .build();
-        var buffer = PacketByteBufs.create();
-        try {
-            buffer.writeBytes(request.toByteArray());
-            player.connection.handleCustomPayload(new ServerboundCustomPayloadPacket(VIEW_REQUEST, buffer));
-        } finally {
-            buffer.release();
-        }
-        return fixture.connection.packets.stream()
+        var payload = MeridianChannels.BODY_VIEW_REQUEST.payload(request.toByteArray());
+        player.connection.handleCustomPayload(new ServerboundCustomPayloadPacket(payload));
+        return fixture.connection.packets().stream()
                 .filter(ClientboundCustomPayloadPacket.class::isInstance)
                 .map(ClientboundCustomPayloadPacket.class::cast)
-                .filter(packet -> packet.getIdentifier().equals(VIEW_UPDATE))
+                .filter(packet -> packet.payload().type().equals(MeridianChannels.BODY_VIEW.type()))
                 .map(HumanRevivalGameTest::decodeView)
                 .filter(update -> update.getRequestId().equals(request.getRequestId()))
                 .findFirst().orElseThrow();
     }
 
     private static BodyViewUpdate decodeView(ClientboundCustomPayloadPacket packet) {
-        // 保留原包读取指针，让同一连接的其他断言仍可读取其余同步结果。
-        var buffer = packet.getData();
-        byte[] bytes = new byte[buffer.readableBytes()];
-        buffer.getBytes(buffer.readerIndex(), bytes);
+        // 载荷只持有字节数组，重复解码不改变原包，同一连接的其他断言仍可读取其余同步结果。
         try {
-            return BodyViewUpdate.parseFrom(bytes);
+            return BodyViewUpdate.parseFrom(((ProtobufChannel.Payload) packet.payload()).bytes());
         } catch (IOException failure) {
             throw new IllegalStateException(failure);
         }
@@ -267,6 +262,6 @@ public final class HumanRevivalGameTest implements FabricGameTest {
 
     private static long now(ServerPlayer player) {
         // 与 Human 生产调度使用相同的服务端世界时钟。
-        return player.getServer().overworld().getGameTime() * MILLIS_PER_TICK;
+        return player.level().getServer().overworld().getGameTime() * MILLIS_PER_TICK;
     }
 }

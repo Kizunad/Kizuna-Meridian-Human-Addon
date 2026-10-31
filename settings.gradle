@@ -14,7 +14,7 @@ include 'shared', 'client', 'server', 'fabric'
 
 // 框架尚未发布 Maven 产物；开发时从独立仓库源码组合，不复制它的源码或协议。local.meridian 是本地替换键。
 kizunaWorkspace.includeSource('framework', [client: 'local.meridian:client', server: 'local.meridian:server'])
-// 功法库、玩家动画、Damage 与库存 UI 服务端都是模组依赖，Loom 按真实坐标重新加入其传递库，
+// 功法库、玩家动画、Damage 与库存 UI 服务端都按真实坐标声明依赖，
 // 所以替换键用各工程自身的 group 与工程名；登记后完整装配按同一组件装入，不再另读同名 JAR。
 kizunaWorkspace.includeSource('technique', [
         fabric: 'dev.kizuna.meridian.technique:fabric',

@@ -14,7 +14,7 @@
     "meridian_health_host": ["dev.kizuna.meridian.human.fabric.HumanHealthHost"],
     "meridian_environment_host": ["dev.kizuna.meridian.human.fabric.HumanEnvironmentHost"]
   },
-  "depends": {"java": ">=17", "minecraft": "1.20.1", "fabricloader": ">=0.16.10", "fabric-api": "*",
+  "depends": {"java": ">=25", "minecraft": "26.2", "fabricloader": ">=0.20.1", "fabric-api": "*",
     "meridian_framework": "*",
     "meridian_technique": "*", "kizuna_players_animation": "*", "meridian_progression": "*",
     "meridian_vanilla_damage": "*", "meridian_vanilla_healing": "*"}

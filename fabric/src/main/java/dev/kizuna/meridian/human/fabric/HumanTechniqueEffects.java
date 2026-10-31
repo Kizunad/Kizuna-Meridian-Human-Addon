@@ -13,14 +13,15 @@ import dev.kizuna.meridian.technique.server.TechniqueHost;
 import dev.kizuna.meridian.technique.server.TechniqueMovement;
 import dev.kizuna.meridian.technique.server.TechniqueProtocol;
 import dev.kizuna.meridian.vanilla.fabric.VanillaStrikeContext;
-import net.fabricmc.fabric.api.gamerule.v1.GameRuleFactory;
-import net.fabricmc.fabric.api.gamerule.v1.GameRuleRegistry;
+import net.fabricmc.fabric.api.gamerule.v1.GameRuleBuilder;
 import net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.level.GameRules;
+import net.minecraft.world.level.gamerules.GameRule;
+import net.minecraft.world.level.gamerules.GameRuleCategory;
 import net.minecraft.world.phys.Vec3;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
@@ -33,9 +34,10 @@ import java.util.UUID;
 /** 正常施放与未认领恢复共用的实体效果执行器，回执只在当前服务器连接内有效。 */
 final class HumanTechniqueEffects {
     private static final double TICKS_PER_SECOND = 20;
-    private static final GameRules.Key<GameRules.BooleanValue> PLAYER_BREAK_BLOCKS = GameRuleRegistry.register(
-            "meridianTechniquePlayerBreakBlocks", GameRules.Category.PLAYER,
-            GameRuleFactory.createBooleanRule(true /* defaultValue */));
+    // 26.x 的游戏规则 ID 只允许小写路径，旧名 meridianTechniquePlayerBreakBlocks 改为下划线写法。
+    private static final GameRule<Boolean> PLAYER_BREAK_BLOCKS = GameRuleBuilder.forBoolean(true /* defaultValue */)
+            .category(GameRuleCategory.PLAYER)
+            .buildAndRegister(Identifier.fromNamespaceAndPath("meridian_human", "technique_player_break_blocks"));
     private final Map<UUID, TechniqueWorldEffects> worldEffects = new HashMap<>();
     private final Map<UUID, Set<String>> castingIds = new HashMap<>();
     private final Map<UUID, Map<String, EffectIntent>> requests = new HashMap<>();
@@ -45,7 +47,7 @@ final class HumanTechniqueEffects {
 
     TechniqueHost.EffectCommit submit(ServerPlayer player, TechniqueHost.EffectSubmission submission) {
         // 身份由调用适配器认证；两种稳定身份都检查内容，失败不留下成功回执。
-        if (!player.getServer().isSameThread()) {
+        if (!player.level().getServer().isSameThread()) {
             throw new TechniqueErrors.HostRejected(FailureCode.ACCESS_DENIED);
         }
         EffectIntent effect = submission.effect();
@@ -156,7 +158,7 @@ final class HumanTechniqueEffects {
     private TechniqueWorldEffects world(ServerPlayer player) {
         // 世界工具调用 Damage 的一次出手上下文，横扫多目标共享做功前系数。
         return worldEffects.computeIfAbsent(player.getUUID(), id -> new TechniqueWorldEffects(player,
-                () -> player.level().getGameRules().getBoolean(PLAYER_BREAK_BLOCKS)
+                () -> player.level().getGameRules().get(PLAYER_BREAK_BLOCKS)
                         ? TechniqueWorldEffects.Policy.PLAYER : TechniqueWorldEffects.Policy.PLAYER_NO_BREAK,
                 target -> true,
                 (actor, source, strike) -> {
@@ -172,14 +174,16 @@ final class HumanTechniqueEffects {
         if (attribute == null) {
             throw new TechniqueErrors.HostRejected(FailureCode.MODULE_UNAVAILABLE);
         }
-        UUID modifierId = UUID.nameUUIDFromBytes(
+        // 修正身份改为 Identifier；施放 ID 可能含路径不允许的字符，仍用它派生的 UUID 作路径。
+        UUID castUuid = UUID.nameUUIDFromBytes(
                 ("meridian_human:technique_movement:" + effect.getCastId()).getBytes(StandardCharsets.UTF_8));
+        Identifier modifierId = Identifier.fromNamespaceAndPath("meridian_human", "technique_movement/" + castUuid);
         AttributeModifier existing = attribute.getModifier(modifierId);
         if (effect.getMovement().getAction() == MovementAction.LOCK) {
             if (existing == null) {
-                var modifier = new AttributeModifier(modifierId, "meridian_human:technique_movement",
+                var modifier = new AttributeModifier(modifierId,
                         TechniqueMovement.multiplier(effect.getMovement()) - 1,
-                        AttributeModifier.Operation.MULTIPLY_TOTAL);
+                        AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
                 attribute.addTransientModifier(modifier);
             }
         } else {
@@ -261,7 +265,7 @@ final class HumanTechniqueEffects {
         } catch (IllegalArgumentException invalid) {
             throw new TechniqueErrors.HostRejected(FailureCode.INVALID_REQUEST);
         }
-        Entity target = player.serverLevel().getEntity(targetUuid);
+        Entity target = player.level().getEntity(targetUuid);
         if (target == null || target.isRemoved()) {
             throw new TechniqueErrors.HostRejected(FailureCode.MODULE_UNAVAILABLE);
         }

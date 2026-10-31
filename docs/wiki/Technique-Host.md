@@ -32,7 +32,7 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 ## 冲量与表现
 
 冲量设置实体速度，换算为 `速度（m/s）÷20 = 格/tick`，随后设置 `hurtMarked=true`。
-已核对 1.20.1：`ServerEntity.sendChanges` 看到此标记后，向观察者和玩家本人发送
+已核对 26.2：`ServerEntity.sendChanges` 看到此标记后，经跟踪表的 `sendToTrackingPlayersAndSelf` 向观察者和玩家本人发送
 `ClientboundSetEntityMotionPacket`，再清除标记。GameTest 实际经过此跟踪器并检查双方发包。
 
 `FORWARD` 取玩家水平朝向；`BACKWARD` 取其反方向；`UP` 垂直向上；
@@ -79,8 +79,8 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 实际位移、碰撞及额外跌落伤害由功法库共享宿主处理；飞行 tick 由功法库按直线长度与起跳速度求出，
 落地间隔以服务端回执的可起跳时刻为准，本宿主不另计。
 
-原版速度包会把每轴限制到 ±3.9 格/tick（±78 m/s），并以 1/8000 格/tick 量化；服务端仍设置契约中的完整速度。
-高于此逐轴范围的普通冲量无法通过原版包精确同步；跃步另用功法库的 Protobuf 轨迹频道进行权威纠正。
+26.2 原版速度包在编码时按三轴最大绝对值取整数倍率，各轴相对倍率以 15 位量化（倍率 1 时步长约 1/16383 格/tick）；
+服务端仍设置契约中的完整速度。分量悬殊时小分量的量化误差随大分量放大，普通冲量不保证精确同步；跃步另用功法库的 Protobuf 轨迹频道进行权威纠正。
 GameTest 使用 10 m/s，验证服务端为 0.5 格/tick，并检查同步标记与速度包。
 
 ## 取消与组织占用

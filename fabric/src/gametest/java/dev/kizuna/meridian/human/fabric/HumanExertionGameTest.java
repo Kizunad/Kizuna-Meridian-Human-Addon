@@ -9,16 +9,15 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.ExertTissue;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.ExertTissues;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.RequestEnvelope;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
-import net.minecraft.gametest.framework.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import java.util.UUID;
 
 /** 玩家健康宿主使用真实在线绑定转发普通做功命令。 */
-public final class HumanExertionGameTest implements FabricGameTest {
+public final class HumanExertionGameTest {
     private static final double EXCESSIVE_POWER = 1_000_000;
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void exertionChargesOnceRejectsCapacityAndChecksBoundIdentity(GameTestHelper context) {
         // 原子做功、成功重试和能力不足都通过正式宿主，不替换玩家或核心账本。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {

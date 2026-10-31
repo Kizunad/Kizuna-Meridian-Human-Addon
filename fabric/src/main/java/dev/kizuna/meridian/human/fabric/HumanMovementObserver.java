@@ -16,7 +16,7 @@ final class HumanMovementObserver {
     HumanPlayerBody.Motion sample(ServerPlayer player) {
         // 首次观测、换维度、乘坐、游泳或飞行均不能把位移当成地面肌肉做功。
         Vec3 position = player.position();
-        String currentDimension = player.level().dimension().location().toString();
+        String currentDimension = player.level().dimension().identifier().toString();
         boolean grounded = player.isAlive() && player.onGround() && !player.isSpectator()
                 && !player.getAbilities().flying && !player.isPassenger() && !player.isSwimming() && !player.isFallFlying();
         return sample(position, currentDimension, grounded, player.isSprinting(), player.hurtTime > 0);
