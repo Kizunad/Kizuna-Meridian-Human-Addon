@@ -91,7 +91,7 @@ Java 编译、测试、内容导出与演示均使用 17。框架自己的构建
 - `server/build/libs/kizuna-meridian-human-addon-server-0.1.0-SNAPSHOT.jar`：人体定义与出生候选，内含 `META-INF/kizuna_meridian/addons/human.pb`。
 - `server/build/generated/human-content/META-INF/kizuna_meridian/addons/human.pb`：同一内容的独立二进制文件，其他语言宿主也可读取。
 
-单独 `client/server` 内容 JAR 不内嵌框架或运行库。另有 `fabric/build/libs/kizuna-meridian-human-addon-fabric-0.1.0-SNAPSHOT.jar` 安装包，通过 Loom 嵌套原始内容、框架与运行依赖 JAR。`fabric/build.gradle` 的 `clearNestedJarCache` 在每次 `remapJar` 前删除 `fabric/build/loom-cache/temp/modprocessing`：Loom 只按坐标复用这里的嵌套 JAR，SNAPSHOT 坐标不变时会把旧 server/shared JAR 打进发布 JAR。它的 `meridian_human_host` 入口负责 Minecraft 适配，客户端资源仍由 `meridian_human` 容器提供；内容库没有 UI 反向依赖。
+单独 `client/server` 内容 JAR 不内嵌框架或运行库。另有 `fabric/build/libs/kizuna-meridian-human-addon-fabric-0.1.0-SNAPSHOT.jar` 安装包，通过 Loom 嵌套原始内容、框架与运行依赖 JAR。它的 `meridian_human_host` 入口负责 Minecraft 适配，客户端资源仍由 `meridian_human` 容器提供；内容库没有 UI 反向依赖。
 
 ## 内容前置
 
