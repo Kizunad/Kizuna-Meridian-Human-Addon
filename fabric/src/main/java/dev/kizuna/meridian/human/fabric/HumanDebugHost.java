@@ -2,9 +2,8 @@ package dev.kizuna.meridian.human.fabric;
 
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.DebugQi;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
-import net.minecraft.server.network.ServerPlayerEntity;
-
 import java.util.Objects;
+import net.minecraft.server.level.ServerPlayer;
 
 /** 调试用途，不进正式玩法：调试附属改写玩家真元库存的入口；权限检查留在调用方命令层。 */
 public final class HumanDebugHost {
@@ -19,7 +18,7 @@ public final class HumanDebugHost {
         delegate = host;
     }
 
-    public static FailureCode debugQi(ServerPlayerEntity player, DebugQi request) {
+    public static FailureCode debugQi(ServerPlayer player, DebugQi request) {
         // 模组加载阶段尚无世界时按无身体拒绝，不提前创建玩家身体。
         Objects.requireNonNull(player);
         Objects.requireNonNull(request);
@@ -30,6 +29,6 @@ public final class HumanDebugHost {
     }
 
     interface Delegate {
-        FailureCode debugQi(ServerPlayerEntity player, DebugQi request);
+        FailureCode debugQi(ServerPlayer player, DebugQi request);
     }
 }

@@ -31,9 +31,9 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 
 ## 冲量与表现
 
-冲量设置实体速度，换算为 `速度（m/s）÷20 = 格/tick`，随后设置 `velocityModified=true`。
-已核对 Yarn 1.20.1：`EntityTrackerEntry.tick` 看到此标记后，向观察者和玩家本人发送
-`EntityVelocityUpdateS2CPacket`，再清除标记。GameTest 实际经过此跟踪器并检查双方发包。
+冲量设置实体速度，换算为 `速度（m/s）÷20 = 格/tick`，随后设置 `hurtMarked=true`。
+已核对 1.20.1：`ServerEntity.sendChanges` 看到此标记后，向观察者和玩家本人发送
+`ClientboundSetEntityMotionPacket`，再清除标记。GameTest 实际经过此跟踪器并检查双方发包。
 
 `FORWARD` 取玩家水平朝向；`BACKWARD` 取其反方向；`UP` 垂直向上；
 `INPUT` 的 x/z 是世界坐标，归一化后使用。零输入按 `input_default_direction` 选前方或后方，缺省前方。
@@ -49,7 +49,7 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 效果回执在连接结束时清除；库不跨重启恢复效果游标，不补发离线效果。
 
 `HumanTechniquePresentation.EVENT` 是公开的服务端表现钩子，回调为
-`apply(ServerPlayerEntity player, String requestId, EffectIntent effect)`。
+`apply(ServerPlayer player, String requestId, EffectIntent effect)`。
 正常施放和恢复共用此通道，完整传递施放/效果身份、选手、START/PLAY_ONCE/STOP 及原始 `start_millis`。
 适配器应按请求身份幂等，只有实际接受意图后才返回；抛出 `TechniqueErrors.HostRejected` 可保留原失败码并重试。
 多个监听器中有失败时，已执行的监听器也可能再次收到同一请求，因此不能仅依赖 Human 的成功回执去重。
@@ -65,9 +65,9 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 撞门冲量在 1550、1800、2050 毫秒，位于动画 1550–2250 毫秒的迈步窗口，后两次与落脚同刻。
 承接或迟到时保留原始起点和剪辑偏移，不能从第零帧重播。
 
-`LOCK/UNLOCK` 按施放 ID 派生固定 UUID，只修改原版 `GENERIC_MOVEMENT_SPEED` 的临时属性修正，
+`LOCK/UNLOCK` 按施放 ID 派生固定 UUID，只修改原版 `MOVEMENT_SPEED` 的临时属性修正，
 用 `MULTIPLY_TOTAL=(movement_speed_multiplier-1)` 施加目录倍率，缺省为 1，破门斩八式为 0.4。
-本人立即收到 `EntityAttributesS2CPacket`，旁观者由原版跟踪器同步。
+本人立即收到 `ClientboundUpdateAttributesPacket`，旁观者由原版跟踪器同步。
 不同施放的修正独立，承接移除前式后再应用新式；重复清理不影响其他修正。
 限速仍允许主动移动，不缩放冲量、不拦跳跃或转向；收势、打断、死亡、下线和恢复清理临时属性。
 受击僵直不由本宿主判定：原版伤害附属在命中提交后写入功法库，功法库给实体另加一份固定 UUID 的

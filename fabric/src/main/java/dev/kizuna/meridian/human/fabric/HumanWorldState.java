@@ -24,17 +24,17 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.CommandReceipt;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.server.InMemoryBodyStore;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
-import net.minecraft.nbt.NbtHelper;
+import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtIo;
-import net.minecraft.nbt.NbtList;
+import net.minecraft.nbt.NbtUtils;
+import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.PersistentState;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.saveddata.SavedData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,7 +52,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /** Minecraft 持久化容器只包装 Protobuf 字节，正文仍由框架负责定义和校验。 */
-final class HumanWorldState extends PersistentState {
+final class HumanWorldState extends SavedData {
     private static final Logger LOG = LoggerFactory.getLogger(HumanWorldState.class);
     private static final long WINDOW_MILLIS = 30_000;
     private static final int CHUNK_WIDTH_BLOCKS = 16;
@@ -111,27 +111,27 @@ final class HumanWorldState extends PersistentState {
     private record SavedPlayers(List<BodySnapshot> bodies, List<CommandReceipt> receipts,
                                 Map<UUID, Set<String>> breathingActions) { }
 
-    static HumanWorldState read(NbtCompound nbt) {
+    static HumanWorldState read(CompoundTag nbt) {
         // 先校验各列表封装，再恢复身体、区域和交接事实；任一错误使整份存档拒绝加载。
         try {
-            requireField(nbt, "epoch", NbtElement.STRING_TYPE);
+            requireField(nbt, "epoch", Tag.TAG_STRING);
             String epoch = nbt.getString("epoch");
             // 时钟世代必须是合法 UUID，损坏时 fromString 抛出校验异常。
             UUID.fromString(epoch);
-            requireList(nbt, "players", NbtElement.COMPOUND_TYPE);
-            requireField(nbt, "released_qi", NbtElement.BYTE_ARRAY_TYPE);
-            requireList(nbt, "environment_sources", NbtElement.BYTE_ARRAY_TYPE);
-            requireList(nbt, "release_ids", NbtElement.COMPOUND_TYPE);
-            requireList(nbt, "pending_credits", NbtElement.COMPOUND_TYPE);
+            requireList(nbt, "players", Tag.TAG_COMPOUND);
+            requireField(nbt, "released_qi", Tag.TAG_BYTE_ARRAY);
+            requireList(nbt, "environment_sources", Tag.TAG_BYTE_ARRAY);
+            requireList(nbt, "release_ids", Tag.TAG_COMPOUND);
+            requireList(nbt, "pending_credits", Tag.TAG_COMPOUND);
 
-            SavedPlayers saved = readPlayers(nbt.getList("players", NbtElement.COMPOUND_TYPE), epoch);
+            SavedPlayers saved = readPlayers(nbt.getList("players", Tag.TAG_COMPOUND), epoch);
             var released = BodyProtobuf.fromInventory(
                     BodyMessages.QiInventory.parseFrom(nbt.getByteArray("released_qi")));
-            var sources = readSources(nbt.getList("environment_sources", NbtElement.BYTE_ARRAY_TYPE), epoch);
+            var sources = readSources(nbt.getList("environment_sources", Tag.TAG_BYTE_ARRAY), epoch);
             var store = new InMemoryBodyStore(saved.bodies(), saved.receipts(), released, sources);
             var state = new HumanWorldState(epoch, store);
-            state.readReleaseIds(nbt.getList("release_ids", NbtElement.COMPOUND_TYPE));
-            state.readPendingCredits(nbt.getList("pending_credits", NbtElement.COMPOUND_TYPE));
+            state.readReleaseIds(nbt.getList("release_ids", Tag.TAG_COMPOUND));
+            state.readPendingCredits(nbt.getList("pending_credits", Tag.TAG_COMPOUND));
 
             // 失败队列也须恢复，余额不一致留待执行时报告，不能让重启吞掉重试机会。
             for (BodySnapshot body : saved.bodies()) {
@@ -139,7 +139,7 @@ final class HumanWorldState extends PersistentState {
                 var restored = new HumanPlayerBody(body, store, saved.breathingActions().get(playerId));
                 state.players.put(playerId, restored);
                 if (restored.snapshot().revision() != body.revision()) {
-                    state.markDirty();
+                    state.setDirty();
                 }
             }
             state.persistedReleaseIds.addAll(state.releaseIds.keySet());
@@ -149,17 +149,17 @@ final class HumanWorldState extends PersistentState {
         }
     }
 
-    private static SavedPlayers readPlayers(NbtList entries, String epoch) throws IOException {
+    private static SavedPlayers readPlayers(ListTag entries, String epoch) throws IOException {
         // 每具身体只恢复自己的回执与呼吸动作，释放余额必须来自世界唯一账户。
         var bodies = new ArrayList<BodySnapshot>();
         var receipts = new ArrayList<CommandReceipt>();
         var breathingActions = new HashMap<UUID, Set<String>>();
         for (int index = 0; index < entries.size(); index++) {
-            NbtCompound entry = entries.getCompound(index);
-            requireField(entry, "body", NbtElement.BYTE_ARRAY_TYPE);
-            requireField(entry, "released_qi", NbtElement.BYTE_ARRAY_TYPE);
-            requireList(entry, "receipts", NbtElement.COMPOUND_TYPE);
-            requireList(entry, "breathing_actions", NbtElement.STRING_TYPE);
+            CompoundTag entry = entries.getCompound(index);
+            requireField(entry, "body", Tag.TAG_BYTE_ARRAY);
+            requireField(entry, "released_qi", Tag.TAG_BYTE_ARRAY);
+            requireList(entry, "receipts", Tag.TAG_COMPOUND);
+            requireList(entry, "breathing_actions", Tag.TAG_STRING);
             var body = BodyProtobuf.decodeSnapshot(entry.getByteArray("body"));
             UUID playerId = UUID.fromString(body.id().value());
             if (!body.settledAt().epoch().equals(epoch) || breathingActions.containsKey(playerId)) {
@@ -171,25 +171,25 @@ final class HumanWorldState extends PersistentState {
                 throw HumanErrors.invalid(HumanErrors.INVALID_SAVED_BODY);
             }
             bodies.add(body);
-            receipts.addAll(readReceipts(entry.getList("receipts", NbtElement.COMPOUND_TYPE)));
+            receipts.addAll(readReceipts(entry.getList("receipts", Tag.TAG_COMPOUND)));
             breathingActions.put(playerId, readBreathingActions(entry.getList("breathing_actions",
-                    NbtElement.STRING_TYPE)));
+                    Tag.TAG_STRING)));
         }
         return new SavedPlayers(bodies, receipts, breathingActions);
     }
 
-    private static List<CommandReceipt> readReceipts(NbtList entries) {
+    private static List<CommandReceipt> readReceipts(ListTag entries) {
         // 先检查载荷字段再解码回执，避免 NBT 空值掩盖损坏。
         var receipts = new ArrayList<CommandReceipt>();
         for (int index = 0; index < entries.size(); index++) {
-            NbtCompound entry = entries.getCompound(index);
-            requireField(entry, "value", NbtElement.BYTE_ARRAY_TYPE);
+            CompoundTag entry = entries.getCompound(index);
+            requireField(entry, "value", Tag.TAG_BYTE_ARRAY);
             receipts.add(MeridianProtocol.decodeReceipt(entry.getByteArray("value")));
         }
         return receipts;
     }
 
-    private static Set<String> readBreathingActions(NbtList entries) {
+    private static Set<String> readBreathingActions(ListTag entries) {
         // 呼吸动作按实例唯一，重复或空身份都表示存档损坏。
         var instances = new HashSet<String>();
         for (int index = 0; index < entries.size(); index++) {
@@ -201,11 +201,11 @@ final class HumanWorldState extends PersistentState {
         return Set.copyOf(instances);
     }
 
-    private static List<EnvironmentQiSource> readSources(NbtList entries, String epoch) throws IOException {
+    private static List<EnvironmentQiSource> readSources(ListTag entries, String epoch) throws IOException {
         // 区域必须属于当前世界的同一时钟世代，不能混入其他世界的窗口。
         var sources = new ArrayList<EnvironmentQiSource>();
         for (int index = 0; index < entries.size(); index++) {
-            var bytes = ((net.minecraft.nbt.NbtByteArray) entries.get(index)).getByteArray();
+            var bytes = ((net.minecraft.nbt.ByteArrayTag) entries.get(index)).getAsByteArray();
             EnvironmentQiSource source = EnvironmentQiSource.parseFrom(bytes);
             EnvironmentProtobuf.validateSource(source);
             if (!source.getValidFrom().getEpoch().equals(epoch)
@@ -219,12 +219,12 @@ final class HumanWorldState extends PersistentState {
         return sources;
     }
 
-    private void readReleaseIds(NbtList entries) throws IOException {
+    private void readReleaseIds(ListTag entries) throws IOException {
         // 完整请求与受理时间一起恢复；相同 ID 出现两次时拒绝账本。
         for (int index = 0; index < entries.size(); index++) {
-            NbtCompound entry = entries.getCompound(index);
-            requireField(entry, "request", NbtElement.BYTE_ARRAY_TYPE);
-            requireField(entry, "millis", NbtElement.LONG_TYPE);
+            CompoundTag entry = entries.getCompound(index);
+            requireField(entry, "request", Tag.TAG_BYTE_ARRAY);
+            requireField(entry, "millis", Tag.TAG_LONG);
             var request = RegionRelease.parseFrom(entry.getByteArray("request"));
             validateRelease(request);
             long millis = entry.getLong("millis");
@@ -235,15 +235,15 @@ final class HumanWorldState extends PersistentState {
         }
     }
 
-    private void readPendingCredits(NbtList entries) throws IOException {
+    private void readPendingCredits(ListTag entries) throws IOException {
         // 外部待入账必须与去重原请求一致，才能证明恢复后的同一数量不会重复入账。
         var queuedIds = new HashSet<String>();
         for (int index = 0; index < entries.size(); index++) {
-            NbtCompound entry = entries.getCompound(index);
-            requireField(entry, "source_id", NbtElement.STRING_TYPE);
-            requireField(entry, "qi", NbtElement.BYTE_ARRAY_TYPE);
-            requireField(entry, "kind", NbtElement.STRING_TYPE);
-            requireField(entry, "release_id", NbtElement.STRING_TYPE);
+            CompoundTag entry = entries.getCompound(index);
+            requireField(entry, "source_id", Tag.TAG_STRING);
+            requireField(entry, "qi", Tag.TAG_BYTE_ARRAY);
+            requireField(entry, "kind", Tag.TAG_STRING);
+            requireField(entry, "release_id", Tag.TAG_STRING);
             String sourceId = entry.getString("source_id");
             String kind = entry.getString("kind");
             String releaseId = entry.getString("release_id");
@@ -270,44 +270,44 @@ final class HumanWorldState extends PersistentState {
         }
     }
 
-    private static void requireField(NbtCompound nbt, String key, int type) {
+    private static void requireField(CompoundTag nbt, String key, int type) {
         // 缺字段或错类型直接停止加载，不让 NBT 的空值兜底吞掉损坏。
         if (!nbt.contains(key, type)) {
             throw HumanErrors.invalid(HumanErrors.INVALID_SAVED_BODY);
         }
     }
 
-    private static void requireList(NbtCompound nbt, String key, int elementType) {
+    private static void requireList(CompoundTag nbt, String key, int elementType) {
         // 检查列表元素类型，避免 getList 在类型不符时静默返回空列表。
-        requireField(nbt, key, NbtElement.LIST_TYPE);
-        NbtList list = (NbtList) nbt.get(key);
-        if (list.getHeldType() != NbtElement.END_TYPE && list.getHeldType() != elementType) {
+        requireField(nbt, key, Tag.TAG_LIST);
+        ListTag list = (ListTag) nbt.get(key);
+        if (list.getElementType() != Tag.TAG_END && list.getElementType() != elementType) {
             throw HumanErrors.invalid(HumanErrors.INVALID_SAVED_BODY);
         }
     }
 
-    HumanPlayerBody join(ServerPlayerEntity player, long millis) {
+    HumanPlayerBody join(ServerPlayer player, long millis) {
         // 恢复会话本身也可能释放，必须先绑定按执行时位置选区的归位回调。
-        HumanPlayerBody body = players.computeIfAbsent(player.getUuid(),
+        HumanPlayerBody body = players.computeIfAbsent(player.getUUID(),
                 id -> HumanPlayerBody.born(id, epoch, millis, store));
         bindReleaseSink(player);
         body.resume(millis);
-        markDirty();
+        setDirty();
         return body;
     }
 
-    void bindReleaseSink(ServerPlayerEntity player) {
+    void bindReleaseSink(ServerPlayer player) {
         // 重生会替换实体；释放回调和行走负荷都必须先于新实体的任何身体命令重新绑定。
-        HumanPlayerBody body = players.get(player.getUuid());
+        HumanPlayerBody body = players.get(player.getUUID());
         body.bindMovementLoad(() -> HumanMovementLoads.multiplier(player));
         body.bindReleaseSink(qi -> {
             // 回调读取实时玩家位置，不保留登录时或旧窗口的区域。
-            String sourceId = ensureRegion(player.getServerWorld(), player.getChunkPos(),
-                    Math.multiplyExact(player.getServer().getOverworld().getTime(), 50L));
+            String sourceId = ensureRegion(player.serverLevel(), player.chunkPosition(),
+                    Math.multiplyExact(player.getServer().overworld().getGameTime(), 50L));
             if (sourceId != null) {
                 queueDefaultRelease(sourceId, qi);
             }
-            markDirty();
+            setDirty();
         });
     }
 
@@ -328,7 +328,7 @@ final class HumanWorldState extends PersistentState {
         // 只有不存在的 UUID 才首次创建；重连和重生均继续同一权威身体。
         HumanPlayerBody body = players.computeIfAbsent(playerId, id -> HumanPlayerBody.born(id, epoch, millis, store));
         body.resume(millis);
-        markDirty();
+        setDirty();
         return body;
     }
 
@@ -337,17 +337,17 @@ final class HumanWorldState extends PersistentState {
         return players.get(playerId);
     }
 
-    void selectEnvironment(ServerPlayerEntity player, long millis) {
+    void selectEnvironment(ServerPlayer player, long millis) {
         // 玩家和服务查询共用区域初始化，保持同一区域唯一库存。
-        HumanPlayerBody body = players.get(player.getUuid());
-        body.selectEnvironment(ensureRegion(player.getServerWorld(), player.getChunkPos(), millis), millis);
+        HumanPlayerBody body = players.get(player.getUUID());
+        body.selectEnvironment(ensureRegion(player.serverLevel(), player.chunkPosition(), millis), millis);
     }
 
-    String ensureRegion(ServerWorld world, ChunkPos chunk, long millis) {
+    String ensureRegion(ServerLevel world, ChunkPos chunk, long millis) {
         // 仅从固定区域中心群系初始化一次，重访始终沿用权威库存。
         // 这里只校验受理时间，负值会抛出 INVALID_REQUEST。
         time(millis);
-        String dimension = world.getRegistryKey().getValue().toString();
+        String dimension = world.dimension().location().toString();
         if (!dimension.equals("minecraft:overworld")) {
             return null;
         }
@@ -358,7 +358,7 @@ final class HumanWorldState extends PersistentState {
             // 相同区域使用固定中心的群系，生成后只读取保存库存，不会随进入位置重抽。
             BlockPos center = new BlockPos((regionX * regionSizeChunks * 16) + regionSizeChunks * 8,
                     world.getSeaLevel(), (regionZ * regionSizeChunks * 16) + regionSizeChunks * 8);
-            String biome = world.getBiome(center).getKey().orElseThrow().getValue().toString();
+            String biome = world.getBiome(center).unwrapKey().orElseThrow().location().toString();
             double volumeBlocks = rules.regionVolumeBlocks(world.getHeight());
             var request = TerrainQiRegionRequest.newBuilder().setProtocolVersion(1)
                     .setWorldSeed(Long.toString(world.getSeed())).setDimensionId(dimension)
@@ -368,12 +368,12 @@ final class HumanWorldState extends PersistentState {
                     .setKind(EnvironmentSpaceKind.REGION_BACKGROUND).setVolumeBlocks(volumeBlocks).build();
             store.registerEnvironmentSource(EnvironmentAbsorption.initialize(space,
                     BodyProtobuf.fromInventory(seed.getInitialQi()), time(millis), time(Math.addExact(millis, WINDOW_MILLIS)), rules));
-            markDirty();
+            setDirty();
         }
         return sourceId;
     }
 
-    RegionView query(ServerWorld world, int blockX, int blockZ, long millis) {
+    RegionView query(ServerLevel world, int blockX, int blockZ, long millis) {
         // 服务只读取区域库存；负坐标按区块整除规则定位，不初始化身体。
         String sourceId = ensureRegion(world, new ChunkPos(Math.floorDiv(blockX, 16), Math.floorDiv(blockZ, 16)), millis);
         if (sourceId == null) {
@@ -387,7 +387,7 @@ final class HumanWorldState extends PersistentState {
                 .setSourceRevision(source.getRevision()).build();
     }
 
-    ReleaseResult release(RegionRelease request, ServerWorld world, long millis) {
+    ReleaseResult release(RegionRelease request, ServerLevel world, long millis) {
         // 去重先比较完整原请求，再排队；失败不消耗 ID，也不直接改变本窗库存。
         // 校验受理时间；负值会抛出 INVALID_REQUEST。
         time(millis);
@@ -397,7 +397,7 @@ final class HumanWorldState extends PersistentState {
         if (unsavedForgetIds.contains(releaseId)) {
             throw HumanErrors.hostRejected(FailureCode.REQUEST_ID_CONFLICT);
         }
-        if (!position.getDimensionId().equals(world.getRegistryKey().getValue().toString())) {
+        if (!position.getDimensionId().equals(world.dimension().location().toString())) {
             throw HumanErrors.hostRejected(FailureCode.INVALID_REQUEST);
         }
         ReleaseRecord previous = releaseIds.get(releaseId);
@@ -411,7 +411,7 @@ final class HumanWorldState extends PersistentState {
             pendingCredits.add(new PendingCredit(sourceId == null ? "" : sourceId,
                     BodyProtobuf.fromInventory(request.getReleasedQi()), false, releaseId));
             releaseIds.put(releaseId, new ReleaseRecord(request, millis));
-            markDirty();
+            setDirty();
         }
         var result = ReleaseResult.newBuilder()
                 .setDuplicate(previous != null)
@@ -432,7 +432,7 @@ final class HumanWorldState extends PersistentState {
         }
         if (releaseIds.remove(releaseId) != null) {
             unsavedForgetIds.add(releaseId);
-            markDirty();
+            setDirty();
         }
         return ForgetReleaseResult.newBuilder()
                 .setPersisted(!unsavedForgetIds.contains(releaseId))
@@ -457,8 +457,8 @@ final class HumanWorldState extends PersistentState {
         if (!isDirty()) {
             return;
         }
-        if (server != null && !server.isStopping()) {
-            int tick = server.getTicks();
+        if (server != null && !server.isShutdown()) {
+            int tick = server.getTickCount();
             if (lastSaveTick == tick) {
                 return;
             }
@@ -473,10 +473,10 @@ final class HumanWorldState extends PersistentState {
 
     private void saveDurably(Path file) throws IOException {
         // ID、原请求、待入账事实及余额一起保存；任何失败都保留 dirty 供重试。
-        markDirty();
-        var root = new NbtCompound();
-        root.put("data", writeNbt(new NbtCompound()));
-        NbtHelper.putDataVersion(root);
+        setDirty();
+        var root = new CompoundTag();
+        root.put("data", save(new CompoundTag()));
+        NbtUtils.addCurrentDataVersion(root);
         DurableStateFile.write(file, temporary -> NbtIo.writeCompressed(root, temporary.toFile()), directorySync);
         persistedReleaseIds.clear();
         persistedReleaseIds.addAll(releaseIds.keySet());
@@ -516,7 +516,7 @@ final class HumanWorldState extends PersistentState {
             var source = store.environmentSource(sourceId).orElseThrow();
             BodyMessages.TimeCursor validUntil = time(Math.addExact(millis, WINDOW_MILLIS));
             store.renewEnvironmentWindow(sourceId, source.getRevision(), validFrom, validUntil, rules);
-            markDirty();
+            setDirty();
         }
     }
 
@@ -544,7 +544,7 @@ final class HumanWorldState extends PersistentState {
                         store.creditEnvironmentSource(sourceId, qi);
                     }
                     iterator.remove();
-                    markDirty();
+                    setDirty();
                 } catch (RuntimeException failure) {
                     // 失败项继续随世界保存并等待下一窗，不能阻断其他入账或吞掉余额不一致。
                     LOG.error(HumanErrors.ENVIRONMENT_CREDIT_FAILED + ": " + sourceId, failure);
@@ -575,7 +575,7 @@ final class HumanWorldState extends PersistentState {
                 if (!transfers.isEmpty()) {
                     store.transferReleasedToSources(transfers);
                     dueClaims.forEach(this::removeDefaultCredit);
-                    markDirty();
+                    setDirty();
                 }
             } catch (RuntimeException failure) {
                 // 真正缺账保留对应相态属性的全部意图，其他种类与外部交接仍可入账。
@@ -612,7 +612,7 @@ final class HumanWorldState extends PersistentState {
     }
 
     @Override
-    public NbtCompound writeNbt(NbtCompound nbt) {
+    public CompoundTag save(CompoundTag nbt) {
         // 身体、余额及交接事实提交到同一文件，不能分别保存后确认。
         nbt.putString("epoch", epoch);
         nbt.put("players", savedPlayers());
@@ -623,21 +623,21 @@ final class HumanWorldState extends PersistentState {
         return nbt;
     }
 
-    private NbtList savedPlayers() {
+    private ListTag savedPlayers() {
         // 每个玩家快照携带自己的动作与回执，默认释放账户仅保存在世界级字段。
-        var entries = new NbtList();
+        var entries = new ListTag();
         for (HumanPlayerBody body : players.values()) {
-            var entry = new NbtCompound();
+            var entry = new CompoundTag();
             entry.putByteArray("body", BodyProtobuf.encodeSnapshot(body.snapshot()));
             entry.putByteArray("released_qi", BodyProtobuf.toInventory(QiInventory.empty()).toByteArray());
-            var actions = new NbtList();
+            var actions = new ListTag();
             for (String instance : body.breathingActions()) {
-                actions.add(net.minecraft.nbt.NbtString.of(instance));
+                actions.add(net.minecraft.nbt.StringTag.valueOf(instance));
             }
             entry.put("breathing_actions", actions);
-            var receipts = new NbtList();
+            var receipts = new ListTag();
             for (CommandReceipt receipt : body.receipts()) {
-                var saved = new NbtCompound();
+                var saved = new CompoundTag();
                 saved.putByteArray("value", MeridianProtocol.encodeReceipt(receipt));
                 receipts.add(saved);
             }
@@ -647,20 +647,20 @@ final class HumanWorldState extends PersistentState {
         return entries;
     }
 
-    private NbtList savedSources() {
+    private ListTag savedSources() {
         // 区域库存与版本使用原始 Protobuf 字节保存，重启不重抽库存。
-        var sources = new NbtList();
+        var sources = new ListTag();
         for (EnvironmentQiSource source : store.environmentSources()) {
-            sources.add(new net.minecraft.nbt.NbtByteArray(source.toByteArray()));
+            sources.add(new net.minecraft.nbt.ByteArrayTag(source.toByteArray()));
         }
         return sources;
     }
 
-    private NbtList savedReleaseIds() {
+    private ListTag savedReleaseIds() {
         // 保留未完成遗忘的完整请求，供冲突检查与待入账恢复校验。
-        var ids = new NbtList();
+        var ids = new ListTag();
         for (ReleaseRecord record : releaseIds.values()) {
-            var entry = new NbtCompound();
+            var entry = new CompoundTag();
             entry.putByteArray("request", record.request().toByteArray());
             entry.putLong("millis", record.millis());
             ids.add(entry);
@@ -668,11 +668,11 @@ final class HumanWorldState extends PersistentState {
         return ids;
     }
 
-    private NbtList savedPendingCredits() {
+    private ListTag savedPendingCredits() {
         // 待入账数量与其去重 ID 同时持久化，玩家默认释放仍按区域合并。
-        var pending = new NbtList();
+        var pending = new ListTag();
         for (PendingCredit credit : pendingCredits) {
-            var entry = new NbtCompound();
+            var entry = new CompoundTag();
             entry.putString("source_id", credit.sourceId());
             entry.putByteArray("qi", BodyProtobuf.toInventory(credit.qi()).toByteArray());
             entry.putString("kind", credit.fromDefault() ? "default" : "external");

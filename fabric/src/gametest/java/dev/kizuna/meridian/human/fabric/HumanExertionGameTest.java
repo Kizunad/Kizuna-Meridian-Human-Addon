@@ -10,20 +10,19 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.ExertTissues;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.RequestEnvelope;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
-import net.minecraft.test.GameTest;
-import net.minecraft.test.TestContext;
-
+import net.minecraft.gametest.framework.GameTest;
+import net.minecraft.gametest.framework.GameTestHelper;
 import java.util.UUID;
 
 /** 玩家健康宿主使用真实在线绑定转发普通做功命令。 */
 public final class HumanExertionGameTest implements FabricGameTest {
     private static final double EXCESSIVE_POWER = 1_000_000;
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void exertionChargesOnceRejectsCapacityAndChecksBoundIdentity(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void exertionChargesOnceRejectsCapacityAndChecksBoundIdentity(GameTestHelper context) {
         // 原子做功、成功重试和能力不足都通过正式宿主，不替换玩家或核心账本。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
-            String subject = fixture.player.getUuidAsString();
+            String subject = fixture.player.getStringUUID();
             var inspect = HealthHostRequest.newBuilder()
                     .setProtocolVersion(1)
                     .setRequestId(UUID.randomUUID().toString())
@@ -49,7 +48,7 @@ public final class HumanExertionGameTest implements FabricGameTest {
             context.assertTrue(denied.getFailure().getCode() == FailureCode.ACCESS_DENIED,
                     "玩家宿主允许做功请求操作其他身体");
         }
-        context.complete();
+        context.succeed();
     }
 
     private static HealthHostRequest request(String subject, BodySnapshot body, double power) {

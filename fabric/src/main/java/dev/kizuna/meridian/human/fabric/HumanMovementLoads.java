@@ -1,8 +1,8 @@
 package dev.kizuna.meridian.human.fabric;
 
-import net.minecraft.server.network.ServerPlayerEntity;
 import java.util.Objects;
 import java.util.Optional;
+import net.minecraft.server.level.ServerPlayer;
 
 /** 行走负荷提供者的唯一注册点；没有提供者时行走与疾跑按原目标功率做功。 */
 public final class HumanMovementLoads {
@@ -23,7 +23,7 @@ public final class HumanMovementLoads {
         provider = load;
     }
 
-    static double multiplier(ServerPlayerEntity player) {
+    static double multiplier(ServerPlayer player) {
         // 提供者返回的倍率直接乘到目标功率上，小于 1 或非有限数会让做功失真，按接线错误拒绝。
         HumanMovementLoad load = provider;
         if (load == null) {
@@ -36,7 +36,7 @@ public final class HumanMovementLoads {
         return multiplier;
     }
 
-    static Optional<String> status(ServerPlayerEntity player) {
+    static Optional<String> status(ServerPlayer player) {
         // 没有提供者时状态命令保持原样，不显示默认倍率。
         HumanMovementLoad load = provider;
         if (load == null) {

@@ -17,7 +17,7 @@ Human 不携带具体功法目录，不复制协议或新增战斗 UI 频道。
 
 `RegionRelease` 字段为 `release_id=1`、`position=2`（`RegionQuery`）、`released_qi=3`（框架 `QiInventory`）。`RegionView` 直接提供 `source_id=1`、`volume_blocks=2`、`inventory=3`、`concentration=4`、`source_revision=5`。`ReleaseResult` 提供可选 `source_id=1` 和 `duplicate=2`；无区域来源时不设置来源 ID。响应结果编号固定为 `unbound=10`、`region=11`、`released=12`、`now=13`、`failure=14`。
 
-`release_id` 是释放事实的去重键，保留七个游戏日，仍在待入账队列中的记录不会过期；重试必须保留原 ID、位置与库存。调用方先持久化自己的待释放事实，成功返回 `released`（含 `duplicate=true`）后清除。受理只表示进入世界持久化队列，库存统一在 30 秒供给续窗时更新。接入顺序、存档边界与调用方重试约定见[区域环境服务](Environment-Host.md)。区域查询和释放通过同一 WorldState 与框架权威 Store 执行，不能另存一份环境账本。玩家进入使用 `join(ServerPlayerEntity, long)`，由 WorldState 在恢复身体前绑定该玩家的释放 sink。
+`release_id` 是释放事实的去重键，保留七个游戏日，仍在待入账队列中的记录不会过期；重试必须保留原 ID、位置与库存。调用方先持久化自己的待释放事实，成功返回 `released`（含 `duplicate=true`）后清除。受理只表示进入世界持久化队列，库存统一在 30 秒供给续窗时更新。接入顺序、存档边界与调用方重试约定见[区域环境服务](Environment-Host.md)。区域查询和释放通过同一 WorldState 与框架权威 Store 执行，不能另存一份环境账本。玩家进入使用 `join(ServerPlayer, long)`，由 WorldState 在恢复身体前绑定该玩家的释放 sink。
 
 失败使用框架 `RequestFailure` 的原始失败码：无法解析、超限、空请求 ID、缺操作、`clock=false`、非法库存或非法维度格式为 `INVALID_REQUEST`；版本不符为 `UNSUPPORTED_VERSION`；非主线程调用为 `ACCESS_DENIED`；维度不存在为 `ENVIRONMENT_UNAVAILABLE`；相同释放 ID 对应不同内容为 `REQUEST_ID_CONFLICT`；宿主内部异常为 `INTERNAL_ERROR`。存在的非主世界没有区域，查询返回未设置 result 的成功响应，释放返回未设置 `source_id` 的 `released`。加载阶段服务尚未绑定或没有运行世界时返回 `unbound=true`，与业务拒绝分开处理；这不提供缺失必装模块的替代路径。
 
@@ -60,7 +60,7 @@ Minecraft 入口由本包必装 Fabric 宿主注册，实际入账算子、协�
 
 ## 调试入口
 
-调试用途，不进正式玩法。`HumanDebugHost.debugQi(ServerPlayerEntity, DebugQi)` 是调试附属改写玩家真元库存的唯一公开入口，权限检查留在调用方命令层。它与上面的 OP 命令走同一路径：先按主世界时间结算，再以临时调试授权提交 `DebugQi`，随后标记世界存档并推送同一身体快照。返回 Framework 失败码，成功为 `FAILURE_CODE_UNSPECIFIED`；非主线程为 `ACCESS_DENIED`，世界未绑定、身体未加载或加载失败为 `BODY_NOT_FOUND`。
+调试用途，不进正式玩法。`HumanDebugHost.debugQi(ServerPlayer, DebugQi)` 是调试附属改写玩家真元库存的唯一公开入口，权限检查留在调用方命令层。它与上面的 OP 命令走同一路径：先按主世界时间结算，再以临时调试授权提交 `DebugQi`，随后标记世界存档并推送同一身体快照。返回 Framework 失败码，成功为 `FAILURE_CODE_UNSPECIFIED`；非主线程为 `ACCESS_DENIED`，世界未绑定、身体未加载或加载失败为 `BODY_NOT_FOUND`。
 
 只读身体快照、疲劳调试事务与复活走公开的 `meridian_health_host` 协议（inspect、exertion、effect），功法宿主状态走功法库 `TechniqueHostEntrypoint`；本入口不重复暴露这些能力，也不开放字段或私有方法。
 
@@ -199,7 +199,7 @@ python3 "scripts/check_docs.py"
 
 ### 行走负荷提供者
 
-2026-10-30 源码新增服务端接入点，JUnit 已覆盖倍率与爆发截断。可信附属在模组初始化阶段调用一次 `HumanMovementLoads.register(HumanMovementLoad)`；第二次注册抛出 `IllegalStateException`，避免两个附属争用同一规则。`HumanMovementLoad.multiplier(ServerPlayerEntity)` 返回当前负荷倍率，`status(ServerPlayerEntity)` 返回 `/meridian status` 总览末尾追加的一行，返回空则不追加。
+2026-10-30 源码新增服务端接入点，JUnit 已覆盖倍率与爆发截断。可信附属在模组初始化阶段调用一次 `HumanMovementLoads.register(HumanMovementLoad)`；第二次注册抛出 `IllegalStateException`，避免两个附属争用同一规则。`HumanMovementLoad.multiplier(ServerPlayer)` 返回当前负荷倍率，`status(ServerPlayer)` 返回 `/meridian status` 总览末尾追加的一行，返回空则不追加。
 
 宿主在玩家加入和重生绑定释放回调时，同时把实时玩家实体绑定为负荷来源；每个运动结算区间在服务器主线程读取一次倍率。行走与疾跑每块肌肉的目标功率乘以倍率，再照旧受爆发和剩余耐力截断。倍率必须是不小于 1 的有限数，否则该次结算失败并按上文宿主故障暂停该玩家身体，不会静默改成 1。没有提供者时倍率为 1，状态命令不追加行。Kizuna Meridian Burden 附属按 BS3D Weights 的有效负重注册该提供者。
 

@@ -15,14 +15,13 @@ import dev.kizuna.meridian.technique.server.TechniqueProtocol;
 import dev.kizuna.meridian.vanilla.fabric.VanillaStrikeContext;
 import net.fabricmc.fabric.api.gamerule.v1.GameRuleFactory;
 import net.fabricmc.fabric.api.gamerule.v1.GameRuleRegistry;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.attribute.EntityAttributeModifier;
-import net.minecraft.entity.attribute.EntityAttributes;
-import net.minecraft.network.packet.s2c.play.EntityAttributesS2CPacket;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameRules;
-
+import net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.level.GameRules;
+import net.minecraft.world.phys.Vec3;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -34,7 +33,7 @@ import java.util.UUID;
 /** 正常施放与未认领恢复共用的实体效果执行器，回执只在当前服务器连接内有效。 */
 final class HumanTechniqueEffects {
     private static final double TICKS_PER_SECOND = 20;
-    private static final GameRules.Key<GameRules.BooleanRule> PLAYER_BREAK_BLOCKS = GameRuleRegistry.register(
+    private static final GameRules.Key<GameRules.BooleanValue> PLAYER_BREAK_BLOCKS = GameRuleRegistry.register(
             "meridianTechniquePlayerBreakBlocks", GameRules.Category.PLAYER,
             GameRuleFactory.createBooleanRule(true /* defaultValue */));
     private final Map<UUID, TechniqueWorldEffects> worldEffects = new HashMap<>();
@@ -44,14 +43,14 @@ final class HumanTechniqueEffects {
     private final Map<UUID, Map<String, EffectIntent>> executingRequests = new HashMap<>();
     private final Map<UUID, Map<EffectKey, EffectIntent>> executingEffects = new HashMap<>();
 
-    TechniqueHost.EffectCommit submit(ServerPlayerEntity player, TechniqueHost.EffectSubmission submission) {
+    TechniqueHost.EffectCommit submit(ServerPlayer player, TechniqueHost.EffectSubmission submission) {
         // 身份由调用适配器认证；两种稳定身份都检查内容，失败不留下成功回执。
-        if (!player.getServer().isOnThread()) {
+        if (!player.getServer().isSameThread()) {
             throw new TechniqueErrors.HostRejected(FailureCode.ACCESS_DENIED);
         }
         EffectIntent effect = submission.effect();
         TechniqueProtocol.validateEffect(effect);
-        UUID playerId = player.getUuid();
+        UUID playerId = player.getUUID();
         String requestId = submission.requestId();
         Map<String, EffectIntent> receipts = requests.computeIfAbsent(playerId, id -> new HashMap<>());
         Map<EffectKey, EffectIntent> identities = effects.computeIfAbsent(playerId, id -> new HashMap<>());
@@ -72,9 +71,9 @@ final class HumanTechniqueEffects {
         return new TechniqueHost.EffectCommit(requestId);
     }
 
-    private void executeOnce(ServerPlayerEntity player, TechniqueHost.EffectSubmission submission, EffectKey key) {
+    private void executeOnce(ServerPlayer player, TechniqueHost.EffectSubmission submission, EffectKey key) {
         // 执行中只用于阻止同步重入，不能被其他请求当作成功回执。
-        UUID playerId = player.getUuid();
+        UUID playerId = player.getUUID();
         String requestId = submission.requestId();
         EffectIntent effect = submission.effect();
         Map<String, EffectIntent> requests = executingRequests.computeIfAbsent(playerId, id -> new HashMap<>());
@@ -103,16 +102,16 @@ final class HumanTechniqueEffects {
         }
     }
 
-    private void execute(ServerPlayerEntity player, TechniqueHost.EffectSubmission submission) {
+    private void execute(ServerPlayer player, TechniqueHost.EffectSubmission submission) {
         // 移速修正不接管速度或跳跃，冲量仍通过原版跟踪器同步。
         EffectIntent effect = submission.effect();
         if (effect.hasStatusBenefit()) {
             TechniqueStatusBenefits.apply(player, effect.getStatusBenefit());
         } else if (effect.hasImpulse()) {
-            Vec3d direction = impulseDirection(player, effect);
+            Vec3 direction = impulseDirection(player, effect);
             double speedPerTick = effect.getImpulse().getSpeed().getValue() / TICKS_PER_SECOND;
             TechniqueWorldImpulses.apply(player, effect.getImpulse().getDirection(),
-                    direction.multiply(speedPerTick));
+                    direction.scale(speedPerTick));
         } else if (effect.hasMovement()) {
             movement(player, effect);
             updateCasting(player, effect);
@@ -137,9 +136,9 @@ final class HumanTechniqueEffects {
         return castingIds.containsKey(playerId);
     }
 
-    private void updateCasting(ServerPlayerEntity player, EffectIntent effect) {
+    private void updateCasting(ServerPlayer player, EffectIntent effect) {
         // 承接先结束旧式再开始新式，施放状态按稳定身份独立维护。
-        UUID playerId = player.getUuid();
+        UUID playerId = player.getUUID();
         if (effect.getMovement().getAction() == MovementAction.LOCK) {
             castingIds.computeIfAbsent(playerId, id -> new HashSet<>()).add(effect.getCastId());
         } else {
@@ -154,10 +153,10 @@ final class HumanTechniqueEffects {
         }
     }
 
-    private TechniqueWorldEffects world(ServerPlayerEntity player) {
+    private TechniqueWorldEffects world(ServerPlayer player) {
         // 世界工具调用 Damage 的一次出手上下文，横扫多目标共享做功前系数。
-        return worldEffects.computeIfAbsent(player.getUuid(), id -> new TechniqueWorldEffects(player,
-                () -> player.getWorld().getGameRules().getBoolean(PLAYER_BREAK_BLOCKS)
+        return worldEffects.computeIfAbsent(player.getUUID(), id -> new TechniqueWorldEffects(player,
+                () -> player.level().getGameRules().getBoolean(PLAYER_BREAK_BLOCKS)
                         ? TechniqueWorldEffects.Policy.PLAYER : TechniqueWorldEffects.Policy.PLAYER_NO_BREAK,
                 target -> true,
                 (actor, source, strike) -> {
@@ -167,21 +166,21 @@ final class HumanTechniqueEffects {
                 }, "meridian_door_breaker"));
     }
 
-    private static void movement(ServerPlayerEntity player, EffectIntent effect) {
+    private static void movement(ServerPlayer player, EffectIntent effect) {
         // 每个施放有固定属性身份，重复移除限速不影响其他施放。
-        var attribute = player.getAttributeInstance(EntityAttributes.GENERIC_MOVEMENT_SPEED);
+        var attribute = player.getAttribute(Attributes.MOVEMENT_SPEED);
         if (attribute == null) {
             throw new TechniqueErrors.HostRejected(FailureCode.MODULE_UNAVAILABLE);
         }
         UUID modifierId = UUID.nameUUIDFromBytes(
                 ("meridian_human:technique_movement:" + effect.getCastId()).getBytes(StandardCharsets.UTF_8));
-        EntityAttributeModifier existing = attribute.getModifier(modifierId);
+        AttributeModifier existing = attribute.getModifier(modifierId);
         if (effect.getMovement().getAction() == MovementAction.LOCK) {
             if (existing == null) {
-                var modifier = new EntityAttributeModifier(modifierId, "meridian_human:technique_movement",
+                var modifier = new AttributeModifier(modifierId, "meridian_human:technique_movement",
                         TechniqueMovement.multiplier(effect.getMovement()) - 1,
-                        EntityAttributeModifier.Operation.MULTIPLY_TOTAL);
-                attribute.addTemporaryModifier(modifier);
+                        AttributeModifier.Operation.MULTIPLY_TOTAL);
+                attribute.addTransientModifier(modifier);
             }
         } else {
             if (existing == null) {
@@ -190,7 +189,7 @@ final class HumanTechniqueEffects {
             attribute.removeModifier(modifierId);
         }
         // 本人立即收到属性；旁观者仍由原版实体跟踪器消费属性脏标记。
-        player.networkHandler.sendPacket(new EntityAttributesS2CPacket(player.getId(), List.of(attribute)));
+        player.connection.send(new ClientboundUpdateAttributesPacket(player.getId(), List.of(attribute)));
     }
 
     static void validateRecovery(TechniqueHost.EffectSubmission submission) {
@@ -228,33 +227,33 @@ final class HumanTechniqueEffects {
         HumanTechniquePresentation.clear();
     }
 
-    private static Vec3d impulseDirection(ServerPlayerEntity player, EffectIntent effect) {
+    private static Vec3 impulseDirection(ServerPlayer player, EffectIntent effect) {
         // 水平方向只取服务端朝向；目标方向使用同世界实体的实际位置。
         return switch (effect.getImpulse().getDirection()) {
-            case UP -> new Vec3d(0, 1, 0);
-            case FORWARD -> Vec3d.fromPolar(0, player.getYaw());
-            case BACKWARD -> Vec3d.fromPolar(0, player.getYaw()).negate();
+            case UP -> new Vec3(0, 1, 0);
+            case FORWARD -> Vec3.directionFromRotation(0, player.getYRot());
+            case BACKWARD -> Vec3.directionFromRotation(0, player.getYRot()).reverse();
             case INPUT -> inputDirection(player, effect);
             case TOWARD_TARGET -> targetDirection(player, effect.getTargetId());
             default -> throw new TechniqueErrors.HostRejected(FailureCode.INVALID_REQUEST);
         };
     }
 
-    private static Vec3d inputDirection(ServerPlayerEntity player, EffectIntent effect) {
+    private static Vec3 inputDirection(ServerPlayer player, EffectIntent effect) {
         // 最大分量缩放避免平方溢出；零输入按声明选择前后方向。
         var input = effect.getDirection();
         double scale = Math.max(Math.abs(input.getX()), Math.abs(input.getZ()));
         if (scale == 0) {
-            Vec3d forward = Vec3d.fromPolar(0, player.getYaw());
+            Vec3 forward = Vec3.directionFromRotation(0, player.getYRot());
             if (effect.getImpulse().getInputDefaultDirection() == ImpulseDirection.BACKWARD) {
-                return forward.negate();
+                return forward.reverse();
             }
             return forward;
         }
-        return new Vec3d(input.getX() / scale, 0, input.getZ() / scale).normalize();
+        return new Vec3(input.getX() / scale, 0, input.getZ() / scale).normalize();
     }
 
-    private static Vec3d targetDirection(ServerPlayerEntity player, String targetId) {
+    private static Vec3 targetDirection(ServerPlayer player, String targetId) {
         // 朝目标推进只归一化水平位移；目标无效不记录回执，允许服务用原身份重试。
         UUID targetUuid;
         try {
@@ -262,12 +261,12 @@ final class HumanTechniqueEffects {
         } catch (IllegalArgumentException invalid) {
             throw new TechniqueErrors.HostRejected(FailureCode.INVALID_REQUEST);
         }
-        Entity target = player.getServerWorld().getEntity(targetUuid);
+        Entity target = player.serverLevel().getEntity(targetUuid);
         if (target == null || target.isRemoved()) {
             throw new TechniqueErrors.HostRejected(FailureCode.MODULE_UNAVAILABLE);
         }
-        Vec3d direction = target.getPos().subtract(player.getPos()).multiply(1, 0, 1);
-        if (direction.lengthSquared() == 0) {
+        Vec3 direction = target.position().subtract(player.position()).multiply(1, 0, 1);
+        if (direction.lengthSqr() == 0) {
             throw new TechniqueErrors.HostRejected(FailureCode.INVALID_REQUEST);
         }
         return direction.normalize();

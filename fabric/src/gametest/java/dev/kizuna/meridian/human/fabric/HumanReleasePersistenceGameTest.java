@@ -11,13 +11,12 @@ import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.pb.BodyMessages;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
+import net.minecraft.gametest.framework.GameTest;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtIo;
-import net.minecraft.nbt.NbtList;
-import net.minecraft.test.GameTest;
-import net.minecraft.test.TestContext;
-
+import net.minecraft.nbt.Tag;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -42,69 +41,69 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
 
     private record RoundingFixture(HumanWorldState state, RegionView first, RegionView second) { }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void crossRegionRoundingTailReturnsAndSurvivesReload(TestContext context) throws Exception {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void crossRegionRoundingTailReturnsAndSurvivesReload(GameTestHelper context) throws Exception {
         // 旧存档的区域合并与共享账户采用不同求和顺序，最后一笔不能永远留在队列。
         var fixture = roundingFixture(context, 0);
         var restored = fixture.state();
         restored.renewEnvironment(WINDOW_MILLIS);
-        var first = restored.query(context.getWorld(), 0, 0, WINDOW_MILLIS);
-        var second = restored.query(context.getWorld(), DISTANT_REGION_BLOCK, 0, WINDOW_MILLIS);
+        var first = restored.query(context.getLevel(), 0, 0, WINDOW_MILLIS);
+        var second = restored.query(context.getLevel(), DISTANT_REGION_BLOCK, 0, WINDOW_MILLIS);
         assertReturned(context, fixture.first(), first, FIRST_SHARE);
         assertReturned(context, fixture.second(), second, SHARED_RELEASE - FIRST_SHARE);
-        var returned = restored.writeNbt(new NbtCompound());
-        context.assertTrue(returned.getList("pending_credits", NbtElement.COMPOUND_TYPE).isEmpty(),
+        var returned = restored.save(new CompoundTag());
+        context.assertTrue(returned.getList("pending_credits", Tag.TAG_COMPOUND).isEmpty(),
                 "浮点尾差使跨区域归位永久滞留");
         context.assertTrue(BodyProtobuf.fromInventory(BodyMessages.QiInventory
                 .parseFrom(returned.getByteArray("released_qi"))).entries().isEmpty(), "共享账户留下尾差");
         var reloaded = HumanWorldState.read(returned);
         reloaded.renewEnvironment(WINDOW_MILLIS * 2);
-        context.assertTrue(reloaded.writeNbt(new NbtCompound()).getList("pending_credits", NbtElement.COMPOUND_TYPE)
+        context.assertTrue(reloaded.save(new CompoundTag()).getList("pending_credits", Tag.TAG_COMPOUND)
                 .isEmpty(), "重载恢复了已归位队列");
-        context.assertTrue(reloaded.query(context.getWorld(), 0, 0, WINDOW_MILLIS * 2).getInventory()
+        context.assertTrue(reloaded.query(context.getLevel(), 0, 0, WINDOW_MILLIS * 2).getInventory()
                 .equals(first.getInventory()), "重载重复向第一区域入账");
-        context.assertTrue(reloaded.query(context.getWorld(), DISTANT_REGION_BLOCK, 0, WINDOW_MILLIS * 2)
+        context.assertTrue(reloaded.query(context.getLevel(), DISTANT_REGION_BLOCK, 0, WINDOW_MILLIS * 2)
                 .getInventory().equals(second.getInventory()), "重载重复向第二区域入账");
-        context.complete();
+        context.succeed();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void roundingAllocationPreservesRegionWindowAndPendingAcrossReload(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void roundingAllocationPreservesRegionWindowAndPendingAcrossReload(GameTestHelper context) {
         // 较晚创建的区域尚未到期时不能提前入账；重载后继续使用实际余额处理尾笔。
         var fixture = roundingFixture(context, HALF_WINDOW_MILLIS);
         fixture.state().renewEnvironment(WINDOW_MILLIS);
-        var first = fixture.state().query(context.getWorld(), 0, 0, WINDOW_MILLIS);
-        var second = fixture.state().query(context.getWorld(), DISTANT_REGION_BLOCK, 0, WINDOW_MILLIS);
+        var first = fixture.state().query(context.getLevel(), 0, 0, WINDOW_MILLIS);
+        var second = fixture.state().query(context.getLevel(), DISTANT_REGION_BLOCK, 0, WINDOW_MILLIS);
         assertReturned(context, fixture.first(), first, FIRST_SHARE);
         context.assertTrue(second.getInventory().equals(fixture.second().getInventory()), "未到期区域提前入账");
-        var saved = fixture.state().writeNbt(new NbtCompound());
-        context.assertTrue(saved.getList("pending_credits", NbtElement.COMPOUND_TYPE).size() == 1,
+        var saved = fixture.state().save(new CompoundTag());
+        context.assertTrue(saved.getList("pending_credits", Tag.TAG_COMPOUND).size() == 1,
                 "未到期区域的归位意图丢失");
         var reloaded = HumanWorldState.read(saved);
         long secondWindow = WINDOW_MILLIS + HALF_WINDOW_MILLIS;
         reloaded.renewEnvironment(secondWindow);
-        var returnedSecond = reloaded.query(context.getWorld(), DISTANT_REGION_BLOCK, 0, secondWindow);
+        var returnedSecond = reloaded.query(context.getLevel(), DISTANT_REGION_BLOCK, 0, secondWindow);
         assertReturned(context, fixture.second(), returnedSecond, SHARED_RELEASE - FIRST_SHARE);
-        context.assertTrue(reloaded.writeNbt(new NbtCompound()).getList("pending_credits", NbtElement.COMPOUND_TYPE)
+        context.assertTrue(reloaded.save(new CompoundTag()).getList("pending_credits", Tag.TAG_COMPOUND)
                 .isEmpty(), "跨窗重载后尾笔未能归位");
-        context.complete();
+        context.succeed();
     }
 
-    private static RoundingFixture roundingFixture(TestContext context, long secondCreatedAt) {
+    private static RoundingFixture roundingFixture(GameTestHelper context, long secondCreatedAt) {
         // 直接读取旧队列的 0.1 + 0.2 与账户 0.3，不用新分配规则构造期望数据。
         var state = new HumanWorldState();
-        var first = state.query(context.getWorld(), 0, 0, 0);
-        var second = state.query(context.getWorld(), DISTANT_REGION_BLOCK, 0, secondCreatedAt);
-        var saved = state.writeNbt(new NbtCompound());
+        var first = state.query(context.getLevel(), 0, 0, 0);
+        var second = state.query(context.getLevel(), DISTANT_REGION_BLOCK, 0, secondCreatedAt);
+        var saved = state.save(new CompoundTag());
         saved.putByteArray("released_qi", BodyProtobuf.toInventory(releaseQi(SHARED_RELEASE)).toByteArray());
-        var pending = new NbtList();
+        var pending = new ListTag();
         pending.add(defaultCredit(first.getSourceId(), FIRST_SHARE));
         pending.add(defaultCredit(second.getSourceId(), SECOND_SHARE));
         saved.put("pending_credits", pending);
         return new RoundingFixture(HumanWorldState.read(saved), first, second);
     }
 
-    private static void assertReturned(TestContext context, RegionView before, RegionView after, double amount) {
+    private static void assertReturned(GameTestHelper context, RegionView before, RegionView after, double amount) {
         // 检查目的地完整库存，删除队列或清空默认账户不能冒充实际归位。
         var expected = QiAccounting.credit(BodyProtobuf.fromInventory(before.getInventory()), releaseQi(amount));
         context.assertTrue(BodyProtobuf.fromInventory(after.getInventory()).equals(expected), "区域实际入账不守恒");
@@ -115,9 +114,9 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         return new QiInventory(List.of(new Qi(Qi.QiAttribute.of("qi_variants:wither"), amount, RELEASE_DENSITY)));
     }
 
-    private static NbtCompound defaultCredit(String sourceId, double amount) {
+    private static CompoundTag defaultCredit(String sourceId, double amount) {
         // 与旧存档完全一致的排队格式，不调用新分配器准备预期值。
-        var entry = new NbtCompound();
+        var entry = new CompoundTag();
         entry.putString("source_id", sourceId);
         entry.putString("kind", "default");
         entry.putString("release_id", "");
@@ -125,14 +124,14 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         return entry;
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void memoryAcceptanceAndDuplicateDoNotConfirmDisk(TestContext context) throws Exception {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void memoryAcceptanceAndDuplicateDoNotConfirmDisk(GameTestHelper context) throws Exception {
         // 先保存旧状态，模拟首次受理与重复受理后均未触发世界保存就退出。
         Fixture fixture = fixture(context);
         HumanWorldState state = fixture.state();
         RegionRelease release = fixture.release();
         Path file = fixture.file();
-        var world = context.getWorld();
+        var world = context.getLevel();
         state.save(file.toFile());
         var accepted = state.release(release, world, 1);
         var duplicate = state.release(release, world, 1);
@@ -141,16 +140,16 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         HumanWorldState restored = read(file);
         context.assertTrue(!restored.release(release, world, 1).getDuplicate(),
                 "夹具没有保留首次受理前的旧文件");
-        context.complete();
+        context.succeed();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void durableReleaseSurvivesRepeatedReloadAndCreditsOnce(TestContext context) throws Exception {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void durableReleaseSurvivesRepeatedReloadAndCreditsOnce(GameTestHelper context) throws Exception {
         // 接收端先落盘、响应丢失及发送端旧文件反复重放，都只保留一笔待入账事实。
         Fixture fixture = fixture(context);
         RegionRelease release = fixture.release();
         Path file = fixture.file();
-        var world = context.getWorld();
+        var world = context.getLevel();
         var accepted = fixture.state().release(release, world, 1);
         context.assertTrue(!accepted.getPersisted() && !accepted.getDuplicate(), "首次受理不应同步写盘");
         fixture.state().flushHandoffs(file);
@@ -168,17 +167,17 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
             context.assertTrue(BodyProtobuf.fromInventory(actual.getInventory()).equals(expected),
                     "重复响应丢失或重启导致重复入账");
         }
-        context.complete();
+        context.succeed();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void failedWriteKeepsOldFileAndDuplicateMustRetryDisk(TestContext context) throws Exception {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void failedWriteKeepsOldFileAndDuplicateMustRetryDisk(GameTestHelper context) throws Exception {
         // 用同名目录阻止临时文件写入，确保首次失败及内存 duplicate 都不能确认持久化。
         Fixture fixture = fixture(context);
         HumanWorldState state = fixture.state();
         RegionRelease release = fixture.release();
         Path file = fixture.file();
-        var world = context.getWorld();
+        var world = context.getLevel();
         state.save(file.toFile());
         byte[] original = Files.readAllBytes(file);
         Path blocked = file.resolveSibling(file.getFileName() + ".tmp");
@@ -197,11 +196,11 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         state.flushHandoffs(file);
         var recovered = state.release(release, world, 1);
         context.assertTrue(recovered.getPersisted() && recovered.getDuplicate(), "磁盘恢复后未完成原请求交接");
-        context.complete();
+        context.succeed();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void failedAtomicReplacementDoesNotConfirmDisk(TestContext context) throws Exception {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void failedAtomicReplacementDoesNotConfirmDisk(GameTestHelper context) throws Exception {
         // 非空目标目录使原子替换失败，不能把临时文件已写完当作提交完成。
         Fixture fixture = fixture(context);
         Path file = fixture.file();
@@ -211,17 +210,17 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         assertWriteFails(context, fixture);
         context.assertTrue(Files.readString(sentinel).equals("保留原目标"), "替换失败破坏了原目标");
         context.assertTrue(fixture.state().isDirty(), "原子替换失败清除了 dirty");
-        context.complete();
+        context.succeed();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void unresolvedReleaseSurvivesSevenDaysAndRejectsConflictingContent(TestContext context) throws Exception {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void unresolvedReleaseSurvivesSevenDaysAndRejectsConflictingContent(GameTestHelper context) throws Exception {
         // 没有发送端持久删除证明时，已入账 ID 也不能按时间回收。
         Fixture fixture = fixture(context);
         HumanWorldState state = fixture.state();
         RegionRelease release = fixture.release();
         Path file = fixture.file();
-        var world = context.getWorld();
+        var world = context.getLevel();
         state.release(release, world, 1);
         state.flushHandoffs(file);
         state.renewEnvironment(AFTER_SEVEN_DAYS_MILLIS);
@@ -240,45 +239,45 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
                 .build();
         assertConflict(context, restored, moved);
         assertConflict(context, restored, changedQi);
-        context.assertTrue(restored.writeNbt(new NbtCompound())
-                .getList("release_ids", NbtElement.COMPOUND_TYPE).size() == 1, "冲突改变了去重记录");
-        context.complete();
+        context.assertTrue(restored.save(new CompoundTag())
+                .getList("release_ids", Tag.TAG_COMPOUND).size() == 1, "冲突改变了去重记录");
+        context.succeed();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void batchAndWorldSaveShareOneAttemptPerTick(TestContext context) throws Exception {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void batchAndWorldSaveShareOneAttemptPerTick(GameTestHelper context) throws Exception {
         // 多笔释放共用快照，普通世界保存也不能绕过同 tick 的次数限制。
         Fixture fixture = fixture(context);
         HumanWorldState state = fixture.state();
-        state.bind(context.getWorld().getServer());
+        state.bind(context.getLevel().getServer());
         for (int index = 0; index < BATCH_SIZE; index++) {
             var release = fixture.release().toBuilder().setReleaseId("batch:" + index).build();
-            context.assertTrue(!state.release(release, context.getWorld(), 1).getPersisted(), "首次受理提前确认");
+            context.assertTrue(!state.release(release, context.getLevel(), 1).getPersisted(), "首次受理提前确认");
         }
         state.flushHandoffs(fixture.file());
-        context.assertTrue(read(fixture.file()).writeNbt(new NbtCompound())
-                .getList("release_ids", NbtElement.COMPOUND_TYPE).size() == BATCH_SIZE, "未合并保存");
+        context.assertTrue(read(fixture.file()).save(new CompoundTag())
+                .getList("release_ids", Tag.TAG_COMPOUND).size() == BATCH_SIZE, "未合并保存");
         byte[] saved = Files.readAllBytes(fixture.file());
-        state.release(fixture.release(), context.getWorld(), 1);
+        state.release(fixture.release(), context.getLevel(), 1);
         state.flushHandoffs(fixture.file());
         state.save(fixture.file().toFile());
         context.assertTrue(Arrays.equals(saved, Files.readAllBytes(fixture.file())), "同 tick 重复写盘");
-        context.assertTrue(!state.release(fixture.release(), context.getWorld(), 1).getPersisted(), "未写盘却确认");
-        context.waitAndRun(1, () -> {
+        context.assertTrue(!state.release(fixture.release(), context.getLevel(), 1).getPersisted(), "未写盘却确认");
+        context.runAfterDelay(1, () -> {
             state.flushHandoffs(fixture.file());
-            context.assertTrue(state.release(fixture.release(), context.getWorld(), 1).getPersisted(),
+            context.assertTrue(state.release(fixture.release(), context.getLevel(), 1).getPersisted(),
                     "下一 tick 未保存延后的请求");
-            context.complete();
+            context.succeed();
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void failedBatchOnlyRetriesNextTick(TestContext context) throws Exception {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void failedBatchOnlyRetriesNextTick(GameTestHelper context) throws Exception {
         // 失败也消耗本 tick 的保存机会，磁盘恢复后须等下一 tick，避免故障时重复重写。
         Fixture fixture = fixture(context);
         HumanWorldState state = fixture.state();
-        state.bind(context.getWorld().getServer());
-        state.release(fixture.release(), context.getWorld(), 1);
+        state.bind(context.getLevel().getServer());
+        state.release(fixture.release(), context.getLevel(), 1);
         Path blocked = fixture.file().resolveSibling(fixture.file().getFileName() + ".tmp");
         Files.createDirectory(blocked);
         try {
@@ -288,35 +287,35 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
         }
         state.save(fixture.file().toFile());
         context.assertTrue(!Files.exists(fixture.file()) && state.isDirty(), "同 tick 重试了失败保存");
-        context.waitAndRun(1, () -> {
+        context.runAfterDelay(1, () -> {
             state.flushHandoffs(fixture.file());
-            context.assertTrue(state.release(fixture.release(), context.getWorld(), 1).getPersisted(),
+            context.assertTrue(state.release(fixture.release(), context.getLevel(), 1).getPersisted(),
                     "下一 tick 没有重试失败保存");
-            context.complete();
+            context.succeed();
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void unsupportedDirectorySyncStillConfirmsPersistence(TestContext context) throws Exception {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void unsupportedDirectorySyncStillConfirmsPersistence(GameTestHelper context) throws Exception {
         // 走 Windows 的目录能力路径，保存完整文件后仍应返回真实确认。
         Fixture fixture = fixture(context, new HumanWorldState(DurableStateFile.DirectorySync.UNSUPPORTED));
-        fixture.state().release(fixture.release(), context.getWorld(), 1);
+        fixture.state().release(fixture.release(), context.getLevel(), 1);
         fixture.state().flushHandoffs(fixture.file());
         context.assertTrue(!fixture.state().isDirty(), "目录同步不支持导致保存失败");
-        context.assertTrue(fixture.state().release(fixture.release(), context.getWorld(), 1).getPersisted(),
+        context.assertTrue(fixture.state().release(fixture.release(), context.getLevel(), 1).getPersisted(),
                 "目录同步不支持导致 persisted 永远为 false");
-        context.assertTrue(read(fixture.file()).release(fixture.release(), context.getWorld(), 1).getPersisted(),
+        context.assertTrue(read(fixture.file()).release(fixture.release(), context.getLevel(), 1).getPersisted(),
                 "正式文件没有保存已确认请求");
-        context.complete();
+        context.succeed();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void forgetWaitsForCreditAndDurableDeletionThenReclaimsHistory(TestContext context) throws Exception {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void forgetWaitsForCreditAndDurableDeletionThenReclaimsHistory(GameTestHelper context) throws Exception {
         // 待入账时不删除；删除写入失败和响应丢失都能用旧文件恢复并安全重试。
         Fixture fixture = fixture(context);
         HumanWorldState state = fixture.state();
         String releaseId = fixture.release().getReleaseId();
-        state.release(fixture.release(), context.getWorld(), 1);
+        state.release(fixture.release(), context.getLevel(), 1);
         state.flushHandoffs(fixture.file());
         context.assertTrue(!state.forgetRelease(releaseId).getPersisted(), "提前删除待入账事实");
         state.renewEnvironment(WINDOW_MILLIS);
@@ -331,39 +330,39 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
             Files.delete(blocked);
         }
         verifyForgetRecovery(context, fixture);
-        context.complete();
+        context.succeed();
     }
 
-    private static void verifyForgetRecovery(TestContext context, Fixture fixture) throws IOException {
+    private static void verifyForgetRecovery(GameTestHelper context, Fixture fixture) throws IOException {
         // 删除尚未落盘时重启仍有去重项；成功后重启只重试遗忘，不能重发原释放。
         String releaseId = fixture.release().getReleaseId();
         HumanWorldState restored = read(fixture.file());
-        context.assertTrue(restored.release(fixture.release(), context.getWorld(), 1).getDuplicate(),
+        context.assertTrue(restored.release(fixture.release(), context.getLevel(), 1).getDuplicate(),
                 "删除未落盘却丢失去重项");
         restored.forgetRelease(releaseId);
         restored.flushHandoffs(fixture.file());
         HumanWorldState afterLostResponse = read(fixture.file());
         context.assertTrue(afterLostResponse.forgetRelease(releaseId).getPersisted(), "遗忘重试不幂等");
-        context.assertTrue(afterLostResponse.writeNbt(new NbtCompound())
-                .getList("release_ids", NbtElement.COMPOUND_TYPE).isEmpty(), "已完成历史未回收");
+        context.assertTrue(afterLostResponse.save(new CompoundTag())
+                .getList("release_ids", Tag.TAG_COMPOUND).isEmpty(), "已完成历史未回收");
         QiInventory expected = QiAccounting.credit(BodyProtobuf.fromInventory(fixture.original().getInventory()),
                 BodyProtobuf.fromInventory(fixture.release().getReleasedQi()));
-        RegionView actual = afterLostResponse.query(context.getWorld(), REGION_COORDINATE,
+        RegionView actual = afterLostResponse.query(context.getLevel(), REGION_COORDINATE,
                 REGION_COORDINATE, WINDOW_MILLIS);
         context.assertTrue(BodyProtobuf.fromInventory(actual.getInventory()).equals(expected), "遗忘改变余额");
     }
 
-    private static Fixture fixture(TestContext context) throws IOException {
+    private static Fixture fixture(GameTestHelper context) throws IOException {
         // 每项回归使用独立文件和状态，库存及群系仍由真实世界和生产实现生成。
         return fixture(context, new HumanWorldState());
     }
 
-    private static Fixture fixture(TestContext context, HumanWorldState state) throws IOException {
+    private static Fixture fixture(GameTestHelper context, HumanWorldState state) throws IOException {
         // 测试使用真实世界生成区域，保存能力可以指定为平台不支持目录同步。
-        var world = context.getWorld();
+        var world = context.getLevel();
         RegionView original = state.query(world, REGION_COORDINATE, REGION_COORDINATE, 0);
         var position = RegionQuery.newBuilder()
-                .setDimensionId(world.getRegistryKey().getValue().toString())
+                .setDimensionId(world.dimension().location().toString())
                 .setBlockX(REGION_COORDINATE)
                 .setBlockZ(REGION_COORDINATE)
                 .build();
@@ -379,24 +378,24 @@ public final class HumanReleasePersistenceGameTest implements FabricGameTest {
     }
 
     private static HumanWorldState read(Path file) throws IOException {
-        // 必须读取实际压缩文件，不能用内存 writeNbt 冒充重启恢复。
+        // 必须读取实际压缩文件，不能用内存 save 冒充重启恢复。
         return HumanWorldState.read(NbtIo.readCompressed(file.toFile()).getCompound("data"));
     }
 
-    private static void assertWriteFails(TestContext context, Fixture fixture) {
+    private static void assertWriteFails(GameTestHelper context, Fixture fixture) {
         // 异步保存失败保留 dirty，后续重试不能生成持久化确认。
         HumanWorldState state = fixture.state();
-        state.release(fixture.release(), context.getWorld(), 1);
+        state.release(fixture.release(), context.getLevel(), 1);
         state.flushHandoffs(fixture.file());
         context.assertTrue(state.isDirty()
-                && !state.release(fixture.release(), context.getWorld(), 1).getPersisted(), "写失败却确认");
+                && !state.release(fixture.release(), context.getLevel(), 1).getPersisted(), "写失败却确认");
     }
 
-    private static void assertConflict(TestContext context, HumanWorldState state, RegionRelease request) {
+    private static void assertConflict(GameTestHelper context, HumanWorldState state, RegionRelease request) {
         // 比较完整请求，位置或库存变化必须在任何写盘和入账之前拒绝。
         boolean conflict = false;
         try {
-            state.release(request, context.getWorld(), AFTER_SEVEN_DAYS_MILLIS);
+            state.release(request, context.getLevel(), AFTER_SEVEN_DAYS_MILLIS);
         } catch (HumanErrors.HostRejected expected) {
             conflict = expected.code() == FailureCode.REQUEST_ID_CONFLICT;
         }

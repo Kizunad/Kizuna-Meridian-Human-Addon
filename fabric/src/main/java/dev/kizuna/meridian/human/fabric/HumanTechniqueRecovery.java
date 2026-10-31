@@ -4,10 +4,10 @@ import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.BodyCommand;
 import dev.kizuna.meridian.technique.server.TechniqueHost;
 import dev.kizuna.meridian.technique.server.TechniqueRecoveryHost;
-import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.level.ServerPlayer;
 
 /** 恢复直接使用已认证实体和权威身体，允许在目录认领前及死体状态清理效果。 */
-record HumanTechniqueRecovery(ServerPlayerEntity player, HumanPlayerBody body,
+record HumanTechniqueRecovery(ServerPlayer player, HumanPlayerBody body,
                               HumanTechniqueEffects effects) implements TechniqueRecoveryHost {
     @Override
     public BodySnapshot snapshot() {

@@ -5,15 +5,14 @@ import dev.kizuna.meridian.core.Qi;
 import dev.kizuna.meridian.core.QiInventory;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.*;
 import dev.kizuna.meridian.human.server.HumanErrors;
-import net.minecraft.nbt.NbtCompound;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.DebugQi;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.DebugQiMode;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
-import net.minecraft.test.GameTest;
-import net.minecraft.test.TestContext;
-
+import net.minecraft.gametest.framework.GameTest;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.nbt.CompoundTag;
 import java.util.List;
 
 /** 整体回归：游戏服务端加载真实人体内容，并由玩家宿主执行新拓扑扩散和存档恢复。 */
@@ -25,10 +24,10 @@ public final class HumanMeridianGameTest implements FabricGameTest {
     private static final double GAS_RELEASE_DENSITY = 0.01;
     private static final double LIQUID_RELEASE_DENSITY = 0.1;
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void regionReleaseSurvivesSaveAndCreditsOnlyAtWindowBoundary(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void regionReleaseSurvivesSaveAndCreditsOnlyAtWindowBoundary(GameTestHelper context) {
         // 真实世界首次查询生成区域，后续查询与排队释放均不得重抽库存或提前改版。
-        var world = context.getWorld();
+        var world = context.getLevel();
         var state = new HumanWorldState();
         var original = state.query(world, RELEASE_COORDINATE, RELEASE_COORDINATE, 0);
         context.assertTrue(original != null, "主世界区域未生成");
@@ -38,7 +37,7 @@ public final class HumanMeridianGameTest implements FabricGameTest {
                 GAS_RELEASE_AMOUNT, GAS_RELEASE_DENSITY), new Qi(Qi.QiAttribute.of("qi_variants:wither"),
                 LIQUID_RELEASE_AMOUNT, LIQUID_RELEASE_DENSITY)));
         var position = RegionQuery.newBuilder()
-                .setDimensionId(world.getRegistryKey().getValue().toString())
+                .setDimensionId(world.dimension().location().toString())
                 .setBlockX(RELEASE_COORDINATE)
                 .setBlockZ(RELEASE_COORDINATE)
                 .build();
@@ -52,14 +51,14 @@ public final class HumanMeridianGameTest implements FabricGameTest {
         context.assertTrue(original.equals(state.query(world, RELEASE_COORDINATE, RELEASE_COORDINATE, 1)),
                 "排队释放提前改变区域");
         verifySavedRelease(context, state, release, original, qi);
-        context.complete();
+        context.succeed();
     }
 
-    private static void verifySavedRelease(TestContext context, HumanWorldState state, RegionRelease release,
+    private static void verifySavedRelease(GameTestHelper context, HumanWorldState state, RegionRelease release,
                                            RegionView original, QiInventory qi) {
         // 排队状态经过 NBT 写读后仍保留去重键，跨供给窗续算只能入账一次。
-        var restored = HumanWorldState.read(state.writeNbt(new NbtCompound()));
-        var world = context.getWorld();
+        var restored = HumanWorldState.read(state.save(new CompoundTag()));
+        var world = context.getLevel();
         context.assertTrue(restored.release(release, world, 1).getDuplicate(), "存档恢复丢失排队去重键");
         restored.renewEnvironment(RELEASE_WINDOW_MILLIS - 1);
         context.assertTrue(original.equals(restored.query(world, RELEASE_COORDINATE, RELEASE_COORDINATE,
@@ -71,7 +70,7 @@ public final class HumanMeridianGameTest implements FabricGameTest {
         context.assertTrue(BodyProtobuf.fromInventory(credited.getInventory()).equals(expected),
                 "区域入账未保留自定义属性、数量、密度与相态");
         context.assertTrue(credited.getSourceRevision() > original.getSourceRevision(), "入账未更新区域版本");
-        var savedAgain = HumanWorldState.read(restored.writeNbt(new NbtCompound()));
+        var savedAgain = HumanWorldState.read(restored.save(new CompoundTag()));
         context.assertTrue(savedAgain.release(release, world, RELEASE_WINDOW_MILLIS + 1).getDuplicate(),
                 "已入账去重键未保存");
         long nextWindowMillis = RELEASE_WINDOW_MILLIS + RELEASE_WINDOW_MILLIS;
@@ -81,17 +80,17 @@ public final class HumanMeridianGameTest implements FabricGameTest {
                 .getInventory()).equals(expected), "重启或续窗重复入账");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void defaultReleasedAccountReturnsWithoutCreatingQi(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void defaultReleasedAccountReturnsWithoutCreatingQi(GameTestHelper context) {
         // 真实玩家死亡先进入默认账户和位置队列，重启后在续窗从原账户扣转。
-        var player = context.createMockCreativeServerPlayerInWorld();
-        long now = player.getServer().getOverworld().getTime() * 50;
+        var player = context.makeMockServerPlayerInLevel();
+        long now = player.getServer().overworld().getGameTime() * 50;
         var state = new HumanWorldState();
         var body = state.join(player, now);
         // 健康请求须先结算再读取版本，避免首次修炼进度初始化使请求过期。
         body.settle(now);
-        var position = player.getBlockPos();
-        var original = state.query(context.getWorld(), position.getX(), position.getZ(), now);
+        var position = player.blockPosition();
+        var original = state.query(context.getLevel(), position.getX(), position.getZ(), now);
         double released = body.snapshot().totalQi();
         var death = dev.kizuna.meridian.protocol.pb.MeridianMessages.RequestEnvelope.newBuilder()
                 .setProtocolVersion(1).setRequestId("gametest:player-death")
@@ -100,36 +99,36 @@ public final class HumanMeridianGameTest implements FabricGameTest {
                         .setConfirmBodyDeath(dev.kizuna.meridian.protocol.pb.HealthMessages.ConfirmBodyDeath.newBuilder()
                                 .setSourceId("gametest:death"))).build();
         context.assertTrue(body.applyHealth(now, death).hasCommandCommitted(), "死亡清账未提交");
-        var saved = state.writeNbt(new NbtCompound());
+        var saved = state.save(new CompoundTag());
         context.assertTrue(Math.abs(defaultReleased(saved) - released) < 1e-7, "死亡未进入唯一默认账户");
         context.assertTrue(saved.getList("pending_credits", 10).size() == 1, "玩家释放未按位置排队");
-        context.assertTrue(original.equals(state.query(context.getWorld(), position.getX(), position.getZ(), now)), "玩家释放提前入账");
+        context.assertTrue(original.equals(state.query(context.getLevel(), position.getX(), position.getZ(), now)), "玩家释放提前入账");
         // 余额暂时不一致时，失败项仍须能保存并在修复后重试，不能在加载阶段丢弃队列。
         byte[] savedReleased = saved.getByteArray("released_qi");
         saved.putByteArray("released_qi", BodyProtobuf.toInventory(QiInventory.empty()).toByteArray());
         var failedTransfer = HumanWorldState.read(saved);
         long boundary = now + 30_000;
         failedTransfer.renewEnvironment(boundary);
-        var failedSave = failedTransfer.writeNbt(new NbtCompound());
+        var failedSave = failedTransfer.save(new CompoundTag());
         context.assertTrue(failedSave.getList("pending_credits", 10).size() == 1, "归位失败后队列被静默删除");
         failedSave.putByteArray("released_qi", savedReleased);
         var restored = HumanWorldState.read(failedSave);
         long retryBoundary = boundary + 30_000;
         restored.renewEnvironment(retryBoundary);
-        var after = restored.writeNbt(new NbtCompound());
+        var after = restored.save(new CompoundTag());
         context.assertTrue(defaultReleased(after) == 0, "默认释放账户归位后未扣账");
         double beforeTotal = BodyProtobuf.fromInventory(original.getInventory()).totalQi();
-        double afterTotal = BodyProtobuf.fromInventory(restored.query(context.getWorld(), position.getX(), position.getZ(), retryBoundary)
+        double afterTotal = BodyProtobuf.fromInventory(restored.query(context.getLevel(), position.getX(), position.getZ(), retryBoundary)
                 .getInventory()).totalQi();
         context.assertTrue(Math.abs(afterTotal - beforeTotal - released) < 1e-7, "默认归位不守恒");
         var reloaded = HumanWorldState.read(after);
         reloaded.renewEnvironment(boundary * 2);
-        context.assertTrue(Math.abs(BodyProtobuf.fromInventory(reloaded.query(context.getWorld(), position.getX(), position.getZ(), boundary * 2)
+        context.assertTrue(Math.abs(BodyProtobuf.fromInventory(reloaded.query(context.getLevel(), position.getX(), position.getZ(), boundary * 2)
                 .getInventory()).totalQi() - afterTotal) < 1e-7, "默认余额恢复后重复归位");
-        context.complete();
+        context.succeed();
     }
 
-    private static double defaultReleased(NbtCompound saved) {
+    private static double defaultReleased(CompoundTag saved) {
         // 直接读取宿主保存的框架消息，避免另建测试账本掩盖实际扣账问题。
         try {
             return BodyProtobuf.fromInventory(dev.kizuna.meridian.protocol.pb.BodyMessages.QiInventory
@@ -139,10 +138,10 @@ public final class HumanMeridianGameTest implements FabricGameTest {
         }
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void nonOverworldReleaseStaysInDefaultAccountAndInvalidInventoryIsRejected(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void nonOverworldReleaseStaysInDefaultAccountAndInvalidInventoryIsRejected(GameTestHelper context) {
         // 存在的非主世界不生成区域，外部释放仍须排队并随同一存档恢复。
-        var nether = context.getWorld().getServer().getWorld(net.minecraft.world.World.NETHER);
+        var nether = context.getLevel().getServer().getLevel(net.minecraft.world.level.Level.NETHER);
         context.assertTrue(nether != null, "测试服务器未加载下界");
         var state = new HumanWorldState();
         var position = RegionQuery.newBuilder().setDimensionId("minecraft:the_nether").build();
@@ -151,10 +150,10 @@ public final class HumanMeridianGameTest implements FabricGameTest {
         var release = RegionRelease.newBuilder().setReleaseId("gametest:nether-release")
                 .setPosition(position).setReleasedQi(BodyProtobuf.toInventory(qi)).build();
         context.assertTrue(!state.release(release, nether, 1).hasSourceId(), "无区域释放返回了来源 ID");
-        context.assertTrue(defaultReleased(state.writeNbt(new NbtCompound())) == 0, "非主世界释放跳过队列");
-        state = HumanWorldState.read(state.writeNbt(new NbtCompound()));
+        context.assertTrue(defaultReleased(state.save(new CompoundTag())) == 0, "非主世界释放跳过队列");
+        state = HumanWorldState.read(state.save(new CompoundTag()));
         state.renewEnvironment(30_000);
-        context.assertTrue(defaultReleased(state.writeNbt(new NbtCompound())) == 7, "非主世界释放未进入默认账户");
+        context.assertTrue(defaultReleased(state.save(new CompoundTag())) == 7, "非主世界释放未进入默认账户");
         context.assertTrue(state.release(release, nether, 30_001).getDuplicate(), "无区域释放重试未去重");
 
         // 非法明细不得占用释放 ID；修正同一请求后仍能首次受理。
@@ -173,7 +172,7 @@ public final class HumanMeridianGameTest implements FabricGameTest {
                     nether, 30_001).getDuplicate(), "非法请求占用了释放 ID");
         }
         // 玩家在下界死亡没有区域归位项，既有余额继续留在默认账户。
-        var player = new net.minecraft.server.network.ServerPlayerEntity(nether.getServer(), nether,
+        var player = new net.minecraft.server.level.ServerPlayer(nether.getServer(), nether,
                 new com.mojang.authlib.GameProfile(java.util.UUID.randomUUID(), "EnvironmentTest"));
         long deathMillis = 30_001;
         var body = state.join(player, deathMillis);
@@ -188,14 +187,14 @@ public final class HumanMeridianGameTest implements FabricGameTest {
                                 .setSourceId("gametest:death"))).build();
         context.assertTrue(body.applyHealth(deathMillis, death).hasCommandCommitted(), "下界玩家死亡未提交");
         state.renewEnvironment(60_000);
-        var saved = state.writeNbt(new NbtCompound());
+        var saved = state.save(new CompoundTag());
         context.assertTrue(Math.abs(defaultReleased(saved) - 35 - bodyQi) < 1e-7, "下界玩家释放丢失或被转出");
         context.assertTrue(saved.getList("pending_credits", 10).isEmpty(), "下界玩家生成了默认归位队列");
-        context.complete();
+        context.succeed();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void environmentHostRejectsUnboundAndOffThreadCalls(TestContext context) throws Exception {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void environmentHostRejectsUnboundAndOffThreadCalls(GameTestHelper context) throws Exception {
         // 暂时解除实际宿主后立即恢复，验证加载阶段以合法协议返回 unbound。
         var field = HumanEnvironmentHost.class.getDeclaredField("delegate");
         field.setAccessible(true);
@@ -228,14 +227,14 @@ public final class HumanMeridianGameTest implements FabricGameTest {
                 () -> new HumanEnvironmentHost().exchange(request)).get(5, java.util.concurrent.TimeUnit.SECONDS);
         context.assertTrue(EnvironmentHostResponse.parseFrom(response).getFailure().getCode() == FailureCode.ACCESS_DENIED,
                 "非主线程环境请求未返回 ACCESS_DENIED");
-        context.complete();
+        context.succeed();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void movementPacketGapsKeepAnimationUntilConfirmedStop(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void movementPacketGapsKeepAnimationUntilConfirmedStop(GameTestHelper context) {
         // 真实网络会短暂缺少位置包，不能因此停止循环，再以新请求重新播放。
         var observer = new HumanMovementObserver();
-        var origin = net.minecraft.util.math.Vec3d.ZERO;
+        var origin = net.minecraft.world.phys.Vec3.ZERO;
         observer.sample(origin, "overworld", true, false, false);
         var walking = origin.add(.2, 0, 0);
         context.assertTrue(observer.sample(walking, "overworld", true, false, false)
@@ -251,14 +250,14 @@ public final class HumanMeridianGameTest implements FabricGameTest {
                 == HumanPlayerBody.Motion.SPRINT, "实际疾跑未切换");
         context.assertTrue(observer.sample(walking.add(.6, 0, 0), "nether", true, true, false)
                 == HumanPlayerBody.Motion.IDLE, "换维度继承旧运动");
-        context.complete();
+        context.succeed();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void playerHostRunsCircuitAndCancelsOnReset(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void playerHostRunsCircuitAndCancelsOnReset(GameTestHelper context) {
         // 游戏宿主完成开脉、手动推力和冲关；撤权必须归还在途并解除动作。
-        var player = context.createMockSurvivalPlayer();
-        HumanPlayerBody body = HumanPlayerBody.born(player.getUuid(), "circuit-gametest", 0);
+        var player = context.makeMockSurvivalPlayer();
+        HumanPlayerBody body = HumanPlayerBody.born(player.getUUID(), "circuit-gametest", 0);
         body.writeProgress(dev.kizuna.meridian.progression.pb.ProgressionMessages.PlayerProgress.newBuilder()
                 .setSchemaVersion(1).setQiNotesRead(true).setGatheringScrollRead(true).setMiddleJiaoScrollRead(true).build());
         for (String id : dev.kizuna.meridian.human.server.HumanCultivation.MERIDIANS) {
@@ -293,7 +292,7 @@ public final class HumanMeridianGameTest implements FabricGameTest {
         context.assertTrue(body.snapshot().transits().stream().noneMatch(item -> item.circuit() != null), "重置遗留闭环在途");
         context.assertTrue(Math.abs(total - body.snapshot().totalQi()) < 1e-7, "撤权丢失真元");
         context.assertTrue(!dev.kizuna.meridian.human.server.HumanCultivation.state(body.snapshot()).getRunning(), "撤权未停机");
-        context.complete();
+        context.succeed();
     }
 
     private static dev.kizuna.meridian.human.pb.CultivationMessages.CultivationInput input(long sequence, long now,
@@ -303,11 +302,11 @@ public final class HumanMeridianGameTest implements FabricGameTest {
                 .setSequence(sequence).setOperation(operation).setKeyTick(now / 50).build();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void playerHostDiffusesThroughCrossedMiddleJiaoCycle(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void playerHostDiffusesThroughCrossedMiddleJiaoCycle(GameTestHelper context) {
         // 使用游戏创建的玩家身份，身体与推进均走正式宿主及唯一权威账本。
-        var player = context.createMockSurvivalPlayer();
-        HumanPlayerBody body = HumanPlayerBody.born(player.getUuid(), "gametest", 0);
+        var player = context.makeMockSurvivalPlayer();
+        HumanPlayerBody body = HumanPlayerBody.born(player.getUUID(), "gametest", 0);
         List<String> cycle = List.of("left_lung_meridian", "left_large_intestine_meridian",
                 "right_stomach_meridian", "right_spleen_meridian", "right_lung_meridian",
                 "right_large_intestine_meridian", "left_stomach_meridian", "left_spleen_meridian");
@@ -340,6 +339,6 @@ public final class HumanMeridianGameTest implements FabricGameTest {
                 .allMatch(state -> state.opening().stage() == MeridianOpening.Stage.UNOPENED), "被动扩散不能替代主动开脉");
         context.assertTrue(restored.snapshot().meridianStates().stream().filter(state -> cycle.contains(state.id().value()))
                 .allMatch(state -> state.lumenQi().totalQi() > .01), "中焦八脉应被真实扩散滋养");
-        context.complete();
+        context.succeed();
     }
 }

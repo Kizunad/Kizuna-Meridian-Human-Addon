@@ -4,13 +4,12 @@ import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
-import net.minecraft.nbt.NbtHelper;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
+import net.minecraft.nbt.NbtUtils;
+import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.util.WorldSavePath;
-
+import net.minecraft.world.level.storage.LevelResource;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.UUID;
@@ -28,7 +27,7 @@ public final class HumanLegacyBodyTestBootstrap implements ModInitializer {
 
     private static void writeLegacyBody(MinecraftServer server) {
         // 沿用已有世界及离线玩家，只给本次专用 UUID 添加一个无标签快照。
-        var file = server.getSavePath(WorldSavePath.ROOT).resolve("data/meridian_human.dat");
+        var file = server.getWorldPath(LevelResource.ROOT).resolve("data/meridian_human.dat");
         try {
             HumanWorldState state;
             if (Files.exists(file)) {
@@ -37,8 +36,8 @@ public final class HumanLegacyBodyTestBootstrap implements ModInitializer {
                 state = new HumanWorldState();
             }
             state.join(PLAYER_ID, 0);
-            var data = state.writeNbt(new NbtCompound());
-            var players = data.getList("players", NbtElement.COMPOUND_TYPE);
+            var data = state.save(new CompoundTag());
+            var players = data.getList("players", Tag.TAG_COMPOUND);
             for (int index = 0; index < players.size(); index++) {
                 var entry = players.getCompound(index);
                 var body = BodyProtobuf.decodeSnapshot(entry.getByteArray("body"));
@@ -47,9 +46,9 @@ public final class HumanLegacyBodyTestBootstrap implements ModInitializer {
                     entry.putByteArray("body", BodyProtobuf.encodeSnapshot(legacyBody));
                 }
             }
-            var root = new NbtCompound();
+            var root = new CompoundTag();
             root.put("data", data);
-            NbtHelper.putDataVersion(root);
+            NbtUtils.addCurrentDataVersion(root);
             Files.createDirectories(file.getParent());
             NbtIo.writeCompressed(root, file.toFile());
         } catch (IOException failure) {

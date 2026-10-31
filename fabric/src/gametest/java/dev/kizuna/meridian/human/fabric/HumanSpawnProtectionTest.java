@@ -5,17 +5,16 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
 import dev.kizuna.meridian.technique.server.TechniqueHost;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.DoorBlock;
-import net.minecraft.block.enums.DoubleBlockHalf;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.dedicated.MinecraftDedicatedServer;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.server.dedicated.DedicatedServer;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -38,7 +37,7 @@ public final class HumanSpawnProtectionTest implements ModInitializer {
     private static void run(MinecraftServer server) {
         // 使用真实 DedicatedServer 的保护判断，验证无权限拒绝与管理员放行。
         try {
-            if (!(server instanceof MinecraftDedicatedServer)) {
+            if (!(server instanceof DedicatedServer)) {
                 throw new AssertionError("出生点保护验证必须使用专用服务端");
             }
             verify(server);
@@ -46,33 +45,33 @@ public final class HumanSpawnProtectionTest implements ModInitializer {
         } catch (IOException failure) {
             throw new IllegalStateException("出生点保护测试结果写入失败", failure);
         } finally {
-            server.stop(false /* waitForServer */);
+            server.halt(false /* waitForServer */);
         }
     }
 
     private static void verify(MinecraftServer server) {
         // 保护区只有在管理员列表非空时启用，测试账号本身初始为非管理员。
-        var world = server.getOverworld();
+        var world = server.overworld();
         var anchor = new BlockPos(0, TEST_HEIGHT, 0);
-        world.setSpawnPos(anchor, 0);
+        world.setDefaultSpawnPos(anchor, 0);
         var operator = new GameProfile(UUID.randomUUID(), "protection_admin");
-        server.getPlayerManager().addToOperators(operator);
+        server.getPlayerList().op(operator);
         try (var fixture = new HumanTechniqueTestPlayer(world)) {
-            fixture.player.changeGameMode(GameMode.SURVIVAL);
-            fixture.player.refreshPositionAndAngles(BLOCK_CENTER, TEST_HEIGHT, BLOCK_CENTER, 0, 0);
-            fixture.player.setStackInHand(Hand.MAIN_HAND, new ItemStack(Items.IRON_AXE));
+            fixture.player.setGameMode(GameType.SURVIVAL);
+            fixture.player.moveTo(BLOCK_CENTER, TEST_HEIGHT, BLOCK_CENTER, 0, 0);
+            fixture.player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.IRON_AXE));
             BlockPos door = anchor.south(DOOR_DISTANCE);
             placeDoor(server, door);
-            if (!server.isSpawnProtected(world, door, fixture.player)) {
+            if (!server.isUnderSpawnProtection(world, door, fixture.player)) {
                 throw new AssertionError("专用服务端未启用出生点保护");
             }
             execute(fixture, "protected");
-            if (!world.getBlockState(door).isOf(Blocks.OAK_DOOR)) {
+            if (!world.getBlockState(door).is(Blocks.OAK_DOOR)) {
                 throw new AssertionError("功法破坏了出生点保护区的木门");
             }
             verifyOperator(fixture, door);
         } finally {
-            server.getPlayerManager().removeFromOperators(operator);
+            server.getPlayerList().deop(operator);
         }
     }
 
@@ -80,24 +79,24 @@ public final class HumanSpawnProtectionTest implements ModInitializer {
         // 同一世界同一工具获得管理员权限后应正常破门，证明拒绝来自保护链。
         var server = fixture.player.getServer();
         var profile = fixture.player.getGameProfile();
-        server.getPlayerManager().addToOperators(profile);
+        server.getPlayerList().op(profile);
         try {
             execute(fixture, "operator");
-            if (!fixture.player.getWorld().getBlockState(door).isAir()) {
+            if (!fixture.player.level().getBlockState(door).isAir()) {
                 throw new AssertionError("管理员仍不能劈开保护区木门");
             }
         } finally {
-            server.getPlayerManager().removeFromOperators(profile);
+            server.getPlayerList().deop(profile);
         }
     }
 
     private static void placeDoor(MinecraftServer server, BlockPos pos) {
         // 双格木门使用真实方块及邻接更新，由正式挖掘链移除两半。
-        var world = server.getOverworld();
-        world.setBlockState(pos.down(), Blocks.STONE.getDefaultState());
-        world.setBlockState(pos, Blocks.OAK_DOOR.getDefaultState());
-        world.setBlockState(pos.up(), Blocks.OAK_DOOR.getDefaultState()
-                .with(DoorBlock.HALF, DoubleBlockHalf.UPPER));
+        var world = server.overworld();
+        world.setBlockAndUpdate(pos.below(), Blocks.STONE.defaultBlockState());
+        world.setBlockAndUpdate(pos, Blocks.OAK_DOOR.defaultBlockState());
+        world.setBlockAndUpdate(pos.above(), Blocks.OAK_DOOR.defaultBlockState()
+                .setValue(DoorBlock.HALF, DoubleBlockHalf.UPPER));
     }
 
     private static void execute(HumanTechniqueTestPlayer fixture, String castId) {

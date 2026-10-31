@@ -12,21 +12,20 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueRefe
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponStrikeIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages;
 import dev.kizuna.meridian.technique.server.TechniqueProtocol;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.attribute.EntityAttributes;
-import net.minecraft.entity.damage.DamageSource;
-import net.minecraft.entity.passive.CowEntity;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.animal.Cow;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -38,35 +37,35 @@ final class HumanCombatFixture implements AutoCloseable {
     static final long MILLIS_PER_TICK = 50;
     private static final int PLAYER_HEIGHT = 2;
     final HumanTechniqueTestPlayer human;
-    final TestContext context;
+    final GameTestHelper context;
     final List<Target> targets = new ArrayList<>();
 
-    HumanCombatFixture(TestContext context) {
+    HumanCombatFixture(GameTestHelper context) {
         // 每次测试隔离玩家与空间，使用生存模式覆盖实际磨损与做功。
         this.context = context;
         human = new HumanTechniqueTestPlayer(context, UUID.randomUUID(), ObservedPlayer::new);
         var relative = new BlockPos(1, PLAYER_HEIGHT, 1);
-        Vec3d position = Vec3d.ofBottomCenter(context.getAbsolutePos(relative));
-        human.player.refreshPositionAndAngles(position.x, position.y, position.z, 0, 0);
-        human.player.changeGameMode(GameMode.SURVIVAL);
+        Vec3 position = Vec3.atBottomCenterOf(context.absolutePos(relative));
+        human.player.moveTo(position.x, position.y, position.z, 0, 0);
+        human.player.setGameMode(GameType.SURVIVAL);
     }
 
     Target target(double x, double z) {
         // 目标只观察伤害入口，仍调用原版伤害链并实际进入服务器世界。
-        var target = new Target(human.player.getServerWorld());
-        Vec3d position = human.player.getPos().add(x, 0, z);
-        target.refreshPositionAndAngles(position.x, position.y, position.z, 0, 0);
-        target.setAiDisabled(true /* aiDisabled */);
+        var target = new Target(human.player.serverLevel());
+        Vec3 position = human.player.position().add(x, 0, z);
+        target.moveTo(position.x, position.y, position.z, 0, 0);
+        target.setNoAi(true /* aiDisabled */);
         target.setNoGravity(true /* noGravity */);
-        context.assertTrue(context.getWorld().spawnEntity(target), "真实目标生成失败");
+        context.assertTrue(context.getLevel().addFreshEntity(target), "真实目标生成失败");
         targets.add(target);
         return target;
     }
 
     void hold(Item main, Item off) {
         // 两手物品由真实背包提供，宿主每次检查与打击都会重新读取。
-        human.player.setStackInHand(Hand.MAIN_HAND, new ItemStack(main));
-        human.player.setStackInHand(Hand.OFF_HAND, new ItemStack(off));
+        human.player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(main));
+        human.player.setItemInHand(InteractionHand.OFF_HAND, new ItemStack(off));
     }
 
     static TechniqueDefinition definition(String name) {
@@ -121,7 +120,7 @@ final class HumanCombatFixture implements AutoCloseable {
     void submit(EffectIntent effect) {
         // 每次使用新请求号，效果身份相同的重试必须由真实宿主回执去重。
         var request = TechniqueHostRequest.newBuilder()
-                .setEntityUuid(human.player.getUuidAsString())
+                .setEntityUuid(human.player.getStringUUID())
                 .setRequestId(UUID.randomUUID().toString())
                 .setEffect(effect)
                 .build();
@@ -137,46 +136,46 @@ final class HumanCombatFixture implements AutoCloseable {
         human.close();
     }
 
-    static final class Target extends CowEntity {
+    static final class Target extends Cow {
         final List<DamageSource> sources = new ArrayList<>();
         final List<Float> doses = new ArrayList<>();
         final List<Long> hitMillis = new ArrayList<>();
 
-        Target(ServerWorld world) {
+        Target(ServerLevel world) {
             // 不改血量与防御，只固定牛这种无护甲目标的观察入口。
             super(EntityType.COW, world);
         }
 
         @Override
-        public boolean damage(DamageSource source, float amount) {
+        public boolean hurt(DamageSource source, float amount) {
             // 原始剂量与实际扣血分别断言，不能把调用伤害当作已经命中。
             sources.add(source);
             doses.add(amount);
-            hitMillis.add(getWorld().getTime() * MILLIS_PER_TICK);
-            return super.damage(source, amount);
+            hitMillis.add(level().getGameTime() * MILLIS_PER_TICK);
+            return super.hurt(source, amount);
         }
     }
 
-    static final class ObservedPlayer extends ServerPlayerEntity {
+    static final class ObservedPlayer extends ServerPlayer {
         final List<VelocityChange> velocities = new ArrayList<>();
 
-        ObservedPlayer(MinecraftServer server, ServerWorld world,
+        ObservedPlayer(MinecraftServer server, ServerLevel world,
                        GameProfile profile) {
             // 只记录原版实体方法调用，所有玩家逻辑仍由父类实现。
             super(server, world, profile);
         }
 
         @Override
-        public void setVelocity(Vec3d velocity) {
+        public void setDeltaMovement(Vec3 velocity) {
             // 记录发生时刻而非隔一 tick 采样，避免摩擦掩盖或挪动冲量时序。
-            super.setVelocity(velocity);
+            super.setDeltaMovement(velocity);
             if (velocities != null) {
                 double movement = getAttributeValue(
-                        EntityAttributes.GENERIC_MOVEMENT_SPEED);
-                velocities.add(new VelocityChange(getWorld().getTime() * MILLIS_PER_TICK, velocity, movement));
+                        Attributes.MOVEMENT_SPEED);
+                velocities.add(new VelocityChange(level().getGameTime() * MILLIS_PER_TICK, velocity, movement));
             }
         }
     }
 
-    record VelocityChange(long millis, Vec3d velocity, double movement) { }
+    record VelocityChange(long millis, Vec3 velocity, double movement) { }
 }

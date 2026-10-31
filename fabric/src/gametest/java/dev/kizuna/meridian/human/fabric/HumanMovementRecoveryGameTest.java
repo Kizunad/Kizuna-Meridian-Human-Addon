@@ -14,13 +14,12 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHost
 import dev.kizuna.meridian.technique.server.TechniqueProtocol;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
-import net.minecraft.network.packet.c2s.play.CustomPayloadC2SPacket;
-import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
-import net.minecraft.test.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.Identifier;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.gametest.framework.GameTest;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
+import net.minecraft.network.protocol.game.ServerboundCustomPayloadPacket;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.GameType;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
@@ -31,11 +30,11 @@ public final class HumanMovementRecoveryGameTest implements FabricGameTest {
     private static final long MILLIS_PER_TICK = 50;
     private static final long PAUSE_OBSERVATION_TICKS = 3;
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void destroyedLegRejectsWalkingAndSprintingWithoutPausingBody(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void destroyedLegRejectsWalkingAndSprintingWithoutPausingBody(GameTestHelper context) {
         // 生存玩家部位归零后直接走试玩失败的 observe 路径，健康与功法宿主仍须可用。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
-            fixture.player.changeGameMode(GameMode.SURVIVAL);
+            fixture.player.setGameMode(GameType.SURVIVAL);
             var hit = HealthTarget.newBuilder().setPartId(LOWER_LEG).build();
             damage(context, fixture, hit, LOWER_LEG_HP);
             verifyRejectedMovement(context, fixture);
@@ -43,11 +42,11 @@ public final class HumanMovementRecoveryGameTest implements FabricGameTest {
             context.assertTrue(technique(fixture).hasBody(), "黑腿错误暂停了功法宿主");
             context.assertTrue(partHp(fixture) == 0, "移动不能恢复黑腿 HP");
         }
-        context.complete();
+        context.succeed();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void destroyedLegTissueAlsoRejectsOnlyMovement(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void destroyedLegTissueAlsoRejectsOnlyMovement(GameTestHelper context) {
         // 组织账户可独立损毁；部位仍有血时也不能建立需要该组织的运动占用。
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
             var tissue = fixture.body().snapshot().structure().tissues().stream()
@@ -60,13 +59,13 @@ public final class HumanMovementRecoveryGameTest implements FabricGameTest {
             context.assertTrue(partHp(fixture) == LOWER_LEG_HP, "组织伤害意外扣了部位 HP");
             context.assertTrue(inspect(fixture).hasBody(), "组织损毁错误暂停身体");
         }
-        context.complete();
+        context.succeed();
     }
 
-    private static void verifyRejectedMovement(TestContext context, HumanTechniqueTestPlayer fixture) {
+    private static void verifyRejectedMovement(GameTestHelper context, HumanTechniqueTestPlayer fixture) {
         // 同一时刻切换动作不会扣费，被拒动作也不能留下占用。
         var body = fixture.body();
-        long now = fixture.player.getServer().getOverworld().getTime() * MILLIS_PER_TICK;
+        long now = fixture.player.getServer().overworld().getGameTime() * MILLIS_PER_TICK;
         var before = body.snapshot().tissueStates();
         body.observe(now, HumanPlayerBody.Motion.WALK);
         body.observe(now, HumanPlayerBody.Motion.SPRINT);
@@ -75,25 +74,25 @@ public final class HumanMovementRecoveryGameTest implements FabricGameTest {
         context.assertTrue(body.snapshot().tissueStates().equals(before), "被拒运动仍扣组织疲劳");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void missingRequiredChannelPausesOnceAndReconnectPreservesBody(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void missingRequiredChannelPausesOnceAndReconnectPreservesBody(GameTestHelper context) {
         // 缺少必装 UI 接线是真实宿主故障，模拟客户端撤销通道触发正式 tick 的暂停路径。
         var fixture = new HumanTechniqueTestPlayer(context);
         damage(context, fixture, HealthTarget.newBuilder().setPartId(LOWER_LEG).build(), 1);
         var buffer = PacketByteBufs.create();
         buffer.writeBytes("meridian:body_view".getBytes(StandardCharsets.UTF_8));
         try {
-            var packet = new CustomPayloadC2SPacket(new Identifier("minecraft:unregister"), buffer);
-            fixture.player.networkHandler.onCustomPayload(packet);
+            var packet = new ServerboundCustomPayloadPacket(new ResourceLocation("minecraft:unregister"), buffer);
+            fixture.player.connection.handleCustomPayload(packet);
         } finally {
             buffer.release();
         }
-        context.waitAndRun(PAUSE_OBSERVATION_TICKS, () -> verifyPausedAndReconnect(context, fixture));
+        context.runAfterDelay(PAUSE_OBSERVATION_TICKS, () -> verifyPausedAndReconnect(context, fixture));
     }
 
-    private static void verifyPausedAndReconnect(TestContext context, HumanTechniqueTestPlayer fixture) {
+    private static void verifyPausedAndReconnect(GameTestHelper context, HumanTechniqueTestPlayer fixture) {
         // 暂停保持已认领身份，提示只有一次；同一 UUID 重登沿用已有损伤和资源。
-        UUID id = fixture.player.getUuid();
+        UUID id = fixture.player.getUUID();
         double damagedHp = partHp(fixture);
         double qi = fixture.body().snapshot().totalQi();
         try (fixture) {
@@ -102,8 +101,8 @@ public final class HumanMovementRecoveryGameTest implements FabricGameTest {
             context.assertTrue(technique(fixture).getFailure().getCode() == FailureCode.BODY_PAUSED,
                     "功法宿主没有明确返回暂停");
             long hints = fixture.connection.packets.stream()
-                    .filter(GameMessageS2CPacket.class::isInstance)
-                    .map(GameMessageS2CPacket.class::cast)
+                    .filter(ClientboundSystemChatPacket.class::isInstance)
+                    .map(ClientboundSystemChatPacket.class::cast)
                     .filter(packet -> packet.content().getString().contains("退出世界后重新加入"))
                     .count();
             context.assertTrue(hints == 1, "恢复提示未发送或每 tick 重复发送");
@@ -114,7 +113,7 @@ public final class HumanMovementRecoveryGameTest implements FabricGameTest {
             context.assertTrue(partHp(restored) == damagedHp, "恢复重置了既有损伤");
             context.assertTrue(restored.body().snapshot().totalQi() == qi, "恢复重置了真元");
         }
-        context.complete();
+        context.succeed();
     }
 
     private static double partHp(HumanTechniqueTestPlayer fixture) {
@@ -124,7 +123,7 @@ public final class HumanMovementRecoveryGameTest implements FabricGameTest {
                 .findFirst().orElseThrow().hp();
     }
 
-    private static void damage(TestContext context, HumanTechniqueTestPlayer fixture, HealthTarget hit, double hp) {
+    private static void damage(GameTestHelper context, HumanTechniqueTestPlayer fixture, HealthTarget hit, double hp) {
         // 可信健康协议提交精确损伤，CUSTOM 避免附加局部组织分配干扰最小复现。
         var body = inspect(fixture).getBody();
         var damage = DamageBody.newBuilder()
@@ -160,7 +159,7 @@ public final class HumanMovementRecoveryGameTest implements FabricGameTest {
         return HealthHostRequest.newBuilder()
                 .setProtocolVersion(1)
                 .setRequestId(id)
-                .setSubjectId(fixture.player.getUuidAsString());
+                .setSubjectId(fixture.player.getStringUUID());
     }
 
     private static HealthHostResponse exchange(HealthHostRequest request) {
@@ -173,7 +172,7 @@ public final class HumanMovementRecoveryGameTest implements FabricGameTest {
         // 独立功法宿主必须与健康宿主对同一玩家返回一致的暂停状态。
         var request = TechniqueHostRequest.newBuilder()
                 .setRequestId(UUID.randomUUID().toString())
-                .setEntityUuid(fixture.player.getUuidAsString())
+                .setEntityUuid(fixture.player.getStringUUID())
                 .setInspect(true /* inspect */)
                 .build();
         return TechniqueProtocol.decodeHostResponse(new HumanTechniqueHost().exchange(

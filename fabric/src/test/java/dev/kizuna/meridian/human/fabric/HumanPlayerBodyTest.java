@@ -27,6 +27,7 @@ import java.util.UUID;
 
 import static org.junit.Assert.*;
 
+
 /** 整体回归：Minecraft 运动编排走人体注册内容与框架权威命令链。 */
 public class HumanPlayerBodyTest {
     @Test

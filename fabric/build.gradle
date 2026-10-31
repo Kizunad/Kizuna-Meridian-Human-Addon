@@ -11,7 +11,7 @@ repositories {
 
 dependencies {
     minecraft libs.minecraft
-    mappings "net.fabricmc:yarn:${libs.versions.yarn.get()}:v2"
+    mappings loom.officialMojangMappings()
     modImplementation libs.fabric.loader
     modImplementation libs.fabric.api
     // 玩家动画、Damage、库存 UI 服务端、功法库与成长附属在 settings 中以源码组合，依赖处写替换坐标。
@@ -46,15 +46,6 @@ test { useJUnit() }
 processResources {
     inputs.property 'version', project.version
     filesMatching('fabric.mod.json') { expand version: project.version }
-}
-
-// Loom 只按坐标复用 modprocessing 里的嵌套 JAR，SNAPSHOT 坐标不变时会把旧 server/shared JAR 打进发布 JAR；
-// 每次打发布 JAR 前清掉该缓存，让 include 的 JAR 按当前产物重新生成。
-def clearNestedJarCache = tasks.register('clearNestedJarCache', Delete) {
-    delete layout.buildDirectory.dir('loom-cache/temp/modprocessing')
-}
-tasks.named('remapJar') {
-    dependsOn clearNestedJarCache
 }
 
 // 破门斩等高层附属只在运行时需要，由完整装配按清单读文件，避免本构建反过来组合高层仓库。

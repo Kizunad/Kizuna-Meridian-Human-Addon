@@ -33,7 +33,7 @@ Human 为可信服务端宿主提供位置查询、真元释放、交接回收�
 
 ## 写盘确认
 
-已核对 Minecraft 1.20.1 Yarn 实际字节码：`markDirty()` 只设标记；世界保存经 `ServerWorld.saveLevel` → `PersistentStateManager.save` 调用 `PersistentState.save(File)`。自动保存每 6000 tick（20 TPS 下约五分钟）执行，正常关服也保存；`savingDisabled` 跳过普通世界保存。原版直接覆盖文件，捕获异常后仍清 dirty，没有刷盘确认。
+已核对 Minecraft 1.20.1 实际字节码：`setDirty()` 只设标记；世界保存经 `ServerLevel.saveLevelData` → `DimensionDataStorage.save` 调用 `SavedData.save(File)`。自动保存每 6000 tick（20 TPS 下约五分钟）执行，正常关服也保存；`noSave` 跳过普通世界保存。原版直接覆盖文件，捕获异常后仍清 dirty，没有刷盘确认。
 
 两端覆写保存，保留原版 `data` 与 `DataVersion` 封装，依次执行：
 

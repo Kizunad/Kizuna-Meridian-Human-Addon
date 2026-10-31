@@ -13,7 +13,7 @@ import dev.kizuna.meridian.technique.server.TechniqueHost;
 import dev.kizuna.meridian.technique.server.TechniqueErrors;
 import dev.kizuna.meridian.technique.server.TechniqueProtocol;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,46 +51,46 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
         ready.clear();
     }
 
-    static void reconnect(ServerPlayerEntity player) {
+    static void reconnect(ServerPlayer player) {
         // 恢复残留施放后才对外认领；没有可靠效果游标时不补发离线效果。
         Binding current = binding;
-        HumanPlayerBody body = current.state().find(player.getUuid());
+        HumanPlayerBody body = current.state().find(player.getUUID());
         body.settle(nowMillis(current));
-        TechniqueFabric.service().recoverOnLoad(player.getUuid(), recovery(player, body));
-        ready.add(player.getUuid());
+        TechniqueFabric.service().recoverOnLoad(player.getUUID(), recovery(player, body));
+        ready.add(player.getUUID());
     }
 
-    static void beforeDeath(ServerPlayerEntity player) {
+    static void beforeDeath(ServerPlayer player) {
         // 外部死亡先尝试正常取消；身体已经致死时改由可信恢复入口清理进度。
-        TechniqueFabric.service().cancelOnUnload(player.getUuid());
+        TechniqueFabric.service().cancelOnUnload(player.getUUID());
         Binding current = binding;
-        HumanPlayerBody body = current.state().find(player.getUuid());
+        HumanPlayerBody body = current.state().find(player.getUUID());
         if (body != null) {
             body.settle(nowMillis(current));
-            TechniqueFabric.service().recoverOnLoad(player.getUuid(), recovery(player, body));
-            current.state().markDirty();
-            current.changed().accept(player.getUuid());
+            TechniqueFabric.service().recoverOnLoad(player.getUUID(), recovery(player, body));
+            current.state().setDirty();
+            current.changed().accept(player.getUUID());
         }
     }
 
-    static void recoverIfDead(ServerPlayerEntity player) {
+    static void recoverIfDead(ServerPlayer player) {
         // Framework 死亡已清空动作，附属施放进度需要通过可信入口单独结束。
         Binding current = binding;
-        HumanPlayerBody body = current.state().find(player.getUuid());
+        HumanPlayerBody body = current.state().find(player.getUUID());
         if (body != null && body.snapshot().vitality().dead()) {
             body.settle(nowMillis(current));
-            TechniqueFabric.service().recoverOnLoad(player.getUuid(), recovery(player, body));
+            TechniqueFabric.service().recoverOnLoad(player.getUUID(), recovery(player, body));
         }
     }
 
-    static HumanTechniqueRecovery recovery(ServerPlayerEntity player, HumanPlayerBody body) {
+    static HumanTechniqueRecovery recovery(ServerPlayer player, HumanPlayerBody body) {
         // 恢复持有实体上下文，认领前也可执行 STOP/UNLOCK，不经字节入口重路由。
         return new HumanTechniqueRecovery(player, body, effects);
     }
 
     private static long nowMillis(Binding current) {
         // 所有功法路径共用 Human 主世界累计 tick 时钟。
-        return Math.multiplyExact(current.server().getOverworld().getTime(), MILLIS_PER_TICK);
+        return Math.multiplyExact(current.server().overworld().getGameTime(), MILLIS_PER_TICK);
     }
 
     static void disconnect(UUID playerId) {
@@ -109,11 +109,11 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
         if (current == null) {
             return encode(response.setUnbound(true /* unbound */));
         }
-        if (!current.server().isOnThread()) {
+        if (!current.server().isSameThread()) {
             return failure(response, FailureCode.ACCESS_DENIED);
         }
         UUID playerId = UUID.fromString(request.getEntityUuid());
-        ServerPlayerEntity player = current.server().getPlayerManager().getPlayer(playerId);
+        ServerPlayer player = current.server().getPlayerList().getPlayer(playerId);
         if (player == null) {
             return encode(response.setUnbound(true /* unbound */));
         }
@@ -133,7 +133,7 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
         return execute(current, player, body, request);
     }
 
-    private byte[] execute(Binding current, ServerPlayerEntity player, HumanPlayerBody body,
+    private byte[] execute(Binding current, ServerPlayer player, HumanPlayerBody body,
                            TechniqueHostRequest request) {
         // 所有分支在服务端主线程串行执行，时间结算的变化也必须保存并投影。
         var response = TechniqueHostResponse.newBuilder()
@@ -163,8 +163,8 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
             LOG.error(HumanErrors.TECHNIQUE_HOST_FAILED, failure);
             return failure(response, FailureCode.INTERNAL_ERROR);
         } finally {
-            current.state().markDirty();
-            current.changed().accept(player.getUuid());
+            current.state().setDirty();
+            current.changed().accept(player.getUUID());
         }
     }
 
