@@ -11,7 +11,7 @@ Human 不携带具体功法目录，不复制协议或新增战斗 UI 频道。
 
 ## 可信区域环境服务
 
-服务端附属通过 Fabric entrypoint `meridian_environment_host` 获取服务对象，再反射调用公开的 `exchange(byte[])`，返回值为 `byte[]`。Human 内部绑定使用 `java.util.function.Function<byte[], byte[]>`；调用方不依赖 Human Java 接口。该服务不注册客户端网络频道，所有操作必须在服务器主线程调用。
+服务端附属按 Framework 的 `EnvironmentHostEntrypoint` 接口类型从 Fabric entrypoint `meridian_environment_host` 取出 `HumanEnvironmentHost`，直接调用 `exchange(byte[])`，返回值为 `byte[]`。Human 内部绑定使用 `java.util.function.Function<byte[], byte[]>`；调用方只依赖 Framework 接口，不依赖 Human Java 类。该服务不注册客户端网络频道，所有操作必须在服务器主线程调用。
 
 线协议由 `shared/src/main/proto/kizuna/meridian/human/environment_host.proto` 生成，Protobuf 包为 `kizuna.meridian.human.v1`，Java 包为 `dev.kizuna.meridian.human.protocol.pb`，外部类为 `EnvironmentHostMessages`。请求版本固定为 1，`request_id` 不得为空白，必须选择一项 operation；响应回显请求 ID。操作编号固定为 `query=10`、`release=11`、`clock=12`。`clock` 必须为 true，通过 `now` 返回当前世界 epoch 和主世界累计 tick 对应的模拟时间。`RegionQuery` 使用 `dimension_id=1` 和方块坐标 `block_x=2`、`block_z=3`；维度 ID 必须为完整规范 ID，且维度实际存在。
 

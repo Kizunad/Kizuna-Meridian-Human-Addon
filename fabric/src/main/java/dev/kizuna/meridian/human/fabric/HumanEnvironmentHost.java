@@ -5,10 +5,11 @@ import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.Environment
 import dev.kizuna.meridian.protocol.MeridianProtocol;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.RequestFailure;
+import dev.kizuna.meridian.server.EnvironmentHostEntrypoint;
 import java.util.function.Function;
 
-/** 可信附属通过反射调用 exchange，仅交换 Protobuf 字节。 */
-public final class HumanEnvironmentHost {
+/** 可信附属按 Framework 的 EnvironmentHostEntrypoint 接口调用 exchange，仅交换 Protobuf 字节。 */
+public final class HumanEnvironmentHost implements EnvironmentHostEntrypoint {
     private static volatile Function<byte[], byte[]> delegate;
 
     static void bind(Function<byte[], byte[]> host) {
@@ -16,6 +17,7 @@ public final class HumanEnvironmentHost {
         delegate = host;
     }
 
+    @Override
     public byte[] exchange(byte[] payload) {
         // 加载阶段先解码并校验请求，再明确返回尚未绑定世界。
         Function<byte[], byte[]> host = delegate;

@@ -4,7 +4,7 @@ Human 为可信服务端宿主提供位置查询、真元释放、交接回收�
 
 ## 发现与协议
 
-从 Fabric entrypoint `meridian_environment_host` 获取对象，调用公开方法 `byte[] exchange(byte[])`。只允许服务器主线程调用，不提供客户端网络频道，调用方不依赖 Human 私有 Java 实现。
+按 Framework 的接口类型 `dev.kizuna.meridian.server.EnvironmentHostEntrypoint` 从 Fabric entrypoint `meridian_environment_host` 取出入口，直接调用 `byte[] exchange(byte[])`，不反射查方法。只允许服务器主线程调用，不提供客户端网络频道，调用方不依赖 Human 私有 Java 实现。
 
 协议源为 `shared/src/main/proto/kizuna/meridian/human/environment_host.proto`，包名 `kizuna.meridian.human.v1`，Java 外部类 `EnvironmentHostMessages`。库存、时钟和失败码引用 Framework Protobuf。`protocol_version=1`，非空白的 `request_id` 用于关联响应。
 
