@@ -61,8 +61,8 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 叩门、破门、撞门使用 `door_breaker_knock/cleave/ram`，起手选定副手时使用对应 `_off`；
 左右惯用手由 PA 运行时镜像，不由宿主重复换片段。其余五式暂用对应主副手 `attack_main/off`。
 玩家通过 `ServerPlayerAnimations.playFrom` 保留起播时刻，类人通过 Mobs-Addon 同步相同映射。
-片段不决定打击结算；三式目录打击与动画 `hit` 同为 1700、3200、2400 毫秒（34、64、48 tick）。
-撞门冲量在 1550、1800、2050 毫秒，位于动画 1550–2250 毫秒的迈步窗口，后两次与落脚同刻。
+片段不决定打击结算；三式目录打击与动画 `hit` 同为 1250、1600、1650 毫秒（25、32、33 tick）。
+撞门冲量在 800、1050、1300 毫秒，位于动画 800–1500 毫秒的迈步窗口，后两次与落脚同刻。
 承接或迟到时保留原始起点和剪辑偏移，不能从第零帧重播。
 
 `LOCK/UNLOCK` 按施放 ID 派生固定 UUID，只修改原版 `MOVEMENT_SPEED` 的临时属性修正，

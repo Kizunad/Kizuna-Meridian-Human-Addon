@@ -45,22 +45,22 @@ import static dev.kizuna.meridian.human.fabric.HumanGameTestTicks.DEFAULT_TIMEOU
 /** 从学习、绑定、费用到玩家世界效果的真实服务链。 */
 public final class HumanCombatServiceGameTest {
     private static final long MILLIS_PER_TICK = 50;
-    private static final int KNOCK_HIT_TICKS = 34;
-    private static final int KNOCK_END_TICKS = 60;
-    private static final int KNOCK_FOLLOW_TICKS = 50;
-    private static final int CLEAVE_FOLLOW_TICKS = 94;
-    private static final int ALL_TIMELINES_TICKS = 163;
-    private static final int FOLLOW_CLIP_MILLIS = 400;
-    private static final int FINALE_CLIP_MILLIS = 1500;
+    private static final int KNOCK_HIT_TICKS = 25;
+    private static final int KNOCK_END_TICKS = 51;
+    private static final int KNOCK_FOLLOW_TICKS = 41;
+    private static final int CLEAVE_FOLLOW_TICKS = 62;
+    private static final int ALL_TIMELINES_TICKS = 148;
+    private static final int FOLLOW_CLIP_MILLIS = 200;
+    private static final int FINALE_CLIP_MILLIS = 600;
     private static final int FINALE_EXHAUSTION_TICKS = 130;
     private static final int FINALE_RESTORED_TICKS = 280;
     private static final int ISOLATION_DISTANCE = 12;
     private static final double HEALTHY_TARGET_HP = 1000;
     private static final double EXHAUSTED_MULTIPLIER = 0.6;
     private static final double PEAK_MULTIPLIER = 1.4;
-    // 万门一斩承接从目录 1500 ms 起播：前荡轻击 2300 ms、落地重劈 4850 ms。
-    private static final int FINALE_LIGHT_HIT_AFTER_FOLLOW_TICKS = 16;
-    private static final int FINALE_HIT_AFTER_FOLLOW_TICKS = 67;
+    // 万门一斩承接从目录 600 ms 起播：前荡轻击 1200 ms、落地重劈 2900 ms。
+    private static final int FINALE_LIGHT_HIT_AFTER_FOLLOW_TICKS = 12;
+    private static final int FINALE_HIT_AFTER_FOLLOW_TICKS = 46;
     private static final int SHORT_TEST_TIMEOUT = 100;
     private static final int TIMELINE_TEST_TIMEOUT = 220;
     private static final int EXHAUSTION_TEST_TIMEOUT = 450;
