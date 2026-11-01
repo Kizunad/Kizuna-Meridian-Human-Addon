@@ -3,9 +3,11 @@ package dev.kizuna.meridian.human.fabric;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
 import dev.kizuna.meridian.technique.server.TechniqueHost;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.event.Event;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.players.NameAndId;
@@ -27,12 +29,17 @@ public final class HumanSpawnProtectionTest implements ModInitializer {
     private static final int TEST_HEIGHT = 64;
     private static final int DOOR_DISTANCE = 2;
     private static final double BLOCK_CENTER = 0.5;
+    private static final Identifier AFTER_HUMAN =
+            Identifier.fromNamespaceAndPath("meridian_human_test", "after_human");
 
     @Override
     public void onInitialize() {
         // 仅显式测试运行注册回调，常规 GameTest 不执行专用服务端任务。
         if (Boolean.getBoolean("meridian.human.spawnProtectionTest")) {
-            ServerLifecycleEvents.SERVER_STARTED.register(HumanSpawnProtectionTest::run);
+            // Human 在默认阶段读取人体存档并绑定宿主；测试排在其后，假玩家登录时身体状态已就绪，
+            // 不会因为先登录而被当成存档损坏暂停。
+            ServerLifecycleEvents.SERVER_STARTED.addPhaseOrdering(Event.DEFAULT_PHASE, AFTER_HUMAN);
+            ServerLifecycleEvents.SERVER_STARTED.register(AFTER_HUMAN, HumanSpawnProtectionTest::run);
         }
     }
 

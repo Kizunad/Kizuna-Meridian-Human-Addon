@@ -112,7 +112,10 @@ tasks.named('runGametest') {
 
 tasks.named('runSpawnProtection') {
     doFirst {
+        // 每局新建世界，人体存档与假玩家不跨运行累积。
+        // 平坦世界必须写明地层：默认的空 generator-settings 解析失败，会在日志里留 DFU 错误再退回预设。
         def runDirectory = file('build/spawn-protection')
+        new File(runDirectory, 'world').deleteDir()
         runDirectory.mkdirs()
         new File(runDirectory, 'eula.txt').text = 'eula=true\n'
         new File(runDirectory, 'server.properties').text = '''online-mode=false
@@ -120,6 +123,7 @@ server-ip=127.0.0.1
 server-port=0
 spawn-protection=16
 level-type=minecraft:flat
+generator-settings={"layers":[{"block":"minecraft:bedrock","height":1},{"block":"minecraft:dirt","height":2},{"block":"minecraft:grass_block","height":1}],"biome":"minecraft:plains"}
 generate-structures=false
 view-distance=2
 simulation-distance=2
