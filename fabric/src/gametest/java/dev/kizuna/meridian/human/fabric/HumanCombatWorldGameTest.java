@@ -251,6 +251,39 @@ public final class HumanCombatWorldGameTest {
         shield(context, Items.DIRT, 0);
     }
 
+    @GameTest(environment = "meridian_human_test:allied_players", maxTicks = DEFAULT_TIMEOUT)
+    public void sameTeamPlayerIsNotStruckUntilTeamsSplit(GameTestHelper context) {
+        // 敌我由 Human 玩家谓词决定：同队玩家不受功法伤害，分队后同一式照常命中。
+        // 原版队伍默认允许友伤，所以第一击打不中只能来自宿主谓词。
+        var attacker = new HumanCombatFixture(context);
+        var defender = new HumanTechniqueTestPlayer(context);
+        var server = context.getLevel().getServer();
+        boolean originalPvp = server.getGameRules().get(GameRules.PVP);
+        server.getGameRules().set(GameRules.PVP, true, server);
+        var scoreboard = server.getScoreboard();
+        var team = scoreboard.addPlayerTeam("allies_" + attacker.human.player.getStringUUID());
+        scoreboard.addPlayerToTeam(attacker.human.player.getScoreboardName(), team);
+        scoreboard.addPlayerToTeam(defender.player.getScoreboardName(), team);
+        attacker.hold(Items.IRON_AXE, Items.AIR);
+        Vec3 pos = attacker.human.player.position().add(0, 0, HumanCombatFixture.TARGET_DISTANCE);
+        defender.player.snapTo(pos.x, pos.y, pos.z, FACING_ATTACKER_YAW, 0);
+        defender.player.setGameMode(GameType.SURVIVAL);
+        context.runAfterDelay(JOIN_INVULNERABILITY_TICKS + 1, () -> {
+            try (attacker; defender) {
+                float before = defender.player.getHealth();
+                attacker.submit(HumanCombatFixture.strike("hook", 0, "allied"));
+                near(context, defender.player.getHealth(), before, "同队玩家被功法打中");
+                scoreboard.removePlayerFromTeam(defender.player.getScoreboardName(), team);
+                attacker.submit(HumanCombatFixture.strike("hook", 0, "split"));
+                context.assertTrue(defender.player.getHealth() < before, "分队后功法没有命中");
+                context.succeed();
+            } finally {
+                scoreboard.removePlayerTeam(team);
+                server.getGameRules().set(GameRules.PVP, originalPvp, server);
+            }
+        });
+    }
+
     private static void shield(GameTestHelper context, Item item, int cooldownTicks) {
         // 等待原版举盾生效，再通过真实 Human 宿主执行一次破盾式。
         var attacker = new HumanCombatFixture(context);

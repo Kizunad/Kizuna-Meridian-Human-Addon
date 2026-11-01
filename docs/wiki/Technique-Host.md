@@ -131,6 +131,8 @@ Framework 尚无复活规则，原版重生不会创建新身体或恢复 HP；�
 
 `HumanCombatWorldGameTest` 使用发布目录的武器与劈门算子，通过正式 Human 宿主协议执行，
 检查真实伤害、物品磨损、原版盾冷却、门掉落与玩家总开关。
+敌我只由宿主谓词判断（功法框架不预筛）：玩家不打原版同伴，即 `isAlliedTo` 为真的同队玩家与自己驯服的动物；
+同队时即使队伍开着友伤（原版默认）也不命中，`/team` 分开后照常命中。
 `HumanCombatServiceGameTest` 通过正式学习和施放服务检查选手、费用、八式效果时刻、承接、移动限速及攻击包拦截。
 `HumanCombatTestCatalog` 从运行时破门斩资源派生测试目录，只降低出生身体的境界、经脉数量和费用门槛；
 效果时刻、曲线、物品规则、倍率、承接与冷却保持正式定义，费用与做功仍由唯一权威身体结算。
@@ -149,6 +151,7 @@ Framework 尚无复活规则，原版重生不会创建新身体或恢复 HP；�
 | 双手剂量与两臂做功、副手只用对应手臂 | `twoHandDoseAndOffhandDamageChargeCorrectArms` |
 | 起手后换物、选定手为空落空且不退费 | `switchingSelectedHandItemChangesHitAndEmptyHandMissStillPays` |
 | 斧先破盾、剑先格挡再冷却、方块不破盾 | `axeBreaksShieldBeforeDamage` / `swordBlocksThenCoolsShield` / `blockItemDoesNotDisableShield` |
+| 同队玩家不受功法伤害，移出队伍后同一式命中 | `sameTeamPlayerIsNotStruckUntilTeamsSplit` |
 | 横扫两半圈、同组去重与五目标预算 | `sweepHitsBothHalvesOnceAndSharesFiveTargetBudget` |
 | 木门/活板门/栅栏门掉落、铁门/非工具拒绝 | `woodenDoorsDropAndIronAndNonToolsRefuse` |
 | 副手斧劈门、不交换物品、不额外磨损 | `offhandAxeBreaksDoorWithoutMovingItemsOrExtraWear` |

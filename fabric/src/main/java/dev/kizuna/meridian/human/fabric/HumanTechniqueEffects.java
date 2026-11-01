@@ -157,10 +157,11 @@ final class HumanTechniqueEffects {
 
     private TechniqueWorldEffects world(ServerPlayer player) {
         // 世界工具调用 Damage 的一次出手上下文，横扫多目标共享做功前系数。
+        // 框架不预筛敌我；玩家不打原版同伴（同队、自己驯服的动物），/team 分开后照常可打。
         return worldEffects.computeIfAbsent(player.getUUID(), id -> new TechniqueWorldEffects(player,
                 () -> player.level().getGameRules().get(PLAYER_BREAK_BLOCKS)
                         ? TechniqueWorldEffects.Policy.PLAYER : TechniqueWorldEffects.Policy.PLAYER_NO_BREAK,
-                target -> true,
+                target -> !player.isAlliedTo(target),
                 (actor, source, strike) -> {
                     try (var ignored = VanillaStrikeContext.attack(actor, source)) {
                         strike.run();
