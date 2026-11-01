@@ -100,6 +100,13 @@ public final class HumanFabric implements ModInitializer {
             }
             return net.minecraft.world.InteractionResult.PASS;
         });
+        // 右键与左键在同处拦：用物品、放方块或与方块交互、与实体交互；目录声明放行右键的式（如服药）不拦。
+        net.fabricmc.fabric.api.event.player.UseItemCallback.EVENT.register((player, world, hand) ->
+                useWhileCasting(player));
+        net.fabricmc.fabric.api.event.player.UseBlockCallback.EVENT.register((player, world, hand, hit) ->
+                useWhileCasting(player));
+        net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.register((player, world, hand, entity, hit) ->
+                useWhileCasting(player));
         HumanHealthHost.bind(this::health);
         HumanDebugHost.bind(this::debugQi);
         HumanEnvironmentHost.bind(this::environment);
@@ -307,6 +314,15 @@ public final class HumanFabric implements ModInitializer {
                     state.setDirty();
                     state.find(player.getUUID()).publishGathering();
                 });
+    }
+
+    private static net.minecraft.world.InteractionResult useWhileCasting(
+            net.minecraft.world.entity.player.Player player) {
+        // FAIL 让原版不再处理这次右键；放方块被拦时原版随后补发方块更新，客户端预测的方块会被纠正。
+        if (HumanTechniqueHost.blocksUse(player.getUUID())) {
+            return net.minecraft.world.InteractionResult.FAIL;
+        }
+        return net.minecraft.world.InteractionResult.PASS;
     }
 
     private void join(ServerPlayer player, MinecraftServer server) {

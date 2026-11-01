@@ -25,10 +25,8 @@ import net.minecraft.world.level.gamerules.GameRuleCategory;
 import net.minecraft.world.phys.Vec3;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 /** 正常施放与未认领恢复共用的实体效果执行器，回执只在当前服务器连接内有效。 */
@@ -39,7 +37,8 @@ final class HumanTechniqueEffects {
             .category(GameRuleCategory.PLAYER)
             .buildAndRegister(Identifier.fromNamespaceAndPath("meridian_human", "technique_player_break_blocks"));
     private final Map<UUID, TechniqueWorldEffects> worldEffects = new HashMap<>();
-    private final Map<UUID, Set<String>> castingIds = new HashMap<>();
+    // 每个玩家正在施放的 cast ID 及该式是否放行右键。
+    private final Map<UUID, Map<String, Boolean>> castingIds = new HashMap<>();
     private final Map<UUID, Map<String, EffectIntent>> requests = new HashMap<>();
     private final Map<UUID, Map<EffectKey, EffectIntent>> effects = new HashMap<>();
     private final Map<UUID, Map<String, EffectIntent>> executingRequests = new HashMap<>();
@@ -138,13 +137,20 @@ final class HumanTechniqueEffects {
         return castingIds.containsKey(playerId);
     }
 
+    boolean blocksUse(UUID playerId) {
+        // 同一玩家登记了多个施放时，任一式没声明放行右键就拦。
+        Map<String, Boolean> casts = castingIds.get(playerId);
+        return casts != null && casts.containsValue(false);
+    }
+
     private void updateCasting(ServerPlayer player, EffectIntent effect) {
         // 承接先结束旧式再开始新式，施放状态按稳定身份独立维护。
         UUID playerId = player.getUUID();
         if (effect.getMovement().getAction() == MovementAction.LOCK) {
-            castingIds.computeIfAbsent(playerId, id -> new HashSet<>()).add(effect.getCastId());
+            castingIds.computeIfAbsent(playerId, id -> new HashMap<>())
+                    .put(effect.getCastId(), effect.getMovement().getAllowUseWhileCasting());
         } else {
-            Set<String> casts = castingIds.get(playerId);
+            Map<String, Boolean> casts = castingIds.get(playerId);
             if (casts != null) {
                 casts.remove(effect.getCastId());
                 if (casts.isEmpty()) {

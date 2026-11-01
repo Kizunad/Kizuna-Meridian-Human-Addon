@@ -34,6 +34,7 @@ public final class HumanTechniqueTestCatalog implements TechniqueRegistryEntrypo
     static final String TECHNIQUE_ID = "human_test:breath_step";
     static final String LOCKED_TECHNIQUE_ID = "human_test:locked_step";
     static final String TARGETED_TECHNIQUE_ID = "human_test:targeted_step";
+    static final String USE_TECHNIQUE_ID = "human_test:use_step";
     static final long PRESENTATION_START_MILLIS = 400;
     static final long WARMUP_MILLIS = 100;
     static final long ACTIVE_MILLIS = 100;
@@ -57,6 +58,7 @@ public final class HumanTechniqueTestCatalog implements TechniqueRegistryEntrypo
                 .addDefinitions(definition())
                 .addDefinitions(lockedDefinition())
                 .addDefinitions(targetedDefinition())
+                .addDefinitions(useDefinition())
                 .build();
         return TechniqueRegistry.load(addons(), List.of(catalog));
     }
@@ -190,6 +192,14 @@ public final class HumanTechniqueTestCatalog implements TechniqueRegistryEntrypo
                 .build();
         TechniqueEffect effect = locked.getEffects(1).toBuilder().setImpulse(impulse).build();
         return locked.toBuilder().setId(TARGETED_TECHNIQUE_ID).setEffects(1, effect).build();
+    }
+
+    private static TechniqueDefinition useDefinition() {
+        // 与锁定式只差右键放行，用来对照施放中右键拦与不拦。
+        return lockedDefinition().toBuilder()
+                .setId(USE_TECHNIQUE_ID)
+                .setAllowUseWhileCasting(true)
+                .build();
     }
 
     private static TechniqueEffect movement() {

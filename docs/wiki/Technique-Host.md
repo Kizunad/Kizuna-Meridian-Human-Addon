@@ -73,6 +73,11 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 受击僵直不由本宿主判定：原版伤害附属在命中提交后写入功法库，功法库给实体另加一份固定 UUID 的
 `MULTIPLY_TOTAL` 僵直减速（默认 ×0.5），与施放限速相乘，到期移除；僵直中新起式回执「僵直中」。
 
+`LOCK` 到 `UNLOCK` 之间玩家处于施放中，`HumanFabric` 在同一处拦原版输入：左键攻击实体、攻击方块一律拦，
+挥手包由 `TechniqueHandSwingMixin` 拦；右键（用物品、放方块或与方块交互、与实体交互）在 LOCK 的
+`allow_use_while_casting=false` 时拦，目录声明 true 的式（如服药）放行。只有倍率小于 1、会下发 LOCK 的式进入施放中，
+基础功法吐纳、轻身、蓄力倍率为 1，左右键都不拦。
+
 `status_benefit` 交给功法库的共享原版状态执行器。轻身的每次跃步仍经本宿主提交 Framework 做功活动，
 绑定六块腿肌、不设力量门槛；按当前有效功率与耐力检查预算，不另建体力或真元账本。
 起跳与落地通过既有 PA 映射播放和停止，
@@ -120,6 +125,8 @@ Framework 尚无复活规则，原版重生不会创建新身体或恢复 HP；�
 `startCallbackCancelsAfterDeliveryWithoutRecursion` 覆盖 START 回调取消后的唯一 STOP 和限速清理；
 `synchronousResubmissionDistinguishesExecutingFromSucceeded` 覆盖同步重提交、两种身份内容冲突及失败后的重试；
 `disappearedTargetCancelsAndUnlocksRealPlayer` 覆盖目标销毁后取消与实体约束清理。
+`castingBlocksUseInputUnlessTechniqueAllowsIt` 让两名玩家分别施放只差放行声明的两式，各自用盾、开活板门、剪羊：
+未声明的三样都被拦，声明放行的三样都生效。
 旧身体回归在服务器启动读档前，将专用玩家的无标签身体写入真实 `meridian_human.dat`，
 由正式宿主加载后真实登录，核对标签及保存重载；再走正式学习命令与功法服务，
 施放同时绑定手经和足经的测试功法。夹具保留世界中其他玩家与区域数据。

@@ -31,18 +31,26 @@ import dev.kizuna.meridian.technique.server.TechniqueScheduler;
 import dev.kizuna.meridian.technique.server.TechniqueService;
 import dev.kizuna.meridian.technique.server.TechniqueState;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket;
+import net.minecraft.network.protocol.game.ServerboundInteractPacket;
+import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.animal.sheep.Sheep;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ItemStackTemplate;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.BundleContents;
 import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.TrapDoorBlock;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -65,6 +73,8 @@ public final class HumanTechnique6aGameTest {
     private static final double TARGET_HEIGHT_DIFFERENCE = 4;
     private static final double TARGET_HORIZONTAL_DISTANCE = 3;
     private static final String CAST_ID = "locked_cast";
+    private static final int BLOCKED_LANE = 1;
+    private static final int ALLOWED_LANE = 3;
     private static final Map<UUID, Presentations> observations = new HashMap<>();
 
     static {
@@ -335,6 +345,25 @@ public final class HumanTechnique6aGameTest {
             context.assertTrue(observer.events.size() == 2, "失败后没有重新执行");
             context.assertTrue(exchange(fixture, "reentrant", effect).getEffectAccepted(), "成功回执未复用");
             context.assertTrue(observer.events.size() == 2, "已成功效果重复执行");
+        }
+        context.succeed();
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void castingBlocksUseInputUnlessTechniqueAllowsIt(GameTestHelper context) {
+        // 两式只差右键放行声明：锁定式施放中用物品、与方块交互、与实体交互都被拦，放行式三样照常生效，
+        // 后者同时证明这套场地和输入本身能生效，前者的空结果不是摆错了位置。
+        try (var blocked = prepared(context, HumanTechniqueTestCatalog.LOCKED_TECHNIQUE_ID);
+             var allowed = prepared(context, HumanTechniqueTestCatalog.USE_TECHNIQUE_ID)) {
+            var blockedProbe = UseProbe.place(context, blocked, BLOCKED_LANE);
+            var allowedProbe = UseProbe.place(context, allowed, ALLOWED_LANE);
+            start(context, blocked, HumanTechniqueTestCatalog.LOCKED_TECHNIQUE_ID, "");
+            start(context, allowed, HumanTechniqueTestCatalog.USE_TECHNIQUE_ID, "");
+            context.assertTrue(HumanTechniqueHost.isCasting(allowed.player.getUUID()), "放行式没有进入施放锁");
+            List<String> blockedUses = blockedProbe.use();
+            List<String> allowedUses = allowedProbe.use();
+            context.assertTrue(blockedUses.isEmpty(), "施放中右键没被拦：" + blockedUses);
+            context.assertTrue(allowedUses.equals(UseProbe.ALL), "声明放行的式右键被拦：" + allowedUses);
         }
         context.succeed();
     }
@@ -623,6 +652,49 @@ public final class HumanTechnique6aGameTest {
     }
 
     private record Observed(EffectIntent effect, BodySnapshot body) { }
+
+    private record UseProbe(HumanTechniqueTestPlayer fixture, BlockPos door, Sheep sheep) {
+        static final List<String> ALL = List.of("物品", "方块", "实体");
+
+        static UseProbe place(GameTestHelper context, HumanTechniqueTestPlayer fixture, int lane) {
+            // 玩家站在本道起点，正前方是活板门，再往前是羊；主手剪刀、副手盾，三种右键各有可观察的结果。
+            // 羊不跑不落，放到右键时仍在原位。
+            Vec3 standing = context.absoluteVec(new Vec3(lane + 0.5, 2, 0.5));
+            fixture.player.snapTo(standing.x, standing.y, standing.z, 0, 0);
+            fixture.player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.SHEARS));
+            fixture.player.setItemInHand(InteractionHand.OFF_HAND, new ItemStack(Items.SHIELD));
+            context.setBlock(lane, 2, 1, Blocks.OAK_TRAPDOOR);
+            Sheep sheep = context.spawn(EntityTypes.SHEEP, lane + 0.5F, 2, 3.5F);
+            sheep.setNoAi(true);
+            sheep.setNoGravity(true);
+            return new UseProbe(fixture, context.absolutePos(new BlockPos(lane, 2, 1)), sheep);
+        }
+
+        List<String> use() {
+            // 物品与实体走原版服务端包入口。方块直接调 gameMode.useItemOn：测试玩家没回执进服传送，
+            // 原版方块包在等待位置确认时不处理；Fabric 的右键方块回调就挂在 useItemOn 开头，照样经过。
+            var player = fixture.player;
+            var used = new ArrayList<String>();
+            player.connection.handleUseItem(new ServerboundUseItemPacket(InteractionHand.OFF_HAND, 0,
+                    player.getYRot(), player.getXRot()));
+            if (player.isUsingItem()) {
+                used.add("物品");
+                player.stopUsingItem();
+            }
+            var hit = new BlockHitResult(Vec3.atCenterOf(door), Direction.UP, door, false /* inside */);
+            player.gameMode.useItemOn(player, player.level(), player.getMainHandItem(), InteractionHand.MAIN_HAND,
+                    hit);
+            if (player.level().getBlockState(door).getValue(TrapDoorBlock.OPEN)) {
+                used.add("方块");
+            }
+            player.connection.handleInteract(new ServerboundInteractPacket(sheep.getId(), InteractionHand.MAIN_HAND,
+                    Vec3.ZERO, false /* usingSecondaryAction */));
+            if (sheep.isSheared()) {
+                used.add("实体");
+            }
+            return used;
+        }
+    }
 
     private static final class Presentations implements AutoCloseable {
         private final HumanTechniqueTestPlayer fixture;

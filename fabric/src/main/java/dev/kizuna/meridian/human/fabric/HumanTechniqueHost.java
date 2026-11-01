@@ -36,6 +36,11 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
         return effects.isCasting(playerId);
     }
 
+    public static boolean blocksUse(UUID playerId) {
+        // 原版右键入口同样只查询实体效果锁；目录声明放行右键的式不拦。
+        return effects.blocksUse(playerId);
+    }
+
     static void bind(MinecraftServer server, HumanWorldState state, Predicate<UUID> failed,
                      Consumer<UUID> changed) {
         // 每个服务器绑定自己的世界与通知入口，不跨服务器保留实体效果回执。
