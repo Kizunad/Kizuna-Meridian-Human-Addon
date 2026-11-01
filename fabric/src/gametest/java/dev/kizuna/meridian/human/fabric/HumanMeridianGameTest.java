@@ -12,6 +12,7 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.GameType;
 import java.util.List;
 
@@ -84,8 +85,16 @@ public final class HumanMeridianGameTest {
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void defaultReleasedAccountReturnsWithoutCreatingQi(GameTestHelper context) {
+        // 测试玩家带 PA 通道并在结束时断线：没有通道的假玩家若留在玩家列表，
+        // PA 握手期满后的动画广播会抛错，拖垮之后批次的 GameTest 服务端。
+        try (var fixture = new HumanTechniqueTestPlayer(context)) {
+            verifyDefaultRelease(context, fixture.player);
+        }
+        context.succeed();
+    }
+
+    private static void verifyDefaultRelease(GameTestHelper context, ServerPlayer player) {
         // 真实玩家死亡先进入默认账户和位置队列，重启后在续窗从原账户扣转。
-        var player = context.makeMockServerPlayerInLevel();
         long now = player.level().getServer().overworld().getGameTime() * 50;
         var state = new HumanWorldState();
         var body = state.join(player, now);
@@ -127,7 +136,6 @@ public final class HumanMeridianGameTest {
         reloaded.renewEnvironment(boundary * 2);
         context.assertTrue(Math.abs(BodyProtobuf.fromInventory(reloaded.query(context.getLevel(), position.getX(), position.getZ(), boundary * 2)
                 .getInventory()).totalQi() - afterTotal) < 1e-7, "默认余额恢复后重复归位");
-        context.succeed();
     }
 
     private static double defaultReleased(CompoundTag saved) {
