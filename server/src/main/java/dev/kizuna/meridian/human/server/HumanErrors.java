@@ -44,6 +44,7 @@ public final class HumanErrors {
     public static final String STATUS_VIEW_REQUIRED = "身体状态视图不能为空";
     public static final String STATUS_DETAIL_DUPLICATE = "/meridian body status full 已由其他附属登记";
     public static final String HOST_FAILED = "人体宿主结算失败，已暂停该身体";
+    public static final String HOST_REJECTED = "人体宿主拒绝请求";
     public static final String HOST_RECOVERY = HOST_FAILED + "。请退出世界后重新加入以重新认领；身体数据不会重置。"
             + "若仍失败，请保留日志联系服主。";
     public static final String INVALID_GATHERING_RESPONSE = "吐纳核心返回了无法解码的响应";
@@ -64,7 +65,7 @@ public final class HumanErrors {
 
         private HostRejected(FailureCode code) {
             // 协议拒绝保存为结构化值，不从运行时文案反解析失败码。
-            super(HOST_FAILED + ": " + code);
+            super(hostRejectedMessage(code));
             this.code = code;
         }
 
@@ -72,6 +73,19 @@ public final class HumanErrors {
             // 返回原始框架失败码，让宿主直接编码业务拒绝。
             return code;
         }
+    }
+
+    private static String hostRejectedMessage(FailureCode code) {
+        // 拒绝本身不暂停身体，文案只说原因和失败码；真正暂停身体时由宿主另记 HOST_FAILED。
+        String reason = switch (code) {
+            case INSUFFICIENT_QI -> "真元余额不足";
+            case NUMERIC_LIMIT -> "真元数量超出可精确结算的范围";
+            case INVALID_REQUEST -> "请求无效";
+            case REQUEST_ID_CONFLICT -> "请求号与已受理的内容冲突";
+            case ENVIRONMENT_UNAVAILABLE -> "区域环境暂不可用";
+            default -> "请求未执行";
+        };
+        return HOST_REJECTED + "：" + reason + "（" + code + "）";
     }
 
     public static String openingRejected(FailureCode code) {

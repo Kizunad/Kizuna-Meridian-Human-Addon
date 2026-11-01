@@ -61,7 +61,7 @@ final class ReleasedQiAllocation {
             }
             double amount;
             if (allocation == Allocation.EXHAUST && index == sorted.size() - 1) {
-                amount = Math.max(QiAccounting.MIN_TRANSFER_QI, available.amount() - allocated);
+                amount = Math.max(QiAccounting.MIN_TRANSFER_QI, exhaustingShare(available.amount(), allocated));
             } else {
                 amount = claim.qi().amount();
             }
@@ -70,11 +70,22 @@ final class ReleasedQiAllocation {
             planned.add(new Claim(claim.sourceId(), selected.entries().get(0)));
             allocated += amount;
         }
-        if (allocation == Allocation.EXHAUST && allocated != available.amount()) {
-            throw HumanErrors.hostRejected(FailureCode.NUMERIC_LIMIT);
-        }
         validateBatch(available, planned);
         return List.copyOf(planned);
+    }
+
+    private static double exhaustingShare(double account, double allocated) {
+        // 末笔先取差额；double 下「已分配 + (账户 − 已分配)」可能比账户多或少 1 ULP，按 ULP 微调到
+        // 按 Framework 合并顺序（逐笔从小到大相加）复算正好等于账户。差额两侧都凑不到账户时，
+        // 取合并后不超过账户的最大值，尘埃留在共享账户，等后续释放合并后再扫空。
+        double share = account - allocated;
+        while (allocated + share > account) {
+            share = Math.nextDown(share);
+        }
+        while (allocated + share < account && allocated + Math.nextUp(share) <= account) {
+            share = Math.nextUp(share);
+        }
+        return share;
     }
 
     private static void validateBatch(Qi available, List<Claim> planned) {

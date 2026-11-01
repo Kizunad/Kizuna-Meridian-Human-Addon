@@ -3,9 +3,13 @@ package dev.kizuna.meridian.human.fabric;
 import dev.kizuna.meridian.core.Qi;
 import dev.kizuna.meridian.core.QiAccounting;
 import dev.kizuna.meridian.core.QiInventory;
+import dev.kizuna.meridian.human.server.HumanErrors;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import org.junit.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Random;
 
 import static org.junit.Assert.*;
 
@@ -22,6 +26,18 @@ public final class ReleasedQiAllocationTest {
     private static final double CAST_FIRST_SHARE = 0.001;
     private static final double CAST_MIDDLE_SHARE = 0.007;
     private static final double CAST_LAST_SHARE = 0.0010000000000000009;
+    private static final double PLAYTEST_ACCOUNT = 3.72;
+    private static final double PLAYTEST_SMALL = 1.61;
+    private static final double PLAYTEST_LARGE = 2.11;
+    private static final double PROBE_ACCOUNT = 1.6500000000000001;
+    private static final double PROBE_SMALL = 0.35;
+    private static final double PROBE_LARGE = 1.3;
+    private static final long SIMULATION_SEED = 20261102L;
+    private static final int SIMULATION_TICKS = 100_000;
+    private static final int WINDOW_TICKS = 600;
+    private static final int REGIONS = 3;
+    private static final double RELEASE_MIN = 0.001;
+    private static final double RELEASE_SPAN = 2;
 
     @Test
     public void lastShareUsesActualRemainderAndStrictLedgerDrainsExactly() {
@@ -42,6 +58,37 @@ public final class ReleasedQiAllocationTest {
         var plan = ReleasedQiAllocation.plan(account, claims);
         assertEquals(claims.size(), plan.size());
         assertTrue(execute(account, plan).entries().isEmpty());
+    }
+
+    @Test
+    public void exhaustingLastShareFromPlaytestStaysExecutable() {
+        // 试玩反例：末笔取「账户 − 已分配」后按合并顺序复算会多 1 ULP，旧实现直接抛 NUMERIC_LIMIT。
+        // 末笔按 ULP 下调到合并后不超过账户，小额照原数转，剩下不超过 1 ULP 的尘埃留在账户。
+        assertDrainsWithinUlp(PLAYTEST_ACCOUNT, PLAYTEST_SMALL, PLAYTEST_LARGE);
+        assertDrainsWithinUlp(PROBE_ACCOUNT, PROBE_SMALL, PROBE_LARGE);
+    }
+
+    @Test
+    public void randomReleasesAcrossRegionsAlwaysPlanAndDrainEachWindow() {
+        // 每 tick 一笔释放随机落到三个区域之一，账户与区域意图都按宿主的逐笔 double 加法累计。
+        // 宿主每 tick 都重算计划，所以每 tick 都必须出得了计划；窗口末整批经 Framework 规则扣转，只剩 ULP 级尘埃。
+        var random = new Random(SIMULATION_SEED);
+        double account = 0;
+        var intents = new LinkedHashMap<String, Double>();
+        for (int tick = 0; tick < SIMULATION_TICKS; tick++) {
+            double before = account;
+            account += RELEASE_MIN + random.nextDouble() * RELEASE_SPAN;
+            // 宿主按共享账户前后差额记释放，再并入释放时所在区域的意图。
+            intents.merge("region-" + random.nextInt(REGIONS), account - before, Double::sum);
+            var claims = intents.entrySet().stream().map(entry -> claim(entry.getKey(), entry.getValue())).toList();
+            var plan = ReleasedQiAllocation.plan(inventory(account), claims);
+            if (tick % WINDOW_TICKS == WINDOW_TICKS - 1) {
+                double dust = remaining(execute(inventory(account), plan));
+                assertTrue("第 " + tick + " tick 窗口末尘埃过大：" + dust, dust <= Math.ulp(account));
+                account = dust;
+                intents.clear();
+            }
+        }
     }
 
     @Test
@@ -69,6 +116,33 @@ public final class ReleasedQiAllocationTest {
         assertEquals(SECOND, plan.get(1).qi().amount(), 0);
         assertFalse(execute(account, plan).entries().isEmpty());
         assertThrows(RuntimeException.class, () -> ReleasedQiAllocation.plan(inventory(SHORT_ACCOUNT), claims));
+    }
+
+    @Test
+    public void missingKindIsRejectedByCodeWithoutClaimingPause() {
+        // 共享账户没有这一种真元时按失败码拒绝；拒绝不会暂停身体，文案只给原因和失败码。
+        var failure = assertThrows(HumanErrors.HostRejected.class,
+                () -> ReleasedQiAllocation.plan(QiInventory.empty(), List.of(claim("a", FIRST))));
+        assertEquals(FailureCode.INSUFFICIENT_QI, failure.code());
+        assertTrue(failure.getMessage().startsWith(HumanErrors.HOST_REJECTED));
+        assertTrue(failure.getMessage().endsWith("（" + FailureCode.INSUFFICIENT_QI + "）"));
+        assertFalse(failure.getMessage().contains("暂停"));
+    }
+
+    private static void assertDrainsWithinUlp(double account, double small, double large) {
+        // 两笔意图凑满账户：小额照原数转，执行后剩余不超过账户的 1 ULP。
+        var inventory = inventory(account);
+        var plan = ReleasedQiAllocation.plan(inventory, List.of(claim("large", large), claim("small", small)));
+        assertEquals(small, plan.get(0).qi().amount(), 0);
+        assertTrue(remaining(execute(inventory, plan)) <= Math.ulp(account));
+    }
+
+    private static double remaining(QiInventory account) {
+        // 扣空的账户没有条目，按零计。
+        if (account.entries().isEmpty()) {
+            return 0;
+        }
+        return account.entries().get(0).amount();
     }
 
     private static QiInventory execute(QiInventory account, List<ReleasedQiAllocation.Claim> plan) {

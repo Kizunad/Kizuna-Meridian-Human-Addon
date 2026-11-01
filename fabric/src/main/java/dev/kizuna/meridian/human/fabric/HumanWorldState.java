@@ -70,6 +70,7 @@ final class HumanWorldState {
     private int lastSaveTick = UNSAVED_TICK;
     private boolean dirty;
     private final List<PendingCredit> pendingCredits = new ArrayList<>();
+    private final Map<ReleasedQiAllocation.Kind, String> reportedCreditFailures = new HashMap<>();
     private final String epoch;
     private final Map<UUID, HumanPlayerBody> players = new HashMap<>();
     private final InMemoryBodyStore store;
@@ -587,7 +588,8 @@ final class HumanWorldState {
                 }
             }
         }
-        for (var entries : claims.values()) {
+        for (var entry : claims.entrySet()) {
+            var entries = entry.getValue();
             try {
                 var plan = ReleasedQiAllocation.plan(store.environmentQi(), entries);
                 var transfers = new LinkedHashMap<String, QiInventory>();
@@ -600,11 +602,31 @@ final class HumanWorldState {
                     dueClaims.forEach(this::removeDefaultCredit);
                     setDirty();
                 }
+                reportedCreditFailures.remove(entry.getKey());
             } catch (RuntimeException failure) {
                 // 真正缺账保留对应相态属性的全部意图，其他种类与外部交接仍可入账。
-                LOG.error(HumanErrors.ENVIRONMENT_CREDIT_FAILED, failure);
+                // 计划每 tick 重算：同一失败、同一组数值只在第一次记 ERROR，数值变了再记，卡住时不逐 tick 刷屏。
+                String report = creditFailureReport(failure, entry.getKey(), entries);
+                if (!report.equals(reportedCreditFailures.put(entry.getKey(), report))) {
+                    LOG.error(HumanErrors.ENVIRONMENT_CREDIT_FAILED + "：" + report, failure);
+                }
             }
         }
+        // 已经没有排队意图的种类不再保留记录，之后再出错照常记。
+        reportedCreditFailures.keySet().retainAll(claims.keySet());
+    }
+
+    private String creditFailureReport(RuntimeException failure, ReleasedQiAllocation.Kind kind,
+                                       List<ReleasedQiAllocation.Claim> entries) {
+        // 失败原因、共享账户同种余额与各区域意图共同标识一次失败；double 文本可往返，数值变了文本必变。
+        String account = store.environmentQi().entries().stream()
+                .filter(qi -> ReleasedQiAllocation.Kind.of(qi).equals(kind))
+                .map(qi -> Double.toString(qi.amount()))
+                .findFirst().orElse("无");
+        String intents = entries.stream()
+                .map(claim -> claim.sourceId() + "=" + claim.qi().amount())
+                .collect(java.util.stream.Collectors.joining("，"));
+        return failure.getMessage() + " 种类=" + kind + " 共享账户=" + account + " 区域意图=[" + intents + "]";
     }
 
     private void removeDefaultCredit(ReleasedQiAllocation.Claim claim) {
