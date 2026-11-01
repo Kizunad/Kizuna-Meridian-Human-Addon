@@ -3,10 +3,13 @@ package dev.kizuna.meridian.human.fabric;
 import dev.kizuna.meridian.core.Qi;
 import dev.kizuna.meridian.core.QiAccounting;
 import dev.kizuna.meridian.core.QiInventory;
+import dev.kizuna.meridian.error.MeridianErrors;
 import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import org.junit.Test;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Random;
@@ -38,6 +41,14 @@ public final class ReleasedQiAllocationTest {
     private static final int REGIONS = 3;
     private static final double RELEASE_MIN = 0.001;
     private static final double RELEASE_SPAN = 2;
+    private static final int STAGGERED_TICKS = 20_000;
+    private static final int STAGGERED_RUNS = 2;
+    private static final int MIN_REGIONS = 2;
+    private static final int MAX_REGIONS = 4;
+    // 单笔释放量按对数均匀取：只有小额，或从小额跨到 2。
+    private static final double[][] RELEASE_RANGES = {{0.001, 0.01}, {0.001, 2}};
+    // 每 tick 释放一笔的概率：每 tick 都放，或平均五 tick 一笔。
+    private static final double[] RELEASE_CHANCES = {1, 0.2};
 
     @Test
     public void lastShareUsesActualRemainderAndStrictLedgerDrainsExactly() {
@@ -92,6 +103,25 @@ public final class ReleasedQiAllocationTest {
     }
 
     @Test
+    public void staggeredRegionWindowsNeverRejectQueuedReleases() {
+        // 各区域窗口错开时承接余量的末笔可能单独先到期；2–4 区、两档释放量、两档释放频率各跑两轮，
+        // 每 tick 的计划与每次到期扣转都不能被 Framework 拒绝。
+        var seeds = new Random(SIMULATION_SEED);
+        var rejections = new ArrayList<String>();
+        for (int regions = MIN_REGIONS; regions <= MAX_REGIONS; regions++) {
+            for (double[] range : RELEASE_RANGES) {
+                for (double chance : RELEASE_CHANCES) {
+                    for (int run = 0; run < STAGGERED_RUNS; run++) {
+                        rejections.addAll(staggeredWindows(regions, range, chance, seeds.nextLong()));
+                    }
+                }
+            }
+        }
+        assertTrue("错开窗口下被拒绝 " + rejections.size() + " 次，前几次：" + rejections.stream().limit(5).toList(),
+                rejections.isEmpty());
+    }
+
+    @Test
     public void minimumTransfersStayTransferableAndDustWaitsForAccumulation() {
         // 最大份额承接尾差；不能把一个最小单位修正成不可流转的明细。
         double minimum = QiAccounting.MIN_TRANSFER_QI;
@@ -127,6 +157,49 @@ public final class ReleasedQiAllocationTest {
         assertTrue(failure.getMessage().startsWith(HumanErrors.HOST_REJECTED));
         assertTrue(failure.getMessage().endsWith("（" + FailureCode.INSUFFICIENT_QI + "）"));
         assertFalse(failure.getMessage().contains("暂停"));
+    }
+
+    private static List<String> staggeredWindows(int regions, double[] range, double chance, long seed) {
+        // 每个区域 600 tick 一窗、相位随机；账户与区域意图按宿主的逐笔 double 加法累计。
+        // 宿主每 tick 按全部意图重算计划，只把到期区域的明细整批扣转；被拒绝时保留意图，与宿主保留队列一致。
+        var random = new Random(seed);
+        int[] phases = new int[regions];
+        for (int region = 0; region < regions; region++) {
+            phases[region] = random.nextInt(WINDOW_TICKS);
+        }
+        double logMin = Math.log(range[0]);
+        double logSpan = Math.log(range[1]) - logMin;
+        double account = 0;
+        var intents = new LinkedHashMap<String, Double>();
+        var rejections = new ArrayList<String>();
+        for (int tick = 0; tick < STAGGERED_TICKS; tick++) {
+            if (random.nextDouble() < chance) {
+                double before = account;
+                account += Math.exp(logMin + random.nextDouble() * logSpan);
+                intents.merge("region-" + random.nextInt(regions), account - before, Double::sum);
+            }
+            if (intents.isEmpty()) {
+                continue;
+            }
+            var due = new HashSet<String>();
+            for (int region = 0; region < regions; region++) {
+                if (Math.floorMod(tick - phases[region], WINDOW_TICKS) == 0) {
+                    due.add("region-" + region);
+                }
+            }
+            var claims = intents.entrySet().stream().map(entry -> claim(entry.getKey(), entry.getValue())).toList();
+            try {
+                var duePlan = ReleasedQiAllocation.plan(inventory(account), claims).stream()
+                        .filter(claim -> due.contains(claim.sourceId())).toList();
+                if (!duePlan.isEmpty()) {
+                    account = remaining(execute(inventory(account), duePlan));
+                    duePlan.forEach(claim -> intents.remove(claim.sourceId()));
+                }
+            } catch (MeridianErrors.TransportRejected rejected) {
+                rejections.add(regions + " 区 " + range[1] + "/" + chance + " 第 " + tick + " tick：" + rejected.reason());
+            }
+        }
+        return rejections;
     }
 
     private static void assertDrainsWithinUlp(double account, double small, double large) {

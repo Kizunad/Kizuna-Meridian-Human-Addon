@@ -53,6 +53,7 @@ final class ReleasedQiAllocation {
         // 先转小额、最后转最大份额，避免舍入修正把一笔最小单位变成不可流转尘埃。
         var planned = new ArrayList<Claim>();
         double allocated = 0;
+        BigDecimal allocatedExactly = BigDecimal.ZERO;
         for (int index = 0; index < sorted.size(); index++) {
             Claim claim = sorted.get(index);
             if (claim.qi().amount() < QiAccounting.MIN_TRANSFER_QI) {
@@ -61,7 +62,8 @@ final class ReleasedQiAllocation {
             }
             double amount;
             if (allocation == Allocation.EXHAUST && index == sorted.size() - 1) {
-                amount = Math.max(QiAccounting.MIN_TRANSFER_QI, exhaustingShare(available.amount(), allocated));
+                double share = exhaustingShare(available.amount(), allocated, allocatedExactly);
+                amount = Math.max(QiAccounting.MIN_TRANSFER_QI, share);
             } else {
                 amount = claim.qi().amount();
             }
@@ -69,12 +71,13 @@ final class ReleasedQiAllocation {
             QiInventory selected = QiAccounting.select(new QiInventory(List.of(available)), requested);
             planned.add(new Claim(claim.sourceId(), selected.entries().get(0)));
             allocated += amount;
+            allocatedExactly = allocatedExactly.add(new BigDecimal(amount));
         }
         validateBatch(available, planned);
         return List.copyOf(planned);
     }
 
-    private static double exhaustingShare(double account, double allocated) {
+    private static double exhaustingShare(double account, double allocated, BigDecimal allocatedExactly) {
         // 末笔先取差额；double 下「已分配 + (账户 − 已分配)」可能比账户多或少 1 ULP，按 ULP 微调到
         // 按 Framework 合并顺序（逐笔从小到大相加）复算正好等于账户。差额两侧都凑不到账户时，
         // 取合并后不超过账户的最大值，尘埃留在共享账户，等后续释放合并后再扫空。
@@ -85,7 +88,14 @@ final class ReleasedQiAllocation {
         while (allocated + share < account && allocated + Math.nextUp(share) <= account) {
             share = Math.nextUp(share);
         }
-        return share;
+        // 各区域窗口错开时，承接余量的末笔可能单独先到期。末笔再限制在「账户 − 其余各笔」的精确值以内，
+        // 扣掉末笔后的账户仍够其余区域；否则大数的舍入会落进后到期的小额区域，按保留余量拆分后报余额不足。
+        BigDecimal room = new BigDecimal(account).subtract(allocatedExactly);
+        double cap = room.doubleValue();
+        if (new BigDecimal(cap).compareTo(room) > 0) {
+            cap = Math.nextDown(cap);
+        }
+        return Math.min(share, cap);
     }
 
     private static void validateBatch(Qi available, List<Claim> planned) {
