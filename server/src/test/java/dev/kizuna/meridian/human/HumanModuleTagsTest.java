@@ -4,6 +4,7 @@ import dev.kizuna.meridian.human.server.HumanContent;
 import dev.kizuna.meridian.human.server.HumanOpening;
 import dev.kizuna.meridian.protocol.pb.AddonMessages.AddonHostProfile;
 import dev.kizuna.meridian.protocol.pb.AddonMessages.AddonRegistration;
+import dev.kizuna.meridian.protocol.pb.BodyMessages;
 import dev.kizuna.meridian.protocol.pb.BodyMessages.BodyStructure;
 import dev.kizuna.meridian.protocol.pb.BodyMessages.Realm;
 import dev.kizuna.meridian.server.AddonRegistry;
@@ -19,6 +20,10 @@ import static org.junit.Assert.*;
 
 /** 人体公开标签经过真实内容注册，并与模块身份、左右及开脉分层一致。 */
 public final class HumanModuleTagsTest {
+    private static final double MUSCLE_TRAINING_MAXIMUM_GROWTH = 0.5;
+    private static final double MUSCLE_TRAINING_HALF_LIFE_SECONDS = 600;
+    private static final double MUSCLE_TRAINING_WORK_JOULES_PER_GROWTH = 3_125_000;
+
     @Test
     public void registeredTemplateHasExactSymmetricModuleTags() {
         // 使用正式宿主能力画像安装模板，避免仅检查尚未通过框架校验的候选。
@@ -74,6 +79,21 @@ public final class HumanModuleTagsTest {
                 matching(tags, "human:arm_muscle"));
         assertEquals(bilateral("rectus_femoris", "gastrocnemius", "gluteus_maximus"),
                 matching(tags, "human:leg_muscle"));
+        Set<String> trained = structure.getTissuesList().stream()
+                .filter(BodyMessages.TissueDefinition::hasTraining)
+                .map(BodyMessages.TissueDefinition::getId)
+                .collect(Collectors.toSet());
+        assertEquals(bilateral("biceps_brachii", "triceps_brachii", "brachioradialis",
+                "rectus_femoris", "gastrocnemius", "gluteus_maximus"), trained);
+        for (var tissue : structure.getTissuesList()) {
+            if (!tissue.hasTraining()) {
+                continue;
+            }
+            var training = tissue.getTraining();
+            assertEquals(MUSCLE_TRAINING_MAXIMUM_GROWTH, training.getMaximumGrowth(), 0);
+            assertEquals(MUSCLE_TRAINING_HALF_LIFE_SECONDS, training.getConsolidationHalfLifeSeconds(), 0);
+            assertEquals(MUSCLE_TRAINING_WORK_JOULES_PER_GROWTH, training.getWorkJoulesPerGrowth(), 0);
+        }
         assertEquals(Set.of("diaphragm", "left_lung", "right_lung"), matching(tags, "human:breathing"));
         assertSymmetry(tags);
     }

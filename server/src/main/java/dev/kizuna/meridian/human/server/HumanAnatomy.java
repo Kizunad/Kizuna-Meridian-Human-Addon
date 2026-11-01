@@ -6,6 +6,10 @@ import java.util.List;
 
 /** 第一版人体构型；表中数值是游戏初值，全部由附属内容声明。 */
 final class HumanAnatomy {
+    private static final double MUSCLE_TRAINING_MAXIMUM_GROWTH = 0.5;
+    private static final double MUSCLE_TRAINING_HALF_LIFE_SECONDS = 600;
+    private static final double MUSCLE_TRAINING_WORK_JOULES_PER_GROWTH = 3_125_000;
+
     private HumanAnatomy() {
         // 构型构造不接触任何角色实例；修改模板不会重置已经保存的身体。
     }
@@ -163,12 +167,40 @@ final class HumanAnatomy {
     private static void addMuscle(BodyStructure.Builder body, String id, String name, String part,
                                   double strengthNewtons, double burstWatts, double enduranceJoules) {
         // 一块具名肌肉是一个模块；力量、功率与耐力独立于真元容量。
-        body.addTissues(TissueDefinition.newBuilder().setId(id).setDisplayName(name).setKind("human:muscle")
-                // 肌肉疲劳每休息 30 秒减半，具体动作占用期间由框架暂停恢复。
+        TissueCapacity capacity = TissueCapacity.newBuilder()
+                .setStrengthNewtons(strengthNewtons)
+                .setBurstWatts(burstWatts)
+                .setEnduranceJoules(enduranceJoules)
+                .build();
+        var definition = TissueDefinition.newBuilder()
+                .setId(id)
+                .setDisplayName(name)
+                .setKind("human:muscle")
                 .setRecoveryHalfLifeSeconds(30)
-                .setPartId(part).setMaxHp(10).setFatigueCapacity(100)
-                .setCapacity(TissueCapacity.newBuilder().setStrengthNewtons(strengthNewtons)
-                        .setBurstWatts(burstWatts).setEnduranceJoules(enduranceJoules)));
+                .setPartId(part)
+                .setMaxHp(10)
+                .setFatigueCapacity(100)
+                .setCapacity(capacity);
+        if (trainableMuscle(id)) {
+            definition.setTraining(muscleTraining());
+        }
+        body.addTissues(definition);
+    }
+
+    private static boolean trainableMuscle(String id) {
+        // 手臂与腿部的主动力肌肉都保留训练能力，分别供行矢和千里腿使用。
+        return id.endsWith("_biceps_brachii") || id.endsWith("_triceps_brachii")
+                || id.endsWith("_brachioradialis") || id.endsWith("_gluteus_maximus")
+                || id.endsWith("_rectus_femoris") || id.endsWith("_gastrocnemius");
+    }
+
+    private static TissueTraining muscleTraining() {
+        // Human 的训练参数由人体内容声明，框架只负责按通用参数结算。
+        return TissueTraining.newBuilder()
+                .setMaximumGrowth(MUSCLE_TRAINING_MAXIMUM_GROWTH)
+                .setConsolidationHalfLifeSeconds(MUSCLE_TRAINING_HALF_LIFE_SECONDS)
+                .setWorkJoulesPerGrowth(MUSCLE_TRAINING_WORK_JOULES_PER_GROWTH)
+                .build();
     }
 
     private static void addOrgan(BodyStructure.Builder body, String id, String name, String part, double hp) {
