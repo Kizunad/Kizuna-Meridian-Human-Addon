@@ -100,6 +100,12 @@ public final class HumanFabric implements ModInitializer {
             }
             return net.minecraft.world.InteractionResult.PASS;
         });
+        net.fabricmc.fabric.api.event.player.UseItemCallback.EVENT.register((player, world, hand) ->
+                useWhileCasting(player));
+        net.fabricmc.fabric.api.event.player.UseBlockCallback.EVENT.register((player, world, hand, hit) ->
+                useWhileCasting(player));
+        net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.register((player, world, hand, entity, hit) ->
+                useWhileCasting(player));
         HumanHealthHost.bind(this::health);
         HumanDebugHost.bind(this::debugQi);
         HumanEnvironmentHost.bind(this::environment);
@@ -327,6 +333,15 @@ public final class HumanFabric implements ModInitializer {
         } catch (RuntimeException failure) {
             fail(player, failure);
         }
+    }
+
+    private static net.minecraft.world.InteractionResult useWhileCasting(
+            net.minecraft.world.entity.player.Player player) {
+        // 腿法施放期间右键不能触发物品、方块或实体交互，避免动作中途改变世界状态。
+        if (HumanTechniqueHost.isCasting(player.getUUID())) {
+            return net.minecraft.world.InteractionResult.FAIL;
+        }
+        return net.minecraft.world.InteractionResult.PASS;
     }
 
     private byte[] environment(byte[] payload) {
@@ -633,6 +648,9 @@ public final class HumanFabric implements ModInitializer {
                 // 先用旧区域完成刚过去的呼吸区间，再切换位置与结算运动，避免新位置追溯摄入。
                 boolean breathingChanged = body.advanceGathering(millis);
                 state.selectEnvironment(player, millis);
+                if (HumanTechniqueHost.consumeImpulseMovement(id)) {
+                    observer.ignoreNextMovement();
+                }
                 HumanPlayerBody.Motion motion = observer.sample(player);
                 boolean changed = body.observe(millis, motion, observer.moved());
                 HumanTechniqueHost.recoverIfDead(player);

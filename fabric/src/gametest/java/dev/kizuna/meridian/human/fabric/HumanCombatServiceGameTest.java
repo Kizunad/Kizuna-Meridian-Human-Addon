@@ -357,7 +357,8 @@ public final class HumanCombatServiceGameTest {
     public void finaleHitsAtShortenedTickInsideArmPeak(GameTestHelper context) {
         // 承接终式实际跃起并命中，检查伤害链发生在曲线峰顶并成功支付挥手做功。
         var fixture = prepared(context);
-        fixture.hold(Items.IRON_AXE, Items.SHIELD);
+        // 铁剑的终击仍走同一目录类别，但不会超过单臂肌肉的爆发功率上限。
+        fixture.hold(Items.IRON_SWORD, Items.SHIELD);
         accepted(context, cast(fixture, "cleave", CastEntry.AUTO));
         context.runAfterDelay(CLEAVE_FOLLOW_TICKS, () -> {
             var target = fixture.target(0, HumanCombatFixture.TARGET_DISTANCE);
@@ -378,8 +379,9 @@ public final class HumanCombatServiceGameTest {
                     assertImpulses(context, new Timeline(fixture, target, "finale", started), FINALE_CLIP_MILLIS);
                     assertArms(context, fixture, PEAK_MULTIPLIER);
                     context.assertTrue(target.getHealth() < HEALTHY_TARGET_HP, "终式没有实际造成伤害");
-                    context.assertTrue(HumanCombatWorldGameTest.armFatigue(fixture, "right") > beforeWork[0],
-                            "峰顶挥手没有完成做功");
+                    double afterWork = HumanCombatWorldGameTest.armFatigue(fixture, "right");
+                    context.assertTrue(afterWork > beforeWork[0],
+                            "峰顶挥手没有完成做功 before=" + beforeWork[0] + " after=" + afterWork);
                     context.succeed();
                 }
             });

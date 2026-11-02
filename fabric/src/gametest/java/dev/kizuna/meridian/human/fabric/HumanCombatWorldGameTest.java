@@ -11,6 +11,7 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.util.Unit;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -50,6 +51,8 @@ public final class HumanCombatWorldGameTest {
     private static final int STANDARD_WEAR_MULTIPLIER = 2;
     private static final int OTHER_WEAR_MULTIPLIER = 3;
     private static final float FACING_ATTACKER_YAW = 180;
+    private static final int DIAMOND_BOOT_DAMAGE = 7;
+    private static final double DIAMOND_BOOT_ARMOR = 3;
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void damageCategoriesDoseAndKnockBluntUseRealDamageChain(GameTestHelper context) {
@@ -193,6 +196,51 @@ public final class HumanCombatWorldGameTest {
             near(context, target.doses.get(0), IRON_AXE_DAMAGE * HOOK_MULTIPLIER, "副手单手剂量");
             context.assertTrue(armFatigue(fixture, "left") > 0 && armFatigue(fixture, "right") == 0,
                     "副手做功手臂错误");
+        }
+        context.succeed();
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void legInspectReadsGroundAndBootFacts(GameTestHelper context) {
+        // 腿法起手事实来自同一次正式 inspect，钻石靴的护甲和剩余耐久也必须成对回传。
+        try (var fixture = new HumanCombatFixture(context)) {
+            ItemStack boots = new ItemStack(Items.DIAMOND_BOOTS);
+            boots.setDamageValue(DIAMOND_BOOT_DAMAGE);
+            fixture.human.player.setItemSlot(EquipmentSlot.FEET, boots);
+            fixture.human.player.setOnGround(true);
+            var facts = fixture.inspect().getInspectFacts();
+            context.assertTrue(facts.getGrounded(), "inspect 没有回传着地");
+            context.assertTrue(!facts.getInWater() && !facts.getClimbing()
+                    && !facts.getRiding() && !facts.getGliding(), "inspect 移动事实错误");
+            near(context, facts.getBootArmor(), DIAMOND_BOOT_ARMOR, "靴子护甲");
+            context.assertTrue(facts.getBootDurability() == boots.getMaxDamage() - DIAMOND_BOOT_DAMAGE,
+                    "靴子剩余耐久错误");
+        }
+        context.succeed();
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void legStrikeReadsDeclaredDamageAndWearsBootOnlyInSurvival(GameTestHelper context) {
+        // 腿击不看双手物品，直接使用目录声明的跨命名空间伤害类型，
+        // 末击只磨一次生存靴子。
+        try (var fixture = new HumanCombatFixture(context)) {
+            fixture.hold(Items.SHIELD, Items.DIRT);
+            ItemStack boots = new ItemStack(Items.DIAMOND_BOOTS);
+            fixture.human.player.setItemSlot(EquipmentSlot.FEET, boots);
+            var target = fixture.target(0, HumanCombatFixture.TARGET_DISTANCE);
+            float before = target.getHealth();
+            fixture.submit(HumanCombatFixture.legStrike("leg_survival"));
+            context.assertTrue(target.doses.size() == 1, "腿击没有恰好命中一次");
+            context.assertTrue(target.getHealth() < before, "腿击没有进入真实伤害链");
+            String damageId = target.sources.get(0).typeHolder().unwrapKey().orElseThrow()
+                    .identifier().toString();
+            context.assertTrue(damageId.equals("meridian_human_test:leg_strike"),
+                    "腿击没有读取目录伤害类型：" + damageId);
+            context.assertTrue(boots.getDamageValue() == 1, "生存末击没有磨靴子");
+
+            fixture.human.player.setGameMode(GameType.CREATIVE);
+            fixture.submit(HumanCombatFixture.legStrike("leg_creative"));
+            context.assertTrue(boots.getDamageValue() == 1, "创造模式末击磨了靴子");
         }
         context.succeed();
     }

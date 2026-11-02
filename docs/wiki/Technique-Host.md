@@ -19,6 +19,9 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 装物标志识别原版潜影盒的 `BlockEntityTag.Items` 与收纳袋的根 `Items` 非空库存列表，
 空列表返回 false；不展开嵌套容器，也不推断第三方自定义库存格式。
 
+腿法 `inspect` 还回传服务端实体的 `grounded/in_water/climbing/riding/gliding`，以及脚部装备的
+护甲值和剩余耐久。无靴时这些可选事实保持缺省，宿主不会把腿甲或实体总护甲计入腿击。
+
 `activity` 使用库的固定调用身份 `meridian_technique:caster`，只授权当前玩家身体的 `ExecuteActivity`。
 原始请求 ID、活动与 `expected_revision` 交给 Framework `handleActivity`，版本冲突等失败码原样返回。
 成功活动及其回执保存在 Human 原有世界 Store，重复活动不会重复扣费；身体、回执和默认释放账户一起保存。
@@ -28,6 +31,18 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 30 秒供给窗边界用 `transferReleasedToSources` 批量扣默认账户、贷记原区域；重载与重复请求不重复归位。
 非主世界没有来源时保留在默认账户。此流程与死亡、开脉和加工损耗共用
 [区域环境服务](Environment-Host.md)及其存档规则。
+
+## 腿击
+
+`EffectIntent.leg_strike` 由 `HumanLegStrikeEffects` 在服务器主线程执行。宿主先按生物资格、视线、
+距离、前后腿朝向和扇形筛选目标，再交给功法库的 `TechniqueStrikeTargets` 处理单击上限、整式目标
+上限和 `dedup_group` 去重。单体射线没有命中时使用声明角度的后备锥，不会凭空命中实体。
+
+伤害剂量按起手保存的书级规则计算为 `base_damage + armor_damage × boot_armor`，再乘本击倍率。
+`damage_type_id` 是目录提供的完整命名空间 ID，Human 直接解析该 ID 查 Damage 注册表，不附加固定
+命名空间。击退支持推开、横推、绊倒和踩落；正面盾挡在 `knockback_when_blocked` 开启时仍执行
+击退，Damage 类型自身的 `#minecraft:bypasses_shield` 标签决定是否绕过盾。最后一击只磨脚部装备一次，
+创造模式不磨损；每次实际出手播放一次原版重击声，并在收势时重置原版攻击冷却。
 
 ## 冲量与表现
 
@@ -70,6 +85,8 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 本人立即收到 `ClientboundUpdateAttributesPacket`，旁观者由原版跟踪器同步。
 不同施放的修正独立，承接移除前式后再应用新式；重复清理不影响其他修正。
 限速仍允许主动移动，不缩放冲量、不拦跳跃或转向；收势、打断、死亡、下线和恢复清理临时属性。
+施放锁定期间 Fabric 拦截原版实体攻击、方块攻击、物品使用、方块交互和实体交互；功法自己的效果
+仍由正式宿主回执执行。
 受击僵直不由本宿主判定：原版伤害附属在命中提交后写入功法库，功法库给实体另加一份固定 UUID 的
 `MULTIPLY_TOTAL` 僵直减速（默认 ×0.5），与施放限速相乘，到期移除；僵直中新起式回执「僵直中」。
 
@@ -81,6 +98,8 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 
 26.2 原版速度包在编码时按三轴最大绝对值取整数倍率，各轴相对倍率以 15 位量化（倍率 1 时步长约 1/16383 格/tick）；
 服务端仍设置契约中的完整速度。分量悬殊时小分量的量化误差随大分量放大，普通冲量不保证精确同步；跃步另用功法库的 Protobuf 轨迹频道进行权威纠正。
+Human 会标记已结算的功法冲量，下一次玩家位置采样只更新运动基线，不把冲量位移重复记作 WALK/SPRINT
+做功；之后的正常位移恢复原有采样规则。
 GameTest 使用 10 m/s，验证服务端为 0.5 格/tick，并检查同步标记与速度包。
 
 ## 取消与组织占用
