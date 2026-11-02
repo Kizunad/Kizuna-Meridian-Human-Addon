@@ -5,10 +5,19 @@ import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BreakBlocksIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItemRules;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LegKnockbackKind;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LegRules;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LegSelection;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LegStrike;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LegStrikeIntent;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.StrikeFacing;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.StrikeShape;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueEffect;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostRequest;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostResponse;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Unit;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponStrikeIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages;
 import dev.kizuna.meridian.technique.server.TechniqueProtocol;
@@ -35,6 +44,10 @@ import java.util.UUID;
 final class HumanCombatFixture implements AutoCloseable {
     static final double EPSILON = 0.00001;
     static final double TARGET_DISTANCE = 2;
+    static final double LEG_DISTANCE = 3;
+    static final double LEG_ANGLE = 60;
+    static final double LEG_BASE_DAMAGE = 2;
+    static final double LEG_ARMOR_DAMAGE = 0.5;
     static final long MILLIS_PER_TICK = 50;
     private static final int PLAYER_HEIGHT = 2;
     /** Fabric 空结构 8×8 的中心列；前后左右各留几格，目标不贴近结构边界。 */
@@ -45,8 +58,8 @@ final class HumanCombatFixture implements AutoCloseable {
 
     HumanCombatFixture(GameTestHelper context) {
         // 每次测试隔离玩家与空间，使用生存模式覆盖实际磨损与做功。
-        // 26.2 的 GameTest 会用屏障把结构四周围起来（1.20.1 自动运行时不围），玩家站在结构中心，
-        // 身后两格的目标才不会落进屏障墙里挡住视线。
+        // 26.2 的 GameTest 会用屏障把结构四周围起来（1.20.1 自动运行时不围），
+        // 玩家站在结构中心，身后两格的目标才不会落进屏障墙里挡住视线。
         this.context = context;
         human = new HumanTechniqueTestPlayer(context, UUID.randomUUID(), ObservedPlayer::new);
         var relative = new BlockPos(STRUCTURE_CENTER, PLAYER_HEIGHT, STRUCTURE_CENTER);
@@ -120,6 +133,53 @@ final class HumanCombatFixture implements AutoCloseable {
                 .setSelectedHand(TechniqueMessages.Hand.MAIN_HAND)
                 .setBreakBlocks(blocks)
                 .build();
+    }
+
+    static EffectIntent legStrike(String castId) {
+        // 测试腿击使用另一个命名空间的 Damage ID，确保宿主直接读取目录声明。
+        LegStrike strike = LegStrike.newBuilder()
+                .setShape(StrikeShape.SINGLE_TARGET)
+                .setFacing(StrikeFacing.STRIKE_FORWARD)
+                .setDistance(HumanTechniqueTestCatalog.quantity(LEG_DISTANCE, Unit.METER))
+                .setAngle(HumanTechniqueTestCatalog.quantity(LEG_ANGLE, Unit.DEGREE))
+                .setMultiplier(HumanTechniqueTestCatalog.quantity(1, Unit.RATIO))
+                .setMaximumTargets(1)
+                .setCastTargetLimit(1)
+                .setLeg(LegSelection.FRONT_LEG)
+                .setDamageTypeId("meridian_human_test:leg_strike")
+                .setKnockbackKind(LegKnockbackKind.NONE)
+                .setKnockback(HumanTechniqueTestCatalog.quantity(0, Unit.RATIO))
+                .setKnockbackWhenBlocked(false /* knockbackWhenBlocked */)
+                .setLastStrike(true /* lastStrike */)
+                .setDedupGroup("human_test_leg")
+                .build();
+        LegRules rules = LegRules.newBuilder()
+                .setIgnoreHeldItems(true /* ignoreHeldItems */)
+                .setRequireGrounded(true /* requireGrounded */)
+                .setBaseDamage(HumanTechniqueTestCatalog.quantity(LEG_BASE_DAMAGE, Unit.DAMAGE_POINT))
+                .setArmorDamage(HumanTechniqueTestCatalog.quantity(LEG_ARMOR_DAMAGE, Unit.DAMAGE_POINT))
+                .setDurabilityCost(1)
+                .build();
+        var intent = LegStrikeIntent.newBuilder()
+                .setStrike(strike)
+                .setLegRules(rules)
+                .build();
+        return EffectIntent.newBuilder()
+                .setCastId(castId)
+                .setEffectId("leg_strike")
+                .setLegStrike(intent)
+                .build();
+    }
+
+    TechniqueHostResponse inspect() {
+        // 通过正式宿主回执读取着地和脚部装备事实，避免测试直摸 Human 内部字段。
+        var request = TechniqueHostRequest.newBuilder()
+                .setEntityUuid(human.player.getStringUUID())
+                .setRequestId(UUID.randomUUID().toString())
+                .setInspect(true)
+                .build();
+        return TechniqueProtocol.decodeHostResponse(new HumanTechniqueHost().exchange(
+                TechniqueProtocol.encodeHost(request)));
     }
 
     void submit(EffectIntent effect) {

@@ -649,6 +649,9 @@ public final class HumanFabric implements ModInitializer {
                 // 先用旧区域完成刚过去的呼吸区间，再切换位置与结算运动，避免新位置追溯摄入。
                 boolean breathingChanged = body.advanceGathering(millis);
                 state.selectEnvironment(player, millis);
+                if (HumanTechniqueHost.consumeImpulseMovement(id)) {
+                    observer.ignoreNextMovement();
+                }
                 HumanPlayerBody.Motion motion = observer.sample(player);
                 boolean changed = body.observe(millis, motion, observer.moved());
                 HumanTechniqueHost.recoverIfDead(player);

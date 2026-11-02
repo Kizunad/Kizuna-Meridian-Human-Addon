@@ -37,6 +37,7 @@ final class HumanTechniqueEffects {
             .category(GameRuleCategory.PLAYER)
             .buildAndRegister(Identifier.fromNamespaceAndPath("meridian_human", "technique_player_break_blocks"));
     private final Map<UUID, TechniqueWorldEffects> worldEffects = new HashMap<>();
+    private final Map<UUID, HumanLegStrikeEffects> legEffects = new HashMap<>();
     // 每个玩家正在施放的 cast ID 及该式是否放行右键。
     private final Map<UUID, Map<String, Boolean>> castingIds = new HashMap<>();
     private final Map<UUID, Map<String, EffectIntent>> requests = new HashMap<>();
@@ -113,12 +114,15 @@ final class HumanTechniqueEffects {
             double speedPerTick = effect.getImpulse().getSpeed().getValue() / TICKS_PER_SECOND;
             TechniqueWorldImpulses.apply(player, effect.getImpulse().getDirection(),
                     direction.scale(speedPerTick));
+            HumanTechniqueHost.markImpulseMovement(player.getUUID());
         } else if (effect.hasMovement()) {
             movement(player, effect);
             updateCasting(player, effect);
         } else if (effect.hasPresentation()) {
             HumanTechniquePresentation.apply(player, effect);
             HumanTechniquePresentation.EVENT.invoker().apply(player, submission.requestId(), effect);
+        } else if (effect.hasLegStrike()) {
+            legWorld(player).strike(player, effect);
         } else if (effect.hasWeaponStrike()) {
             world(player).strike(effect);
         } else if (effect.hasBreakBlocks()) {
@@ -157,7 +161,7 @@ final class HumanTechniqueEffects {
                     castingIds.remove(playerId);
                 }
             }
-            world(player).finish(effect.getCastId());
+            finish(player, effect.getCastId());
         }
     }
 
@@ -223,6 +227,7 @@ final class HumanTechniqueEffects {
         executingRequests.remove(playerId);
         executingEffects.remove(playerId);
         worldEffects.remove(playerId);
+        legEffects.remove(playerId);
         castingIds.remove(playerId);
         HumanTechniquePresentation.forget(playerId);
     }
@@ -234,6 +239,7 @@ final class HumanTechniqueEffects {
         executingRequests.clear();
         executingEffects.clear();
         worldEffects.clear();
+        legEffects.clear();
         castingIds.clear();
         HumanTechniquePresentation.clear();
     }
@@ -284,4 +290,19 @@ final class HumanTechniqueEffects {
     }
 
     private record EffectKey(String castId, String effectId) { }
+
+    private HumanLegStrikeEffects legWorld(ServerPlayer player) {
+        // 腿击使用目录中的完整伤害类型 ID，独立于持物打击的旧世界执行器。
+        return legEffects.computeIfAbsent(player.getUUID(), id -> new HumanLegStrikeEffects());
+    }
+
+    private void finish(ServerPlayer player, String castId) {
+        // 收势同时释放两类打击的去重游标，并重置原版攻击冷却。
+        world(player).finish(castId);
+        UUID playerId = player.getUUID();
+        HumanLegStrikeEffects legWorld = legEffects.get(playerId);
+        if (legWorld != null) {
+            legWorld.finish(castId);
+        }
+    }
 }

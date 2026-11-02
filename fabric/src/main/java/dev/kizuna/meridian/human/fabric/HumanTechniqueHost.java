@@ -6,6 +6,7 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.RequestFailure;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueActivityCommit;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostFacts;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostRequest;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostResponse;
 import dev.kizuna.meridian.technique.server.TechniqueHostEntrypoint;
@@ -30,6 +31,7 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
     private static Binding binding;
     private static final HumanTechniqueEffects effects = new HumanTechniqueEffects();
     private static final Set<UUID> ready = new HashSet<>();
+    private static final Set<UUID> impulseMovement = new HashSet<>();
 
     public static boolean isCasting(UUID playerId) {
         // 原版攻击入口只查询实体效果锁，不创建或修改身体。
@@ -41,12 +43,23 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
         return effects.blocksUse(playerId);
     }
 
+    static void markImpulseMovement(UUID playerId) {
+        // 下一次位置采样忽略由功法冲量造成的位移，费用已经在功法动作中结算。
+        impulseMovement.add(playerId);
+    }
+
+    static boolean consumeImpulseMovement(UUID playerId) {
+        // 每个冲量只消费一次采样标记，避免正常行走被长期屏蔽。
+        return impulseMovement.remove(playerId);
+    }
+
     static void bind(MinecraftServer server, HumanWorldState state, Predicate<UUID> failed,
                      Consumer<UUID> changed) {
         // 每个服务器绑定自己的世界与通知入口，不跨服务器保留实体效果回执。
         binding = new Binding(server, state, failed, changed);
         effects.clear();
         ready.clear();
+        impulseMovement.clear();
     }
 
     static void unbind() {
@@ -54,6 +67,7 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
         binding = null;
         effects.clear();
         ready.clear();
+        impulseMovement.clear();
     }
 
     static HumanWorldState state() {
@@ -106,6 +120,7 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
     static void disconnect(UUID playerId) {
         // 功法库取消回调执行完毕后才撤销认领并释放连接内效果回执。
         ready.remove(playerId);
+        impulseMovement.remove(playerId);
         effects.forget(playerId);
     }
 
@@ -158,6 +173,8 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
                 recoverIfDead(player);
                 response.setBody(BodyProtobuf.toMessage(body.snapshot()));
                 response.setHeldItems(HumanTechniqueHeldItems.inspect(player));
+                TechniqueHostFacts facts = HumanTechniqueFacts.inspect(player);
+                response.setInspectFacts(facts);
             } else if (request.hasEffect()) {
                 effects.submit(player, new TechniqueHost.EffectSubmission(request.getRequestId(), request.getEffect()));
                 response.setEffectAccepted(true /* effectAccepted */);
