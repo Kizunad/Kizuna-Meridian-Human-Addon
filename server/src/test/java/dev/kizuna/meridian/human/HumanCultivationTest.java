@@ -17,6 +17,38 @@ import static org.junit.Assert.*;
 /** 整体回归：真实原子入口的闭环、提纯守恒、脾加工、持久化与突破成败。 */
 public class HumanCultivationTest {
     @Test
+    public void breakthroughAvailabilityTracksTheCurrentBodyAndDisappearsAfterStopping() throws Exception {
+        // 同一权威投影控制入口显隐，停止周天后不能残留可突破资格。
+        Host host = preparedBreakthrough();
+        var available = HumanCultivation.bodyView(host.body()).getAddonProgressOrThrow(HumanCultivation.PROGRESS)
+                .unpack(CultivationState.class);
+        assertTrue(available.getBreakthroughAvailable());
+        host.input(CultivationInput.Operation.START_BREAKTHROUGH);
+        var running = HumanCultivation.bodyView(host.body()).getAddonProgressOrThrow(HumanCultivation.PROGRESS)
+                .unpack(CultivationState.class);
+        assertTrue(running.getBreakthrough());
+        assertFalse(running.getBreakthroughAvailable());
+        host.input(CultivationInput.Operation.STOP);
+        var stopped = HumanCultivation.bodyView(host.body()).getAddonProgressOrThrow(HumanCultivation.PROGRESS)
+                .unpack(CultivationState.class);
+        assertFalse(stopped.getBreakthroughAvailable());
+        assertFalse(stopped.getBreakthrough());
+    }
+
+    @Test
+    public void roundedDensityAtCapDoesNotCreateUncreditablePurificationLoss() {
+        // 真实失败存档的气团只比密度上限低一个 ULP，继续提纯不能制造半个环境 ULP 的损耗。
+        double savedAmount = 9.173569236430977;
+        double roundedDensity = Math.nextDown(HumanCultivationNumbers.MAX_DENSITY);
+        var cargo = new QiInventory(List.of(new Qi(Qi.QiAttribute.NONE, savedAmount, roundedDensity)));
+        QiInventory purified = HumanCultivation.purify(cargo, HumanCultivationNumbers.AUTOMATIC_EFFICIENCY);
+        assertEquals("不可流转的损耗应连同原密度保留在气团中", cargo, purified);
+        assertEquals(cargo, HumanCultivation.purify(purified, 1));
+        var tiny = new QiInventory(List.of(new Qi(Qi.QiAttribute.NONE, QiAccounting.MIN_TRANSFER_QI, 0.01)));
+        assertEquals("不足一次损耗的微量真元不能免费提高密度", tiny, HumanCultivation.purify(tiny, 1));
+    }
+
+    @Test
     public void automaticNeedsNoPracticePaysOnlyBrainAndResumesAfterStaminaRecovery() {
         // 真实权威执行到停止线，检查等待状态、空闲恢复、自动续跑和显式取消。
         Host host = new Host();
@@ -24,6 +56,8 @@ public class HumanCultivationTest {
         var initial = HumanCultivation.state(host.body());
         assertEquals(HumanCultivationNumbers.AUTOMATIC_MIN_STAMINA_RATIO,
                 initial.getAutomaticMinimumStaminaRatio(), 0);
+        assertEquals(HumanCultivationNumbers.AUTOMATIC_RESUME_STAMINA_RATIO,
+                initial.getAutomaticResumeStaminaRatio(), 0);
         assertEquals(HumanCultivationNumbers.AUTOMATIC_EFFICIENCY, initial.getAutomaticEfficiency(), 0);
         assertEquals(HumanCultivationNumbers.BREATH_CYCLE_MILLIS, initial.getBreathCycleMillis());
         assertEquals(HumanCultivationNumbers.EXHALE_START_MILLIS, initial.getExhaleStartMillis());
@@ -58,20 +92,36 @@ public class HumanCultivationTest {
         assertTrue(host.body().actions().isEmpty());
         assertTrue(host.body().transits().stream().noneMatch(transit -> transit.circuit() != null));
         int recoveryTicks = 0;
-        while (HumanCultivation.state(host.body()).getAutomaticWaiting() && recoveryTicks++ < 100) {
+        int recoveryBandTicks = 0;
+        final int recoveryTickLimit = 600;
+        double resumeRatio = initial.getAutomaticResumeStaminaRatio();
+        double pauseRatio = initial.getAutomaticMinimumStaminaRatio();
+        while (HumanCultivation.state(host.body()).getAutomaticWaiting() && recoveryTicks++ < recoveryTickLimit) {
             host.tick();
+            var recovering = HumanCultivation.state(host.body());
+            assertEquals(waiting.getLaps(), recovering.getLaps());
+            if (recovering.getBrainStaminaRatio() >= pauseRatio && recovering.getBrainStaminaRatio() < resumeRatio) {
+                recoveryBandTicks++;
+                assertFalse(recovering.getRunning());
+                assertTrue(host.body().actions().isEmpty());
+                assertTrue(host.body().transits().stream().noneMatch(transit -> transit.circuit() != null));
+                host.input(CultivationInput.Operation.START_AUTOMATIC);
+                assertTrue("重复自动输入不能绕过恢复线", HumanCultivation.state(host.body()).getAutomaticWaiting());
+            }
         }
+        assertTrue("越过暂停线后仍应持续休息，直到恢复线", recoveryBandTicks > 1);
         var resumed = HumanCultivation.state(host.body());
         assertTrue(resumed.getRunning());
         assertTrue(resumed.getAutomatic());
         assertFalse(resumed.getAutomaticWaiting());
-        assertTrue(resumed.getBrainStaminaRatio() >= HumanCultivationNumbers.AUTOMATIC_MIN_STAMINA_RATIO);
+        assertTrue(resumed.getBrainStaminaRatio() >= resumeRatio);
         assertEquals(0, host.body().tissueStates().stream().filter(tissue -> tissue.id().value().equals("attention_network"))
                 .findFirst().orElseThrow().fatigue(), 0);
 
         // 自动续跑后再次到达停止线，显式 STOP 必须撤销等待意图。
         int waitAgainTicks = 0;
-        while (!HumanCultivation.state(host.body()).getAutomaticWaiting() && waitAgainTicks++ < 10) {
+        final int activeTickLimit = 480;
+        while (!HumanCultivation.state(host.body()).getAutomaticWaiting() && waitAgainTicks++ < activeTickLimit) {
             host.tick();
         }
         assertTrue(HumanCultivation.state(host.body()).getAutomaticWaiting());

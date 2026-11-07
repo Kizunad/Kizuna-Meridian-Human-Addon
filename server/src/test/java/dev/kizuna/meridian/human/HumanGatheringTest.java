@@ -484,6 +484,8 @@ public class HumanGatheringTest {
         assertEquals(0, session.view().getBreathing().getAbsorbedQi(), 0);
         assertEquals(HumanContent.breathing().getAutomatic().getMinimumStaminaRatio(),
                 session.view().getBreathing().getAutomaticMinimumStaminaRatio(), 0);
+        assertEquals(HumanContent.breathing().getAutomatic().getResumeStaminaRatio(),
+                session.view().getBreathing().getAutomaticResumeStaminaRatio(), 0);
         assertEquals(HumanContent.breathing().getAutomatic().getCaptureEfficiency(),
                 session.view().getBreathing().getAutomaticCaptureEfficiency(), 0);
         assertTrue(host.body().actions().stream().noneMatch(action -> action.definition().tissueIds()
@@ -527,13 +529,28 @@ public class HumanGatheringTest {
         double absorbedBeforeRecovery = session.view().getBreathing().getAbsorbedQi();
         double attentionBeforeRecovery = session.view().getBreathing().getAttentionRatio();
         int recoveryTicks = 0;
-        while (!session.view().getBreathing().getActive() && recoveryTicks++ < 100) {
+        int recoveryBandTicks = 0;
+        final int recoveryTickLimit = 400;
+        double resumeRatio = stopped.getAutomaticResumeStaminaRatio();
+        double pauseRatio = stopped.getAutomaticMinimumStaminaRatio();
+        while (!session.view().getBreathing().getActive() && recoveryTicks++ < recoveryTickLimit) {
             host.now += 250;
             session.advance();
+            BreathingView recovering = session.view().getBreathing();
+            assertEquals(absorbedBeforeRecovery, recovering.getAbsorbedQi(), 0);
+            assertEquals(stopped.getAirLiters(), recovering.getAirLiters(), 0);
+            assertEquals(stopped.getParticlesList(), recovering.getParticlesList());
+            if (recovering.getStaminaRatio() >= pauseRatio && recovering.getStaminaRatio() < resumeRatio) {
+                recoveryBandTicks++;
+                assertFalse(recovering.getActive());
+                assertTrue(host.body().actions().isEmpty());
+            }
         }
+        assertTrue("越过暂停线后仍应持续休息，直到恢复线", recoveryBandTicks > 1);
         BreathingView resumed = session.view().getBreathing();
         assertTrue(resumed.getActive());
         assertTrue(resumed.getAutomatic());
+        assertTrue(resumed.getStaminaRatio() >= resumeRatio);
         assertEquals(absorbedBeforeRecovery, resumed.getAbsorbedQi(), 0);
         assertEquals(attentionBeforeRecovery, resumed.getAttentionRatio(), 0);
         assertTrue(host.body().actions().stream().anyMatch(action -> action.definition().tissueIds().stream()
@@ -542,7 +559,8 @@ public class HumanGatheringTest {
 
         // 自动重新做功再越过80%线后，取消复选框必须清除等待和自动意图。
         int retryTicks = 0;
-        while (session.view().getBreathing().getActive() && retryTicks++ < 20) {
+        final int activeTickLimit = 400;
+        while (session.view().getBreathing().getActive() && retryTicks++ < activeTickLimit) {
             host.now += 250;
             session.advance();
         }

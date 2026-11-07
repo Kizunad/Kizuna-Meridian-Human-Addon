@@ -86,22 +86,40 @@ public final class HumanContent {
 
     public static BreathingProfile breathing() {
         // 空气容量与流速是人体内容；双肺总计 5 升、每秒 1.25 升，一次完整吸气约 4 秒。
-        var profile = BreathingProfile.newBuilder().setRespiratoryTissueId("diaphragm")
-                .setAttentionTissueId("attention_network").setRespiratoryWatts(30).setAttentionWatts(4)
-                .setBodyAction(BreathingActionReference.newBuilder().setId("human:breathing").setVersion(1))
-                .setAutomatic(dev.kizuna.meridian.protocol.pb.BreathingMessages.AutomaticBreathing.newBuilder()
-                        .setMinimumStaminaRatio(HumanBreathingNumbers.AUTOMATIC_MIN_STAMINA_RATIO)
-                        .setCaptureEfficiency(HumanBreathingNumbers.AUTOMATIC_CAPTURE_EFFICIENCY)
-                        .setBodyAction(BreathingActionReference.newBuilder().setId("human:automatic_breathing").setVersion(1)))
+        var automatic = AutomaticBreathing.newBuilder()
+                .setMinimumStaminaRatio(HumanBreathingNumbers.AUTOMATIC_MIN_STAMINA_RATIO)
+                .setResumeStaminaRatio(HumanBreathingNumbers.AUTOMATIC_RESUME_STAMINA_RATIO)
+                .setCaptureEfficiency(HumanBreathingNumbers.AUTOMATIC_CAPTURE_EFFICIENCY)
+                .setBodyAction(breathingAction("human:automatic_breathing"))
+                .build();
+        var profile = BreathingProfile.newBuilder()
+                .setRespiratoryTissueId("diaphragm")
+                .setAttentionTissueId("attention_network")
+                .setRespiratoryWatts(HumanBreathingNumbers.RESPIRATORY_WATTS)
+                .setAttentionWatts(HumanBreathingNumbers.ATTENTION_WATTS)
+                .setBodyAction(breathingAction("human:breathing"))
+                .setAutomatic(automatic)
                 .setParticleVolumeBlocks(1);
         for (String side : List.of("left", "right")) {
-            profile.addOrgans(BreathingOrgan.newBuilder().setOrganId(side + "_lung")
-                    .setAirCapacityLiters(2.5).setAirflowLitersPerSecond(.625));
+            var organ = BreathingOrgan.newBuilder()
+                    .setOrganId(side + "_lung")
+                    .setAirCapacityLiters(HumanBreathingNumbers.LUNG_AIR_CAPACITY_LITERS)
+                    .setAirflowLitersPerSecond(HumanBreathingNumbers.LUNG_AIRFLOW_LITERS_PER_SECOND)
+                    .build();
+            profile.addOrgans(organ);
         }
         for (String attribute : INPUT_ATTRIBUTES) {
             profile.addRecipeIds("human:breath_" + attribute.substring(attribute.indexOf(':') + 1));
         }
         return profile.build();
+    }
+
+    private static BreathingActionReference breathingAction(String id) {
+        // 手动和自动各自绑定内容版本对应的组织占用动作。
+        return BreathingActionReference.newBuilder()
+                .setId(id)
+                .setVersion(CONTENT_VERSION)
+                .build();
     }
 
     private static QiInventory inventory(String attribute, double amount) {

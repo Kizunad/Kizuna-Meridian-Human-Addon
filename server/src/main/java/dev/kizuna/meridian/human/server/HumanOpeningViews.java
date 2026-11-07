@@ -48,7 +48,9 @@ public final class HumanOpeningViews {
         boolean opened = selected.getOpening().getStage() == MeridianOpeningStage.OPENED;
         var result = MeridianOperationView.newBuilder().setId("meridian:opening/" + targetId).setVersion(rule.getVersion())
                 .setMeridianId(targetId).setTitle("凝聚真元").setActive(running)
-                .setActionId(running ? "pause" : "start").setActionLabel(running ? "暂停凝聚" : "凝聚真元");
+                .setActionId(running ? "pause" : "start")
+                .setActionLabel(running ? "暂停凝聚" : "凝聚真元")
+                .setPrimaryMeterId("hold");
 
         // 进度条以体积为分子，避免高密度真元因为元数较大而显示错误满载。
         double bodyCapacity = body.getStructure().getMeridiansList().stream()

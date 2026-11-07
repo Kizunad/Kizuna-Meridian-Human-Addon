@@ -667,23 +667,8 @@ public final class HumanFabric implements ModInitializer {
                 // UI 为必装接线，按身体版本推送；缺少接收通道不能静默跳过。
                 requireChannel(player, MeridianChannels.BODY_VIEW);
                 if (sentRevisions.getOrDefault(id, -1L) != body.snapshot().revision()) {
-                    var update = BodyViewUpdate.newBuilder().setProtocolVersion(1)
-                            .setBody(BodyProtobuf.toMessage(body.snapshot()))
-                            .setPresentationResource("meridian_human:meridian/adult.pb");
-                    // 人体门槛和进度条由本包随同一版本发布，UI 不解释人体规则。
-                    boolean internalView = introspecting.contains(id) && ProgressionFabric.canInspect(player);
-                    update.setIntrospection(internalView);
-                    if (internalView) {
-                        update.addOperations(dev.kizuna.meridian.human.server.HumanOpeningViews.update(
-                                update.getBody(), HumanContent.bundle().getOpeningRulesList()));
-                        update.setOpening(MeridianOpeningOptions.newBuilder()
-                                .addAllRules(HumanContent.bundle().getOpeningRulesList()));
-                    } else {
-                        // 撤销订阅同时撤掉规则目录；基础身体快照仍供其他必装界面使用。
-                        update.setOpening(MeridianOpeningOptions.getDefaultInstance());
-                    }
-                    sendBodyView(player, update.build());
-                    sentRevisions.put(id, body.snapshot().revision());
+                    var projection = dev.kizuna.meridian.human.server.HumanCultivation.bodyView(body.snapshot());
+                    publishBodyView(player, projection);
                 }
                 if (watching.contains(id) && (changed || server.getTickCount() % 20 == 0)) {
                     player.sendOverlayMessage(Component.literal(HumanNumbers.summary(body)));
@@ -706,8 +691,50 @@ public final class HumanFabric implements ModInitializer {
         // 关闭连接无需发送；已连接却缺少必装 UI 通道必须报告错误。
         if (player.connection.isAcceptingMessages()) {
             requireChannel(player, MeridianChannels.GATHERING_RESPONSE);
-            ServerPlayNetworking.send(player, MeridianChannels.GATHERING_RESPONSE.payload(response.toByteArray()));
+            GatheringResponse projected = projectGathering(response);
+            ServerPlayNetworking.send(player, MeridianChannels.GATHERING_RESPONSE.payload(projected.toByteArray()));
+            if (projected.hasView()) {
+                var snapshot = projected.getView().getBody();
+                if (sentRevisions.getOrDefault(player.getUUID(), -1L) != snapshot.getRevision()) {
+                    publishBodyView(player, snapshot);
+                }
+            }
         }
+    }
+
+    private GatheringResponse projectGathering(GatheringResponse response) {
+        // 吐纳回执和普通身体推送携带同一资格投影，不能互相覆盖掉突破入口。
+        if (!response.hasView()) {
+            return response;
+        }
+        var body = BodyProtobuf.fromMessage(response.getView().getBody());
+        var projection = dev.kizuna.meridian.human.server.HumanCultivation.bodyView(body);
+        var view = response.getView().toBuilder()
+                .setBody(projection)
+                .build();
+        return response.toBuilder().setView(view).build();
+    }
+
+    private void publishBodyView(ServerPlayer player, dev.kizuna.meridian.protocol.pb.BodyMessages.BodySnapshot body) {
+        // 身体和操作目录按同一版本一起发布，持续吐纳时也能立即使用当前开脉条件。
+        boolean internalView = introspecting.contains(player.getUUID()) && ProgressionFabric.canInspect(player);
+        var update = BodyViewUpdate.newBuilder()
+                .setProtocolVersion(1)
+                .setBody(body)
+                .setPresentationResource("meridian_human:meridian/adult.pb")
+                .setIntrospection(internalView);
+        if (internalView) {
+            var rules = HumanContent.bundle().getOpeningRulesList();
+            update.addOperations(dev.kizuna.meridian.human.server.HumanOpeningViews.update(body, rules));
+            var opening = MeridianOpeningOptions.newBuilder()
+                    .addAllRules(rules)
+                    .build();
+            update.setOpening(opening);
+        } else {
+            update.setOpening(MeridianOpeningOptions.getDefaultInstance());
+        }
+        sendBodyView(player, update.build());
+        sentRevisions.put(player.getUUID(), body.getRevision());
     }
 
     private void sendBodyView(ServerPlayer player, BodyViewUpdate update) {

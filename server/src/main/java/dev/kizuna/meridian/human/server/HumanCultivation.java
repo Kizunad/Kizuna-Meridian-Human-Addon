@@ -15,6 +15,7 @@ import static dev.kizuna.meridian.human.server.HumanCultivationNumbers.*;
 
 /** 中焦周天的可信人体策略；只生成一次原子计划，真元仍由 Framework 保存。 */
 public final class HumanCultivation {
+    private static final double REFINEMENT_REFERENCE_DENSITY = 0.01;
     public static final String PROGRESS = "human:cultivation";
     public static final String CIRCUIT = "human-middle-jiao";
     public static final String ACTION = "human.circuit";
@@ -31,8 +32,10 @@ public final class HumanCultivation {
         Any progress = body.addonProgress().get(PROGRESS);
         CultivationState state;
         if (progress == null) {
-            state = CultivationState.newBuilder().setSchemaVersion(1)
-                    .setLastMillis(body.settledAt().elapsedMillis()).build();
+            state = CultivationState.newBuilder()
+                    .setSchemaVersion(1)
+                    .setLastMillis(body.settledAt().elapsedMillis())
+                    .build();
         } else {
             try {
                 state = progress.unpack(CultivationState.class);
@@ -48,6 +51,7 @@ public final class HumanCultivation {
         return state.toBuilder()
                 .setBrainStaminaRatio(brainStaminaRatio(body, 0))
                 .setAutomaticMinimumStaminaRatio(AUTOMATIC_MIN_STAMINA_RATIO)
+                .setAutomaticResumeStaminaRatio(AUTOMATIC_RESUME_STAMINA_RATIO)
                 .setAutomaticEfficiency(AUTOMATIC_EFFICIENCY)
                 .setBreathCycleMillis(BREATH_CYCLE_MILLIS)
                 .setExhaleStartMillis(EXHALE_START_MILLIS)
@@ -98,9 +102,8 @@ public final class HumanCultivation {
             if (!openedAndIntact(body) || body.openingTask() != null && body.openingTask().active()) {
                 stop(plan, state, transit, "周天通路受损，自动运行已取消");
                 transit = null;
-            } else if (brainStaminaRatio(body, 0) >= AUTOMATIC_MIN_STAMINA_RATIO) {
-                state.setRunning(true).setAutomatic(true).setAutomaticWaiting(false).setPushing(false).setThrust(1)
-                        .setGateIndex(0).setGateHits(0).setGateRetryUntil(0).setReason("");
+            } else if (brainStaminaRatio(body, 0) >= AUTOMATIC_RESUME_STAMINA_RATIO) {
+                resumeAutomatic(state);
             }
         }
         if (input != null && input.getSequence() > state.getLastSequence()) {
@@ -142,6 +145,47 @@ public final class HumanCultivation {
         return plan.build();
     }
 
+    public static BodyMessages.BodySnapshot bodyView(BodySnapshot body) {
+        // UI 条件来自当前权威快照，不能沿用上次活动保存时的候选数量。
+        CultivationState current = state(body);
+        QiTransit transit = body.transits().stream()
+                .filter(item -> item.id().equals(CIRCUIT))
+                .findFirst().orElse(null);
+        var plan = new HumanQiPlan(body);
+        CultivationState projection = current.toBuilder()
+                .setBreakthroughAvailable(canStartBreakthrough(plan, current, transit))
+                .build();
+        return BodyProtobuf.toMessage(body).toBuilder()
+                .putAddonProgress(PROGRESS, Any.pack(projection))
+                .build();
+    }
+
+    private static boolean canStartBreakthrough(HumanQiPlan plan, CultivationStateOrBuilder state,
+                                                QiTransit transit) {
+        // 展示与启动使用同一条件，当前事务已搬运的候选和燃料也计入判断。
+        if (plan.body.vitality().dead() || plan.body.realm() != Realm.WANDERING_QI
+                || !state.getRunning() || state.getBreakthrough() || !openedAndIntact(plan.body)) {
+            return false;
+        }
+        double wallQi = plan.body.meridianStates().stream()
+                .mapToDouble(item -> plan.get("w:" + item.id().value()).totalQi())
+                .sum();
+        return candidateQi(plan, transit) >= CANDIDATE_QI && wallQi >= STARTING_WALL_QI;
+    }
+
+    private static void resumeAutomatic(CultivationState.Builder state) {
+        // 休息跨过恢复线后才重新开始一圈，当前边界不追补等待期间的做功。
+        state.setRunning(true)
+                .setAutomatic(true)
+                .setAutomaticWaiting(false)
+                .setPushing(false)
+                .setThrust(1)
+                .setGateIndex(0)
+                .setGateHits(0)
+                .setGateRetryUntil(0)
+                .setReason("");
+    }
+
     public static BodyActivity cancel(BodySnapshot body) {
         // 离线、重置和关闭会话立即撤销活动，不把离线时长追溯算作做功或突破。
         var plan = new HumanQiPlan(body);
@@ -169,6 +213,10 @@ public final class HumanCultivation {
         switch (input.getOperation()) {
             case START_MANUAL, START_AUTOMATIC -> {
                 boolean automatic = input.getOperation() == CultivationInput.Operation.START_AUTOMATIC;
+                // 重复选择自动模式保留休息意图，不能绕过独立的恢复线。
+                if (automatic && state.getAutomaticWaiting()) {
+                    return transit;
+                }
                 double spentBrainJoules = plan.activity.getEffortsList().stream()
                         .filter(effort -> effort.getOrganId().equals("brain"))
                         .mapToDouble(effort -> effort.getWatts() * effort.getSeconds()).sum();
@@ -230,8 +278,7 @@ public final class HumanCultivation {
                     // 重复点击保持正在进行的连续计时，不重置已燃烧的这一秒。
                     return transit;
                 }
-                if (plan.body.realm() != Realm.WANDERING_QI || !state.getRunning() || !openedAndIntact(plan.body)
-                        || candidateQi(plan, transit) < CANDIDATE_QI || plan.body.wallQiTotal() < STARTING_WALL_QI) {
+                if (!canStartBreakthrough(plan, state, transit)) {
                     state.setReason("突破需八脉全开、运转周天、候选至少50元、外壁至少60元");
                     return transit;
                 }
@@ -319,11 +366,17 @@ public final class HumanCultivation {
                 refined.add(qi);
                 continue;
             }
-            double x = StrictMath.log10(qi.density() / .01);
+            double x = StrictMath.log10(qi.density() / REFINEMENT_REFERENCE_DENSITY);
             double requestedGain = DENSITY_GAIN * (1 - DENSITY_SLOWDOWN * x) * Math.max(0, Math.min(1, efficiency));
             double density = Math.min(MAX_DENSITY, qi.density() * StrictMath.pow(10, requestedGain));
             double actualGain = StrictMath.log10(density / qi.density());
             double amount = qi.amount() * StrictMath.pow(10, -LOSS_EXPONENT * actualGain);
+            double loss = qi.amount() - amount;
+            if (loss < QiAccounting.MIN_TRANSFER_QI) {
+                // 密度封顶附近的舍入尾差不能入账；保留原量和原密度，不免费提纯或丢弃损耗。
+                refined.add(qi);
+                continue;
+            }
             refined.add(new Qi(qi.attribute(), amount, density));
         }
         return new QiInventory(refined);

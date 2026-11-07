@@ -25,7 +25,7 @@ Human 不携带具体功法目录，不复制协议或新增战斗 UI 频道。
 
 ## 周天、外壁与相变接线
 
-规则和调试命令见[中焦周天](Middle-Jiao-Cultivation.md)。新增 `shared/` 子项目通过 protoc 生成 `CultivationInput` / `CultivationState`，client、server 与 Human-UI 共用；`CultivationState.automatic_waiting` 表示自动周天保留意图但暂停做功，服务端恢复到启动线后续跑。Fabric 安装包内嵌 shared，开发全装配脚本显式加载。网络频道 `meridian_human:cultivation` 只接操作边沿和按键tick，绑定真实玩家及服务端时钟，每秒共用40包输入上限。未读残卷拒绝，重置/断线/关窗取消主动周天与动员及自动等待。
+规则和调试命令见[中焦周天](Middle-Jiao-Cultivation.md)。`shared/` 子项目通过 protoc 生成 `CultivationInput` / `CultivationState`，client、server 与 Human-UI 共用；`CultivationState.automatic_waiting` 表示自动周天保留意图但暂停做功，低于80%暂停后，服务端等待恢复至至少90%才续跑。Fabric 安装包内嵌 shared，开发全装配脚本显式加载。网络频道 `meridian_human:cultivation` 只接操作边沿和按键tick，绑定真实玩家及服务端时钟，每秒共用40包输入上限。未读残卷拒绝，重置/断线/关窗取消主动周天与动员及自动等待。
 
 `HumanPlayerBody` 在250ms活动边界生成可信 Protobuf 计划，经 Framework `handleActivity` 原子执行；空闲且没有储备交换时不轮询。脾配方完成仍走 Framework 器官事件。所有模块在适用端必装，没有缺包分支。
 
@@ -172,6 +172,8 @@ python3 "scripts/check_docs.py"
 
 “经脉”窗口通过 `meridian:opening_request` 提交框架 `MeridianOpeningRequest`，`meridian:opening_response` 返回 `ResponseEnvelope`。宿主绑定当前玩家、在服务器线程串行执行，与吐纳共享每秒 40 包额度；格式异常只拒绝该包，旧连接消息丢弃。首次 `meridian:body_view` 附带 Human 规则选项，后续按身体 revision 推送变化；客户端不上传时间或开脉结果。断线暂停开脉并清除连接回执缓存，已完成成长仍由原身体保存。这些 `meridian:*` 频道的 ID、方向与字节上限统一由 Framework 的 `MeridianChannels` 登记，`meridian_human:cultivation` 由本仓 `HumanChannels` 登记；Human 只注册收包处理。
 
+普通身体推送与吐纳回执统一携带 `HumanCultivation.bodyView` 的当前突破资格投影，避免回执覆盖入口状态。吐纳更新身体版本时同步发布相同版本的开脉目录；内观订阅和残卷权限仍由服务端独立检查。
+
 本包登记 `/meridian body status`（当前动作、下肢最小余力、身体 revision；注册了行走负荷提供者时末尾追加一行负荷说明）、`/meridian body tissue`（单个组织的实际疲劳、当前耐力/力量/功率，ID 支持补全）和观察频道 `/meridian watch body`（快捷栏上方的实时下肢余力），写法见 [Framework 指令页](https://github.com/Kizunad/Kizuna-Meridian-Mod-Framework/wiki/Commands)。
 
 `body status` 是本包的三级节点，其他附属经公开入口 `HumanBodyStatus` 挂入：`registerView` 登记非玩家目标的身体视图（Threatening 的类人生物快照），按登记顺序询问，第一个认领目标的视图负责输出；`registerDetail` 登记 `full` 完整明细（Debug），只能登记一次。没有登记明细时不出现 `full`。
@@ -204,7 +206,7 @@ Fabric 宿主现在接收 `meridian:gathering_request`，返回 `meridian:gather
 
 主世界按 `config/meridian-environment.toml` 的区域尺度与默认地形配置首次生成库存，读取区域中心群系元数据，不扫描方块。相同区域内玩家共享来源和供给预算；换区先结清旧区间，30 秒续窗保留剩余库存。其他维度暂不提供环境摄入。身体、区域、释放账户、待入账队列、释放 ID 和回执一起保存到 `meridian_human.dat`；玩家死亡、开脉中断和加工损耗按发生时位置排队，在区域续窗时从默认账户转回区域，非主世界留在默认账户。肺摄入回执的炼化损耗仍直接归还选定区域，不重复归位。当前接入未执行区域间扩散。
 
-进世界按 `I` → 吐纳：原三维交互直接操作当前玩家身体。有效吸呼占用膈肌与注意组织，停止后按实际空闲区间恢复；自动吐纳低于80%时释放膈肌占用并保留自动意图，服务端在耐力恢复到启动线后续跑，等待期间不补算吸呼或摄入。连接重建不补满身体；断线清理本宿主会话占用和自动等待，异常保存留下的占用在重连时清理，其他附属动作保留。已摄入的原料和在途货物保存为现有事实。
+进世界按 `I` → 吐纳：原三维交互直接操作当前玩家身体。有效吸呼占用膈肌与注意组织，停止后按实际空闲区间恢复；自动吐纳低于80%时释放膈肌占用并保留自动意图，服务端在耐力恢复至至少90%后续跑，等待期间不补算吸呼或摄入。连接重建不补满身体；断线清理本宿主会话占用和自动等待，异常保存留下的占用在重连时清理，其他附属动作保留。已摄入的原料和在途货物保存为现有事实。
 
 Kizuna Players Animation 为客户端和服务端必装依赖，在 settings 中以源码组合，编译与开发运行使用其当前输出，打坐还要求动画资源包含 `meditate` 和模型。
 

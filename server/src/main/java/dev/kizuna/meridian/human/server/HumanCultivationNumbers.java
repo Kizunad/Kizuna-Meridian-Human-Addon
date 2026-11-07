@@ -15,7 +15,8 @@ public final class HumanCultivationNumbers {
     public static final double DENSITY_SLOWDOWN = .7;
     public static final double LOSS_EXPONENT = .66;
     public static final double AUTOMATIC_EFFICIENCY = .5;
-    public static final double AUTOMATIC_MIN_STAMINA_RATIO = .8;
+    public static final double AUTOMATIC_MIN_STAMINA_RATIO = 0.8;
+    public static final double AUTOMATIC_RESUME_STAMINA_RATIO = 0.9;
     public static final double BRAIN_WATTS = 1;
     public static final double ATTENTION_WATTS = .5;
     public static final double MOBILIZE_WATTS = 2;
