@@ -69,6 +69,8 @@ loom {
 }
 
 // 在真实 Minecraft 服务端运行玩家身体宿主；测试入口不进入发布产物。
+def humanGametestDirectory = providers.gradleProperty('humanGametestRunDir')
+        .getOrElse("build/gametest-${System.currentTimeMillis()}")
 sourceSets {
     gametest {
         compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
@@ -88,7 +90,7 @@ loom {
             server()
             name 'Human GameTest'
             source sourceSets.gametest
-            runDir 'build/gametest'
+            runDir humanGametestDirectory
             vmArg '-Dfabric-api.gametest'
             vmArg '-Dfabric-api.gametest.report-file=build/gametest-results.xml'
         }
@@ -99,14 +101,6 @@ loom {
             runDir 'build/spawn-protection'
             vmArg '-Dmeridian.human.spawnProtectionTest=true'
         }
-    }
-}
-
-tasks.named('runGametest') {
-    doFirst {
-        // 每局从空目录新建世界：GameTest 服务端按自带的平坦预设建世界，旧目录只会累积上一局的区块、实体、假玩家与模组存档。
-        // 26.2 把生成设置与游戏规则拆到了 data/minecraft，只留 level.dat 会退回随机种子的默认地形，所以整个目录删掉。
-        file('build/gametest/world').deleteDir()
     }
 }
 

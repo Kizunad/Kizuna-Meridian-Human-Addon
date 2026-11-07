@@ -39,6 +39,7 @@ public final class HumanErrors {
     public static final String EXPORT_FAILED = "人体 Protobuf 内容导出失败";
     public static final String INVALID_SAVED_BODY = "人体存档损坏或版本不兼容，已停止加载，未重置身体";
     public static final String INVALID_MOVEMENT_TIME = "人体运动结算时间不能倒退或跨过未记录的运动切换";
+    public static final String INVALID_FLIGHT_TIME = "飞行时间必须是有限非负 tick";
     public static final String BODY_MISSING = "当前玩家尚未绑定人体";
     public static final String TISSUE_MISSING = "当前人体不存在此组织";
     public static final String STATUS_VIEW_REQUIRED = "身体状态视图不能为空";

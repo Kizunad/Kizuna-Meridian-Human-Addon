@@ -11,6 +11,9 @@ public final class HumanTechniqueAnimations {
         if (presentationId.startsWith("meridian_door_breaker:door_breaker_")) {
             return doorBreaker(path, selectedHand);
         }
+        if (presentationId.startsWith("meridian_wayfarer:wayfarer_") && selectedHand == CastHand.OFF) {
+            return path + "_off";
+        }
         if (!path.equals("technique_dash")) {
             return path;
         }

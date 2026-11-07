@@ -22,6 +22,7 @@
 - [游炁修炼与开脉要求](Cultivation.md)
 - [依赖、构建与宿主接入](Integration.md)
 - [玩家功法宿主](Technique-Host.md)
+- [射击宿主与原版箭](Projectiles.md)
 - [人体模型与空间位置](Presentation.md)
 
 ## 接下来的边界

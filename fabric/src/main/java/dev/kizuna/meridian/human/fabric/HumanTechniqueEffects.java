@@ -38,6 +38,7 @@ final class HumanTechniqueEffects {
             .buildAndRegister(Identifier.fromNamespaceAndPath("meridian_human", "technique_player_break_blocks"));
     private final Map<UUID, TechniqueWorldEffects> worldEffects = new HashMap<>();
     private final Map<UUID, HumanLegStrikeEffects> legEffects = new HashMap<>();
+    private final Map<UUID, HumanProjectileEffects> projectileEffects = new HashMap<>();
     // 每个玩家正在施放的 cast ID 及该式是否放行右键。
     private final Map<UUID, Map<String, Boolean>> castingIds = new HashMap<>();
     private final Map<UUID, Map<String, EffectIntent>> requests = new HashMap<>();
@@ -123,6 +124,10 @@ final class HumanTechniqueEffects {
             HumanTechniquePresentation.EVENT.invoker().apply(player, submission.requestId(), effect);
         } else if (effect.hasLegStrike()) {
             legWorld(player).strike(player, effect);
+        } else if (effect.hasTargetLock()) {
+            projectiles(player).lockTarget(effect);
+        } else if (effect.hasLaunchProjectile()) {
+            projectiles(player).launch(effect);
         } else if (effect.hasWeaponStrike()) {
             world(player).strike(effect);
         } else if (effect.hasBreakBlocks()) {
@@ -151,12 +156,19 @@ final class HumanTechniqueEffects {
         // 承接先结束旧式再开始新式，施放状态按稳定身份独立维护。
         UUID playerId = player.getUUID();
         if (effect.getMovement().getAction() == MovementAction.LOCK) {
+            boolean allowUse = effect.getMovement().getAllowUseWhileCasting();
+            if (!allowUse) {
+                player.stopUsingItem();
+            }
             castingIds.computeIfAbsent(playerId, id -> new HashMap<>())
-                    .put(effect.getCastId(), effect.getMovement().getAllowUseWhileCasting());
+                    .put(effect.getCastId(), allowUse);
         } else {
             Map<String, Boolean> casts = castingIds.get(playerId);
             if (casts != null) {
-                casts.remove(effect.getCastId());
+                Boolean allowUse = casts.remove(effect.getCastId());
+                if (Boolean.FALSE.equals(allowUse)) {
+                    player.stopUsingItem();
+                }
                 if (casts.isEmpty()) {
                     castingIds.remove(playerId);
                 }
@@ -228,6 +240,7 @@ final class HumanTechniqueEffects {
         executingEffects.remove(playerId);
         worldEffects.remove(playerId);
         legEffects.remove(playerId);
+        projectileEffects.remove(playerId);
         castingIds.remove(playerId);
         HumanTechniquePresentation.forget(playerId);
     }
@@ -240,6 +253,7 @@ final class HumanTechniqueEffects {
         executingEffects.clear();
         worldEffects.clear();
         legEffects.clear();
+        projectileEffects.clear();
         castingIds.clear();
         HumanTechniquePresentation.clear();
     }
@@ -296,6 +310,12 @@ final class HumanTechniqueEffects {
         return legEffects.computeIfAbsent(player.getUUID(), id -> new HumanLegStrikeEffects());
     }
 
+    private HumanProjectileEffects projectiles(ServerPlayer player) {
+        // 每个玩家独立维护施放锁点，敌我规则与玩家近战保持一致。
+        return projectileEffects.computeIfAbsent(player.getUUID(),
+                ignored -> new HumanProjectileEffects(player, target -> !player.isAlliedTo(target)));
+    }
+
     private void finish(ServerPlayer player, String castId) {
         // 收势同时释放两类打击的去重游标，并重置原版攻击冷却。
         world(player).finish(castId);
@@ -303,6 +323,10 @@ final class HumanTechniqueEffects {
         HumanLegStrikeEffects legWorld = legEffects.get(playerId);
         if (legWorld != null) {
             legWorld.finish(castId);
+        }
+        HumanProjectileEffects projectiles = projectileEffects.get(playerId);
+        if (projectiles != null) {
+            projectiles.finish(castId);
         }
     }
 }

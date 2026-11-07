@@ -43,4 +43,17 @@ public class HumanTechniqueAnimationsTest {
         assertEquals("technique_dash_" + suffix, HumanTechniqueAnimations.resolve(
                 "basic:technique_dash", direction, CastHand.MAIN));
     }
+
+    @Test
+    public void wayfarerClipsFollowTheFrozenWeaponHand() {
+        // 九式与训练各自保留原片段，副手只加后缀，物理左右手交给动画运行时。
+        var direction = new HumanTechniqueAnimations.Direction(0, 0, 0);
+        for (String move : new String[]{"full_draw", "pearls", "bow_strike", "repeater", "gale", "kneeling",
+                "parthian", "arrow_rain", "convergence", "dry_draw"}) {
+            String clip = "wayfarer_" + move;
+            String presentation = "meridian_wayfarer:" + clip;
+            assertEquals(clip, HumanTechniqueAnimations.resolve(presentation, direction, CastHand.MAIN));
+            assertEquals(clip + "_off", HumanTechniqueAnimations.resolve(presentation, direction, CastHand.OFF));
+        }
+    }
 }

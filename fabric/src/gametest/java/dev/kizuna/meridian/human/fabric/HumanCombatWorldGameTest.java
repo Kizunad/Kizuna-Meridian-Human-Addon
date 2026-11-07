@@ -41,6 +41,8 @@ public final class HumanCombatWorldGameTest {
     private static final int JOIN_INVULNERABILITY_TICKS = 60;
     private static final String BREAK_BLOCKS_RULE = "gamerule meridian_human:technique_player_break_blocks";
     private static final int SWEEP_TARGET_LIMIT = 5;
+    private static final double TRIP_UPWARD_PER_TICK = 0.1;
+    private static final List<Double> TRIP_INITIAL_VERTICAL_SPEEDS = List.of(-0.4, 0.0, 0.6);
     private static final int UNBREAKING_LEVEL = 3;
     private static final int WEAR_SAMPLES = 30;
     private static final int CLEAVE_WEAR = 3;
@@ -241,6 +243,33 @@ public final class HumanCombatWorldGameTest {
             fixture.human.player.setGameMode(GameType.CREATIVE);
             fixture.submit(HumanCombatFixture.legStrike("leg_creative"));
             context.assertTrue(boots.getDamageValue() == 1, "创造模式末击磨了靴子");
+        }
+        context.succeed();
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void legTripClearsHorizontalMotionAndLiftsFallingOrJumpingTargets(GameTestHelper context) {
+        // 从实际玩家宿主击中目标，验证下落、站地和跳跃均转换为相同绊倒速度。
+        for (double initialVertical : TRIP_INITIAL_VERTICAL_SPEEDS) {
+            try (var fixture = new HumanCombatFixture(context)) {
+                var target = fixture.target(0, HumanCombatFixture.TARGET_DISTANCE);
+                target.setDeltaMovement(1, initialVertical, 1);
+                EffectIntent base = HumanCombatFixture.legStrike(UUID.randomUUID().toString());
+                var knockback = base.getLegStrike().getStrike().getKnockback().toBuilder()
+                        .setValue(1)
+                        .build();
+                var strike = base.getLegStrike().getStrike().toBuilder()
+                        .setKnockbackKind(TechniqueMessages.LegKnockbackKind.TRIP)
+                        .setKnockback(knockback)
+                        .build();
+                var intent = base.getLegStrike().toBuilder().setStrike(strike).build();
+                fixture.submit(base.toBuilder().setLegStrike(intent).build());
+                context.assertTrue(target.doses.size() == 1, "绊倒没有通过真实命中入口");
+                Vec3 velocity = target.getDeltaMovement();
+                near(context, velocity.x, 0, "绊倒横向速度");
+                near(context, velocity.z, 0, "绊倒前后速度");
+                near(context, velocity.y, TRIP_UPWARD_PER_TICK, "绊倒向上速度");
+            }
         }
         context.succeed();
     }

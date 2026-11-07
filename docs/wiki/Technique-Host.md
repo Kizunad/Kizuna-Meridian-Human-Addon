@@ -44,7 +44,12 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 击退，Damage 类型自身的 `#minecraft:bypasses_shield` 标签决定是否绕过盾。最后一击只磨脚部装备一次，
 创造模式不磨损；每次实际出手播放一次原版重击声，并在收势时重置原版攻击冷却。
 
+绊倒清空目标水平速度，并将竖直速度设为向上 2 米/秒（原版每 tick 0.1 格），覆盖此前的下落或跳跃速度。
+
 ## 冲量与表现
+
+`launch_projectile`、`target_lock` 和新增双手弓弩事实见[射击宿主与原版箭](Projectiles.md)。
+公开执行器由玩家与类人生物共用；射击效果沿用本页的回执幂等与取消清理。
 
 冲量设置实体速度，换算为 `速度（m/s）÷20 = 格/tick`，随后设置 `hurtMarked=true`。
 已核对 26.2：`ServerEntity.sendChanges` 看到此标记后，经跟踪表的 `sendToTrackingPlayersAndSelf` 向观察者和玩家本人发送

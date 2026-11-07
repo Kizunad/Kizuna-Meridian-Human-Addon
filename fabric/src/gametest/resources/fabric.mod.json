@@ -23,7 +23,9 @@
       "dev.kizuna.meridian.human.fabric.HumanExertionGameTest",
       "dev.kizuna.meridian.human.fabric.HumanMovementRecoveryGameTest",
       "dev.kizuna.meridian.human.fabric.HumanCombatWorldGameTest",
-      "dev.kizuna.meridian.human.fabric.HumanCombatServiceGameTest"
+      "dev.kizuna.meridian.human.fabric.HumanCombatServiceGameTest",
+      "dev.kizuna.meridian.human.fabric.HumanProjectileGameTest",
+      "dev.kizuna.meridian.human.fabric.HumanProjectileConvergenceGameTest"
     ]
   }
 }
