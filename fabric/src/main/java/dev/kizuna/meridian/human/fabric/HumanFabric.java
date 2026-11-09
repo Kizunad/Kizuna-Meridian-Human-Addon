@@ -99,16 +99,19 @@ public final class HumanFabric implements ModInitializer {
                 .resolve(HumanDamageRules.FILE_NAME));
         // 宿主生命周期独立于客户端窗口，关掉 UI 后玩家移动仍正常记入同一身体。
         HumanTechniqueEffects.initialize();
+        HumanControl.initialize();
         HumanStaggerLock.initialize();
         HumanTempo.initialize();
         AttackEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
-            if (HumanTechniqueHost.isCasting(player.getUUID()) || HumanStaggerLock.isLocked(player.getUUID())) {
+            if (HumanTechniqueHost.isCasting(player.getUUID()) || HumanStaggerLock.isLocked(player.getUUID())
+                    || HumanControl.blocksAction(player.getUUID())) {
                 return InteractionResult.FAIL;
             }
             return InteractionResult.PASS;
         });
         AttackBlockCallback.EVENT.register((player, world, hand, pos, side) -> {
-            if (HumanTechniqueHost.isCasting(player.getUUID()) || HumanStaggerLock.isLocked(player.getUUID())) {
+            if (HumanTechniqueHost.isCasting(player.getUUID()) || HumanStaggerLock.isLocked(player.getUUID())
+                    || HumanControl.controlled(player.getUUID())) {
                 return InteractionResult.FAIL;
             }
             return InteractionResult.PASS;
@@ -333,7 +336,7 @@ public final class HumanFabric implements ModInitializer {
     private static InteractionResult useWhileCasting(
             Player player, InteractionHand hand, BlockPos target) {
         // FAIL 让原版不再处理这次右键；放方块被拦时原版随后补发方块更新，客户端预测的方块会被纠正。
-        if (HumanTechniqueHost.blocksUse(player, hand, target)) {
+        if (HumanControl.controlled(player.getUUID()) || HumanTechniqueHost.blocksUse(player, hand, target)) {
             return InteractionResult.FAIL;
         }
         return InteractionResult.PASS;

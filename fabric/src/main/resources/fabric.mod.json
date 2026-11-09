@@ -10,6 +10,8 @@
   "mixins": ["meridian-human.mixins.json"],
   "entrypoints": {
     "main": ["dev.kizuna.meridian.human.fabric.HumanFabric"],
+    "client": ["dev.kizuna.meridian.human.fabric.client.HumanControlClient"],
+    "meridian_player_control_host": ["dev.kizuna.meridian.human.fabric.HumanControl"],
     "meridian_technique_host": ["dev.kizuna.meridian.human.fabric.HumanTechniqueHost"],
     "meridian_health_host": ["dev.kizuna.meridian.human.fabric.HumanHealthHost"],
     "meridian_activity_host": ["dev.kizuna.meridian.human.fabric.HumanActivityHost"],

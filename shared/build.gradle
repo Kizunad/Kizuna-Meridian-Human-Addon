@@ -5,4 +5,5 @@ protobuf { protoc { artifact = "com.google.protobuf:protoc:${libs.versions.proto
 dependencies {
     api libs.protobuf.java
     api 'local.meridian:client'
+    api 'dev.kizuna.meridian.technique:shared'
 }

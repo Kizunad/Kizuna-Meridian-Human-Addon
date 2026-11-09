@@ -5,6 +5,7 @@ import dev.kizuna.meridian.protocol.pb.BreathingMessages.BreathControl;
 import dev.kizuna.meridian.protocol.pb.GatheringMessages.GatheringRequest;
 import dev.kizuna.meridian.protocol.pb.GatheringMessages.GatheringView;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.CommandReceipt;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import net.minecraft.server.level.ServerPlayer;
 
 import java.util.List;
@@ -48,5 +49,15 @@ public final class HumanGameTestAccess {
         // 接触回执包含真实环境扣账和采样体积，不能以器官倍率查询代替摄入证据。
         return HumanTechniqueHost.state().find(player.getUUID()).receipts().stream()
                 .filter(CommandReceipt::hasQiCapture).toList();
+    }
+
+    public static void openMeridians(ServerPlayer player, String target) {
+        // 整体回归沿管理命令的开脉入口准备施放条件，仍由原身体服务校验并原子提交。
+        HumanPlayerBody body = HumanTechniqueHost.state().find(player.getUUID());
+        long now = player.level().getServer().overworld().getGameTime() * MILLIS_PER_TICK;
+        FailureCode result = body.completeOpening(now, target);
+        if (result != FailureCode.FAILURE_CODE_UNSPECIFIED) {
+            throw new IllegalStateException("测试开脉失败：" + result);
+        }
     }
 }

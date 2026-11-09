@@ -4,6 +4,14 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 
 /** 人体内容工具的错误集中定义；身体业务拒绝仍由框架协议表达。 */
 public final class HumanErrors {
+    public static final String CONTROL_DRIVER_MISSING = "玩家受控模式缺少唯一决策入口";
+    public static final String INVALID_CONTROL_COMMAND = "玩家控制来源、载荷或会话无效";
+    public static final String INVALID_CONTROL_PROTOCOL = "玩家控制协议无效";
+    public static final String CONTROL_INTENT_TOO_LARGE = "受控意图超过边界";
+    public static final String INVALID_CONTROL_INTENT_PROTOCOL = "受控意图协议无效";
+    public static final String INVALID_CONTROL_INTENT = "受控意图身份或数值无效";
+    public static final String CONTROL_TARGET_DENIED = "受控意图攻击目标越权";
+    public static final String CONTROL_CHANNEL_MISSING = "玩家缺少 Human 受控输入通道";
     public static final String INVALID_REVIVAL = "人体复活寿元费用数据缺失或无效";
     public static final String REVIVAL_MESSAGE = "大难不死，元气大伤，折损%s寿元";
     public static final String INVALID_TECHNIQUE_OPERATION = "功法宿主操作无效";

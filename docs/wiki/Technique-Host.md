@@ -5,6 +5,8 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 功法库 `meridian_technique` 是服务端硬依赖，协议与服务直接引用相邻 Technique Framework，
 不复制 Protobuf，也不新增客户端频道。具体功法由独立内容目录提供；Human 正式产物不携带功法定义。
 
+受控会话通过可信准入拒绝玩家自己的新式，并在有限调用作用域内代发，详见[玩家受控模式](Player-Control.md)。
+
 ## 身体与活动
 
 读档先经 Framework 授权命令补齐旧身体的空模块标签，再恢复玩家与功法认领；

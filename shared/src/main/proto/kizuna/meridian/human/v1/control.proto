@@ -1,0 +1,58 @@
+syntax = "proto3";
+package kizuna.meridian.human.v1;
+option java_package = "dev.kizuna.meridian.human.protocol.pb";
+option java_outer_classname = "ControlMessages";
+import "kizuna/meridian/v1/body.proto";
+import "kizuna/meridian/technique/v1/technique.proto";
+
+// 可信控制器发给玩家宿主；结束不能借旧会话撤掉后来建立的控制。
+message ControlSession {
+  string session_id = 1;
+  string player_uuid = 2;
+  string caster_uuid = 3;
+  int64 started_tick = 4;
+  int64 ends_tick = 5;
+  string opponent_uuid = 6;
+}
+message ControlCommand {
+  enum Action { ACTION_UNSPECIFIED = 0; START = 1; UPDATE = 2; END = 3; }
+  Action action = 1;
+  ControlSession session = 2;
+  string reason = 3;
+}
+message ControlReply { string session_id = 1; bool accepted = 2; }
+message ControlPoint { double x = 1; double y = 2; double z = 3; }
+message ControlEntity {
+  string uuid = 1;
+  ControlPoint position = 2;
+  ControlPoint eyes = 3;
+  bool visible = 4;
+}
+message ControlRequest {
+  ControlSession session = 1;
+  int64 sequence = 2;
+  int64 server_tick = 3;
+  kizuna.meridian.v1.BodySnapshot body = 4;
+  repeated kizuna.meridian.technique.v1.KnownTechnique known = 5;
+  kizuna.meridian.technique.v1.HeldItems held_items = 6;
+  ControlPoint position = 7;
+  repeated ControlEntity nearby = 8;
+  float yaw = 9;
+  float pitch = 10;
+}
+// 只有意图通过 Framework 字节通道发往玩家；身体快照和决策请求永不下发。
+message ControlIntent {
+  string session_id = 1;
+  int64 sequence = 2;
+  int64 server_tick = 3;
+  int64 valid_until_tick = 4;
+  float forward = 5;
+  float sideways = 6;
+  float yaw = 7;
+  float pitch = 8;
+  bool jump = 9;
+  bool sprint = 10;
+  string attack_uuid = 11;
+  kizuna.meridian.technique.v1.TechniqueReference technique = 12;
+  bool ended = 13;
+}

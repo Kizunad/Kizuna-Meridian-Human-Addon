@@ -30,6 +30,7 @@ public final class HumanMovementRecoveryGameTest {
     private static final double LOWER_LEG_HP = 18;
     private static final long MILLIS_PER_TICK = 50;
     private static final long PAUSE_OBSERVATION_TICKS = 3;
+    private static final long LOGIN_SETTLE_TICKS = 2;
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void destroyedLegRejectsWalkingAndSprintingWithoutPausingBody(GameTestHelper context) {
@@ -79,11 +80,15 @@ public final class HumanMovementRecoveryGameTest {
     public void missingRequiredChannelPausesOnceAndReconnectPreservesBody(GameTestHelper context) {
         // 缺少必装 UI 接线是真实宿主故障，模拟客户端撤销通道触发正式 tick 的暂停路径。
         var fixture = new HumanTechniqueTestPlayer(context);
-        damage(context, fixture, HealthTarget.newBuilder().setPartId(LOWER_LEG).build(), 1);
-        var unregister = new RegistrationPayload(RegistrationPayload.UNREGISTER,
-                List.of(MeridianChannels.BODY_VIEW.type().id()));
-        fixture.player.connection.handleCustomPayload(new ServerboundCustomPayloadPacket(unregister));
-        context.runAfterDelay(PAUSE_OBSERVATION_TICKS, () -> verifyPausedAndReconnect(context, fixture));
+        context.runAfterDelay(LOGIN_SETTLE_TICKS, () -> {
+            // 登录附属先完成首 tick 恢复，再注入运行中通道撤销，避免故障落入登录恢复阶段。
+            var hit = HealthTarget.newBuilder().setPartId(LOWER_LEG).build();
+            damage(context, fixture, hit, 1);
+            var unregister = new RegistrationPayload(RegistrationPayload.UNREGISTER,
+                    List.of(MeridianChannels.BODY_VIEW.type().id()));
+            fixture.player.connection.handleCustomPayload(new ServerboundCustomPayloadPacket(unregister));
+            context.runAfterDelay(PAUSE_OBSERVATION_TICKS, () -> verifyPausedAndReconnect(context, fixture));
+        });
     }
 
     private static void verifyPausedAndReconnect(GameTestHelper context, HumanTechniqueTestPlayer fixture) {

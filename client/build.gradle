@@ -4,7 +4,10 @@ dependencies {
     api project(':shared')
     // local.meridian 是 settings 中的本地替换键，不是已发布的 Maven 坐标。
     compileOnlyApi 'local.meridian:client'
+    testImplementation libs.junit4
 }
+
+test { useJUnit() }
 
 sourceSets {
     tooling {

@@ -209,7 +209,7 @@ final class HumanTechniqueEffects {
         return worldEffects.computeIfAbsent(player.getUUID(), id -> new TechniqueWorldEffects(player,
                 () -> player.level().getGameRules().get(PLAYER_BREAK_BLOCKS)
                         ? TechniqueWorldEffects.Policy.PLAYER : TechniqueWorldEffects.Policy.PLAYER_NO_BREAK,
-                target -> !player.isAlliedTo(target),
+                target -> HumanControl.allowsTarget(player, target),
                 (actor, source, strike) -> {
                     try (var ignored = VanillaStrikeContext.attack(actor, source)) {
                         strike.run();
@@ -339,7 +339,7 @@ final class HumanTechniqueEffects {
     private HumanProjectileEffects projectiles(ServerPlayer player) {
         // 每个玩家独立维护施放锁点，敌我规则与玩家近战保持一致。
         return projectileEffects.computeIfAbsent(player.getUUID(),
-                ignored -> new HumanProjectileEffects(player, target -> !player.isAlliedTo(target)));
+                ignored -> new HumanProjectileEffects(player, target -> HumanControl.allowsTarget(player, target)));
     }
 
     private void finish(ServerPlayer player, String castId) {

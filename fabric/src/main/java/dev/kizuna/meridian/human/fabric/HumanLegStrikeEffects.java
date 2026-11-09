@@ -214,7 +214,7 @@ final class HumanLegStrikeEffects {
 
     private static boolean eligible(ServerPlayer actor, LivingEntity target) {
         // 目标资格与持物打击保持一致，敌我关系由服务端队伍和实体视线决定。
-        if (target == actor || !target.isAlive() || target.isSpectator() || actor.isAlliedTo(target)
+        if (target == actor || !target.isAlive() || target.isSpectator() || !HumanControl.allowsTarget(actor, target)
                 || !actor.hasLineOfSight(target)) {
             return false;
         }
