@@ -61,9 +61,8 @@ public final class HumanControlClient implements ClientModInitializer {
     }
 
     public static boolean allows(KeyMapping key) {
-        // 只放行聊天和命令键，暂停由原版 ESC 菜单直接处理。
-        var options = Minecraft.getInstance().options;
-        return !active() || key == options.keyChat || key == options.keyCommand;
+        // 原版键名交给同一输入策略；暂停仍由 ESC 菜单直接处理。
+        return input.allowsKey(key.getName());
     }
 
     private static void release() {

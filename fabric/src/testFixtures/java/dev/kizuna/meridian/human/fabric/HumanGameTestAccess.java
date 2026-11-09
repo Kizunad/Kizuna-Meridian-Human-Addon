@@ -6,6 +6,10 @@ import dev.kizuna.meridian.protocol.pb.GatheringMessages.GatheringRequest;
 import dev.kizuna.meridian.protocol.pb.GatheringMessages.GatheringView;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.CommandReceipt;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
+import dev.kizuna.meridian.protocol.pb.ActivityMessages.BodyActivity;
+import dev.kizuna.meridian.protocol.pb.BodyMessages.Realm;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostRequest;
+import java.util.UUID;
 import net.minecraft.server.level.ServerPlayer;
 
 import java.util.List;
@@ -58,6 +62,25 @@ public final class HumanGameTestAccess {
         FailureCode result = body.completeOpening(now, target);
         if (result != FailureCode.FAILURE_CODE_UNSPECIFIED) {
             throw new IllegalStateException("测试开脉失败：" + result);
+        }
+    }
+
+    public static void enterTrueQi(ServerPlayer player) {
+        // 整体回归通过真实身体活动准备真炁境界，施放仍由正式玩家宿主执行。
+        HumanPlayerBody body = HumanTechniqueHost.state().find(player.getUUID());
+        long now = player.level().getServer().overworld().getGameTime() * MILLIS_PER_TICK;
+        body.settle(now);
+        var activity = BodyActivity.newBuilder()
+                .setRealm(Realm.TRUE_QI)
+                .build();
+        var request = TechniqueHostRequest.newBuilder()
+                .setRequestId(UUID.randomUUID().toString())
+                .setExpectedRevision(body.snapshot().revision())
+                .setActivity(activity)
+                .build();
+        var response = body.applyTechnique(now, request);
+        if (response.hasFailure()) {
+            throw new IllegalStateException("测试真炁准备失败：" + response.getFailure());
         }
     }
 }

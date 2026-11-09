@@ -62,6 +62,18 @@ public final class ControlledInput {
         return !session.isEmpty();
     }
 
+    public boolean allowsKey(String name) {
+        // 受控时保留交流与观察键；移动、物品和其他附属键默认屏蔽。
+        if (!active()) {
+            return true;
+        }
+        return switch (name) {
+            case "key.chat", "key.command", "key.screenshot", "key.togglePerspective",
+                    "key.playerlist", "key.fullscreen" -> true;
+            default -> false;
+        };
+    }
+
     public ControlIntent sample(long localTick) {
         // 超时或结束都输出静止，保留最后视角，避免断流时突兀转头。
         if (!active() || localTick >= expiresAt) {

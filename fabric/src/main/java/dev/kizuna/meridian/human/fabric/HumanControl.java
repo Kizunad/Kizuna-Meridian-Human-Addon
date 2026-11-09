@@ -26,6 +26,7 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
@@ -214,7 +215,9 @@ public final class HumanControl implements PlayerControlHost {
             }
             ControlIntent intent = ControlIntent.parseFrom(payload);
             validate(request, intent);
-            send(player, intent);
+            if (!send(player, intent)) {
+                return;
+            }
             if (!HumanStaggerLock.isLocked(player.getUUID())) {
                 execute(player, request, intent);
             }
@@ -327,12 +330,14 @@ public final class HumanControl implements PlayerControlHost {
         TechniqueFabric.service().cast(player.getUUID(), request);
     }
 
-    private static void send(ServerPlayer player, ControlIntent intent) {
-        // 必装客户端必须声明控制通道，缺失明确报错，不能悄悄变成无人执行的会话。
+    private static boolean send(ServerPlayer player, ControlIntent intent) {
+        // 缺少必装通道只断开违规连接；下线路径负责清会话，不能中断服务器 tick。
         if (!ServerPlayNetworking.canSend(player, HumanChannels.CONTROL.type())) {
-            throw new IllegalStateException(HumanErrors.CONTROL_CHANNEL_MISSING);
+            player.connection.disconnect(Component.literal(HumanErrors.CONTROL_CHANNEL_MISSING));
+            return false;
         }
         ServerPlayNetworking.send(player, HumanChannels.CONTROL.payload(intent.toByteArray()));
+        return true;
     }
 
     private static void end(ServerPlayer player) {

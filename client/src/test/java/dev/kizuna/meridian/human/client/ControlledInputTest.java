@@ -77,6 +77,23 @@ public class ControlledInputTest {
         assertEquals(current, input.sample(LOCAL_TICK + 1));
     }
 
+    @Test
+    public void controlAllowsObservationAndChatButBlocksActions() {
+        // 观察键全程可用，动作键只有控制结束才恢复。
+        var input = new ControlledInput();
+        input.receive(intent("session", 1), LOCAL_TICK);
+        for (String key : new String[] {"key.chat", "key.command", "key.screenshot", "key.togglePerspective",
+                "key.playerlist", "key.fullscreen"}) {
+            assertTrue(key, input.allowsKey(key));
+        }
+        for (String key : new String[] {"key.forward", "key.attack", "key.use", "key.inventory", "key.drop",
+                "key.swapOffhand", "key.hotbar.1", "key.meridian_combat.cast"}) {
+            assertFalse(key, input.allowsKey(key));
+        }
+        input.reset();
+        assertTrue(input.allowsKey("key.attack"));
+    }
+
     private static ControlIntent intent(String session, long sequence) {
         // 一份包含行走、视角、跳和疾跑的真实跨端协议。
         return ControlIntent.newBuilder()

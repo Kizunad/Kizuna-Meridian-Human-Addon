@@ -11,7 +11,7 @@ public final class HumanErrors {
     public static final String INVALID_CONTROL_INTENT_PROTOCOL = "受控意图协议无效";
     public static final String INVALID_CONTROL_INTENT = "受控意图身份或数值无效";
     public static final String CONTROL_TARGET_DENIED = "受控意图攻击目标越权";
-    public static final String CONTROL_CHANNEL_MISSING = "玩家缺少 Human 受控输入通道";
+    public static final String CONTROL_CHANNEL_MISSING = "缺少 Human 客户端控制通道";
     public static final String INVALID_REVIVAL = "人体复活寿元费用数据缺失或无效";
     public static final String REVIVAL_MESSAGE = "大难不死，元气大伤，折损%s寿元";
     public static final String INVALID_TECHNIQUE_OPERATION = "功法宿主操作无效";
