@@ -202,6 +202,27 @@ python3 "scripts/check_docs.py"
 
 ## Minecraft 真实玩家吐纳
 
+可信附属也可使用 `meridian_activity_host` 的 `BodyActivityHost.exchange(callerId, payload)`。
+Human 验证在线绑定与身体 ID，按请求原有 revision 向唯一命令处理器提交 `execute_activity`；
+能力修正的增撤、经脉释放、伤害和附属进度沿 Framework 的来源校验与原子活动执行。
+不向玩家网络开放任意活动，不另建身体。治疗继续使用 `meridian_health_host` 的指定账户 `HealBody`。
+
+健康和功法 `inspect` 都返回完整身体：两肾的实际器官定义（含吞吐与最大 HP）、器官 HP、
+脑耐力和疲劳、注意组织耐力/成长/疲劳/HP，以及组织和器官修正都在同一快照中。
+手持药水种类、品质和饮用/喷溅用法仍由功法持物事实提供。具体排毒力与脑力档位由内容附属计算。
+
+`HumanTempo` 每 tick 读取组织曲线：主手侧上臂、前臂、手最慢倍率映射到攻击速度与挖掘速度；
+左右腿各取同侧腿肌（含臀大肌）最慢倍率，再平均映射到移动速度。
+每个玩家按实际构型缓存各侧肌肉 ID，构型变化时才重建；每 tick 按 ID 读取倍率。
+倍率变化至少 0.001 才重设临时属性，恢复单位倍率立即移除；由原版同步脏属性，不手动重复发包。
+属性与功法限速及对应僵直相乘，不把伤势重复当成迟滞。
+
+下游 GameTest 可依赖本仓 `fabric` 的 `testFixtures`，通过公开 `HumanGameTestAccess` 启动真实吐纳
+并读取接触回执；夹具属于 Human 测试装配，不进入正式发布 JAR。
+
+肺的器官摄入修正同时放大接触采样量与每秒上限，默认每肺每秒 1 元。
+Framework 按整秒窗口保存实际已摄入原料，重连不重置当秒额度；肺配方的 20% 炼化比例不变。
+
 Fabric 宿主现在接收 `meridian:gathering_request`，返回 `meridian:gathering_response`，载荷分别为框架原有 `GatheringRequest` / `GatheringResponse`。身份只取连接玩家 UUID，时间取服务端模拟 tick；客户端只能上传公开的吸呼方向、瞄准和序号。网络入口限制消息大小及每模拟秒请求数；同一身体的摄入、行走、恢复与保存共用权威 Store。Human 源码不引用 UI 类，运行时 UI 仍是必装接线。
 
 主世界按 `config/meridian-environment.toml` 的区域尺度与默认地形配置首次生成库存，读取区域中心群系元数据，不扫描方块。相同区域内玩家共享来源和供给预算；换区先结清旧区间，30 秒续窗保留剩余库存。其他维度暂不提供环境摄入。身体、区域、释放账户、待入账队列、释放 ID 和回执一起保存到 `meridian_human.dat`；玩家死亡、开脉中断和加工损耗按发生时位置排队，在区域续窗时从默认账户转回区域，非主世界留在默认账户。肺摄入回执的炼化损耗仍直接归还选定区域，不重复归位。当前接入未执行区域间扩散。

@@ -92,12 +92,17 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 限速仍允许主动移动，不缩放冲量、不拦跳跃或转向；收势、打断、死亡、下线和恢复清理临时属性。
 施放锁定期间 Fabric 拦截原版实体攻击、方块攻击、物品使用、方块交互和实体交互；功法自己的效果
 仍由正式宿主回执执行。
-受击僵直不由本宿主判定：原版伤害附属在命中提交后写入功法库，功法库给实体另加一份固定 UUID 的
-`MULTIPLY_TOTAL` 僵直减速（默认 ×0.5），与施放限速相乘，到期移除；僵直中新起式回执「僵直中」。
+受击僵直由 Damage 写入功法库的 `HIT`，只打断可打断起手、拒绝新式并减半移动；不锁攻击或物品。
+Brewing 的魅惑判定写 `CHARM`，Human 只监听这类事件，把移动速度与跳跃力度乘 0，
+拦截攻击、挥手、开始使用物品和挖掘完成，并清理已开始的使用与挖掘。
+不拦移动包，下落、击退与转头保持原版行为。两种期限独立，到期分别解除；均拒绝新起式。
 
 `LOCK` 到 `UNLOCK` 之间玩家处于施放中，`HumanFabric` 在同一处拦原版输入：左键攻击实体、攻击方块一律拦，
 挥手包由 `TechniqueHandSwingMixin` 拦；右键（用物品、放方块或与方块交互、与实体交互）在 LOCK 的
-`allow_use_while_casting=false` 时拦，目录声明 true 的式（如服药）放行。只有倍率小于 1、会下发 LOCK 的式进入施放中，
+`allow_use_while_casting=false` 时拦，目录声明 true 的式（如服药）放行。
+若只声明 `allow_off_hand_use_while_casting=true`，仅副手对实际命中且符合声明标签的方块放行；
+主手、空气用物品、实体交互与不符合标签的方块仍拒绝。Brewing 釜和火共用此门禁。
+只有倍率小于 1、会下发 LOCK 的式进入施放中，
 基础功法吐纳、轻身、蓄力倍率为 1，左右键都不拦。
 
 `status_benefit` 交给功法库的共享原版状态执行器。轻身的每次跃步仍经本宿主提交 Framework 做功活动，
@@ -177,7 +182,7 @@ Framework 尚无复活规则，原版重生不会创建新身体或恢复 HP；�
 | 耐久倍率、耐久附魔、损坏、无法破坏、创造 | `durabilityMultipliersBreakageUnbreakingAndCreativeMatchVanilla` |
 | 起手打断不磨损 | `warmupInterruptionDoesNotWearWeapon` |
 | 破门起手：轻击低于僵直门槛不打断，重击打断、减速 0.5 并拒绝新式 | `cleaveWarmupInterruptedOnlyByStaggeringHit` |
-| 未施放时重击僵直减速，身体时钟到期恢复原速 | `staggerHalvesMovementUntilExpiry` |
+| 未施放时重击减半移动，身体时钟到期恢复原速 | `staggerSlowsMovementUntilExpiry` |
 | 一次性末击挥空、最后一个物品及重试幂等 | `disposableLastStrikeConsumesOnceEvenOnMissAndRetry` |
 | 双手剂量与两臂做功、副手只用对应手臂 | `twoHandDoseAndOffhandDamageChargeCorrectArms` |
 | 起手后换物、选定手为空落空且不退费 | `switchingSelectedHandItemChangesHitAndEmptyHandMissStillPays` |

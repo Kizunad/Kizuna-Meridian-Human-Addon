@@ -103,6 +103,7 @@ final class HumanPlayerBody {
     private DoubleSupplier movementLoad = () -> HumanMovementLoads.UNLOADED;
     private final Set<String> breathingActions = new HashSet<>();
     private boolean debugAuthorized;
+    private String trustedActivityCaller;
     private BreathingView lastBreathing = BreathingView.getDefaultInstance();
 
     HumanPlayerBody(BodySnapshot saved, List<CommandReceipt> receipts, QiInventory releasedQi) {
@@ -123,7 +124,8 @@ final class HumanPlayerBody {
             if (caller.equals(id.value()) && command.getBodyId().equals(id.value())) {
                 return Optional.of(caller);
             }
-            if (caller.equals(TechniqueHost.CALLER_ID) && command.hasExecuteActivity()
+            if ((caller.equals(TechniqueHost.CALLER_ID) || caller.equals(trustedActivityCaller))
+                    && command.hasExecuteActivity()
                     && command.getBodyId().equals(id.value())) {
                 return Optional.of(caller);
             }
@@ -595,6 +597,23 @@ final class HumanPlayerBody {
                 () -> commands.handleActivity(TechniqueHost.CALLER_ID, payload)));
         scheduleNextBoundary();
         return response;
+    }
+
+    ResponseEnvelope applyAddonActivity(long millis, String callerId, RequestEnvelope request) {
+        // 来源只在可信进程内调用的动态范围内授权，网络入口不能借用此身份。
+        if (trustedActivityCaller != null) {
+            throw HumanErrors.hostRejected(FailureCode.ACCESS_DENIED);
+        }
+        settle(millis);
+        trustedActivityCaller = callerId;
+        try {
+            byte[] payload = MeridianProtocol.encodeRequest(request);
+            byte[] result = captureRelease(() -> commands.handleActivity(callerId, payload));
+            return MeridianProtocol.decodeResponse(result);
+        } finally {
+            trustedActivityCaller = null;
+            scheduleNextBoundary();
+        }
     }
 
     public long submitRecovery(String requestId, BodyCommand command) {

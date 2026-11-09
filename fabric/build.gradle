@@ -1,5 +1,6 @@
 plugins {
     id 'net.fabricmc.fabric-loom'
+    id 'java-test-fixtures'
 }
 
 description = '人体内容的 Minecraft 玩家适配；身体结算仍调用经脉框架。'
@@ -72,6 +73,10 @@ loom {
 def humanGametestDirectory = providers.gradleProperty('humanGametestRunDir')
         .getOrElse("build/gametest-${System.currentTimeMillis()}")
 sourceSets {
+    testFixtures {
+        compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
+        runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
+    }
     gametest {
         compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
         runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output

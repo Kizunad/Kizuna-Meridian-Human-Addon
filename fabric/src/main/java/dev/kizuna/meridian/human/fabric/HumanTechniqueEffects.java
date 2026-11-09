@@ -7,6 +7,7 @@ import dev.kizuna.meridian.technique.fabric.world.TechniqueWorldImpulses;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ImpulseDirection;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.MovementAction;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.MovementIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.PresentationAction;
 import dev.kizuna.meridian.technique.server.TechniqueErrors;
 import dev.kizuna.meridian.technique.server.TechniqueHost;
@@ -16,6 +17,11 @@ import dev.kizuna.meridian.vanilla.fabric.VanillaStrikeContext;
 import net.fabricmc.fabric.api.gamerule.v1.GameRuleBuilder;
 import net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket;
 import net.minecraft.resources.Identifier;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
@@ -40,7 +46,7 @@ final class HumanTechniqueEffects {
     private final Map<UUID, HumanLegStrikeEffects> legEffects = new HashMap<>();
     private final Map<UUID, HumanProjectileEffects> projectileEffects = new HashMap<>();
     // 每个玩家正在施放的 cast ID 及该式是否放行右键。
-    private final Map<UUID, Map<String, Boolean>> castingIds = new HashMap<>();
+    private final Map<UUID, Map<String, MovementIntent>> castingIds = new HashMap<>();
     private final Map<UUID, Map<String, EffectIntent>> requests = new HashMap<>();
     private final Map<UUID, Map<EffectKey, EffectIntent>> effects = new HashMap<>();
     private final Map<UUID, Map<String, EffectIntent>> executingRequests = new HashMap<>();
@@ -146,10 +152,30 @@ final class HumanTechniqueEffects {
         return castingIds.containsKey(playerId);
     }
 
-    boolean blocksUse(UUID playerId) {
-        // 同一玩家登记了多个施放时，任一式没声明放行右键就拦。
-        Map<String, Boolean> casts = castingIds.get(playerId);
-        return casts != null && casts.containsValue(false);
+    boolean blocksUse(Player player, InteractionHand hand, BlockPos target) {
+        // 所有活动约束都必须放行；副手特例只适用于目录声明的目标方块标签。
+        Map<String, MovementIntent> casts = castingIds.get(player.getUUID());
+        if (casts == null) {
+            return false;
+        }
+        for (MovementIntent movement : casts.values()) {
+            if (movement.getAllowUseWhileCasting()) {
+                continue;
+            }
+            if (hand != InteractionHand.OFF_HAND || target == null
+                    || !movement.getAllowOffHandUseWhileCasting()) {
+                return true;
+            }
+            var targetState = player.level().getBlockState(target);
+            boolean matches = movement.getOffHandUseBlockTagsList().stream()
+                    .map(Identifier::parse)
+                    .map(id -> TagKey.create(Registries.BLOCK, id))
+                    .anyMatch(targetState::is);
+            if (!matches) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void updateCasting(ServerPlayer player, EffectIntent effect) {
@@ -161,12 +187,12 @@ final class HumanTechniqueEffects {
                 player.stopUsingItem();
             }
             castingIds.computeIfAbsent(playerId, id -> new HashMap<>())
-                    .put(effect.getCastId(), allowUse);
+                    .put(effect.getCastId(), effect.getMovement());
         } else {
-            Map<String, Boolean> casts = castingIds.get(playerId);
+            Map<String, MovementIntent> casts = castingIds.get(playerId);
             if (casts != null) {
-                Boolean allowUse = casts.remove(effect.getCastId());
-                if (Boolean.FALSE.equals(allowUse)) {
+                MovementIntent removed = casts.remove(effect.getCastId());
+                if (removed != null && !removed.getAllowUseWhileCasting()) {
                     player.stopUsingItem();
                 }
                 if (casts.isEmpty()) {

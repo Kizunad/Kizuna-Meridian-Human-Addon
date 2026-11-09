@@ -218,7 +218,7 @@ public final class HumanCombatServiceGameTest {
 
     @GameTest(maxTicks = STAGGER_TEST_TIMEOUT)
     public void cleaveWarmupInterruptedOnlyByStaggeringHit(GameTestHelper context) {
-        // 真实生物攻击经伤害附属换算：轻击低于僵直门槛不打断破门起手，重击打断、减速并拒绝新式。
+        // 真实生物攻击经伤害附属换算：轻击不打断破门起手，重击打断、减速并拒绝新式。
         var attacker = attacker(context);
         var fixture = prepared(context);
         context.runAfterDelay(JOIN_INVULNERABILITY_TICKS, () -> {
@@ -234,7 +234,7 @@ public final class HumanCombatServiceGameTest {
                 player.hurtServer(player.level(), player.damageSources().mobAttack(attacker), HEAVY_HIT);
                 context.assertTrue(!HumanTechniqueHost.isCasting(player.getUUID()), "僵直重击没有打断起手");
                 context.assertTrue(staggerMillis(player) > 0, "重击没有僵直");
-                assertSpeed(context, player, originalSpeed * STAGGER_MOVEMENT, "僵直移动倍率错误");
+                assertSpeed(context, player, originalSpeed * STAGGER_MOVEMENT, "受击僵直没有减半移动");
                 reject(context, cast(fixture, "knock", CastEntry.AUTO), TechniqueFailure.STAGGERED);
             } finally {
                 attacker.discard();
@@ -244,8 +244,8 @@ public final class HumanCombatServiceGameTest {
     }
 
     @GameTest(maxTicks = STAGGER_TEST_TIMEOUT)
-    public void staggerHalvesMovementUntilExpiry(GameTestHelper context) {
-        // 未施放时受重击也僵直：移动速度乘 0.5，身体时钟到期后恢复原速。
+    public void staggerSlowsMovementUntilExpiry(GameTestHelper context) {
+        // 未施放时受重击也减半移动，身体时钟到期后恢复原速。
         var attacker = attacker(context);
         var fixture = prepared(context);
         var player = fixture.human.player;
@@ -254,7 +254,7 @@ public final class HumanCombatServiceGameTest {
             player.hurtServer(player.level(), player.damageSources().mobAttack(attacker), HEAVY_HIT);
             attacker.discard();
             context.assertTrue(staggerMillis(player) > 0, "未施放时重击没有僵直");
-            assertSpeed(context, player, originalSpeed * STAGGER_MOVEMENT, "僵直未减速");
+            assertSpeed(context, player, originalSpeed * STAGGER_MOVEMENT, "受击僵直未减半移动");
             context.runAfterDelay(STAGGER_EXPIRY_TICKS, () -> {
                 try (fixture) {
                     assertSpeed(context, player, originalSpeed, "僵直到期未恢复原速");

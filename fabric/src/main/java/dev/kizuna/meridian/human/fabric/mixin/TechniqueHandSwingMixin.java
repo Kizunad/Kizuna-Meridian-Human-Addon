@@ -1,6 +1,7 @@
 package dev.kizuna.meridian.human.fabric.mixin;
 
 import dev.kizuna.meridian.human.fabric.HumanTechniqueHost;
+import dev.kizuna.meridian.human.fabric.HumanStaggerLock;
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
@@ -17,7 +18,8 @@ public abstract class TechniqueHandSwingMixin {
     @Inject(method = "handleAnimate", at = @At("HEAD"), cancellable = true)
     private void meridian$blockCastingSwing(ServerboundSwingPacket packet, CallbackInfo callback) {
         // 功法每击自行挥手和做功，客户端原版左键不能再产生第二次出手。
-        if (player.level().getServer().isSameThread() && HumanTechniqueHost.isCasting(player.getUUID())) {
+        if (player.level().getServer().isSameThread() && (HumanTechniqueHost.isCasting(player.getUUID())
+                || HumanStaggerLock.isLocked(player.getUUID()))) {
             callback.cancel();
         }
     }

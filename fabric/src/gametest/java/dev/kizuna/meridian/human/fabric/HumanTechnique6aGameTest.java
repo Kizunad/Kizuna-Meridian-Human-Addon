@@ -159,14 +159,14 @@ public final class HumanTechnique6aGameTest {
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void staggerAndDisconnectUnlockAndStop(GameTestHelper context) {
-        // 僵直打断和正式断线回调都在宿主撤销认领前完成实体清理；打断后只剩僵直减速。
+        // 僵直打断和正式断线回调都在宿主撤销认领前完成清理，受击僵直期间移动保持减半。
         try (var fixture = prepared(context); var observer = new Presentations(fixture)) {
             double originalSpeed = speed(fixture);
             start(context, fixture);
             var stagger = new TechniqueService.Stagger(STAGGER_MILLIS, STAGGER_MOVEMENT);
             TechniqueFabric.service().stagger(fixture.player.getUUID(), stagger);
-            double staggeredSpeed = originalSpeed * STAGGER_MOVEMENT;
-            context.assertTrue(Math.abs(speed(fixture) - staggeredSpeed) < EPSILON, "打断未解锁或僵直未减速");
+            context.assertTrue(Math.abs(speed(fixture) - originalSpeed * STAGGER_MOVEMENT) < EPSILON,
+                    "受击僵直未减半移动");
             observer.assertAction(context, PresentationAction.STOP);
         }
         try (var fixture = prepared(context); var observer = new Presentations(fixture)) {

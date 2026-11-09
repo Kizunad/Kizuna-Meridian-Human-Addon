@@ -18,6 +18,8 @@ import dev.kizuna.meridian.progression.server.ProgressionStore;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.GatheringProtobuf;
 import dev.kizuna.meridian.protocol.HealthHostProtobuf;
+import dev.kizuna.meridian.protocol.ActivityHostProtobuf;
+import dev.kizuna.meridian.core.DefinitionId;
 import dev.kizuna.meridian.protocol.MeridianProtocol;
 import dev.kizuna.meridian.protocol.OpeningProtobuf;
 import dev.kizuna.meridian.protocol.pb.GatheringMessages.GatheringRequest;
@@ -33,6 +35,11 @@ import dev.kizuna.meridian.protocol.pb.OpeningMessages.MeridianOpeningRequest;
 import dev.kizuna.meridian.protocol.pb.PresentationMessages.BodyViewRequest;
 import dev.kizuna.meridian.protocol.pb.PresentationMessages.BodyViewUpdate;
 import dev.kizuna.meridian.protocol.pb.PresentationMessages.MeridianOpeningOptions;
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
+import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
+import net.fabricmc.fabric.api.event.player.UseItemCallback;
+import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.fabric.api.entity.event.v1.ServerEntityLevelChangeEvents;
@@ -51,7 +58,11 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.storage.LevelResource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -88,26 +99,29 @@ public final class HumanFabric implements ModInitializer {
                 .resolve(HumanDamageRules.FILE_NAME));
         // 宿主生命周期独立于客户端窗口，关掉 UI 后玩家移动仍正常记入同一身体。
         HumanTechniqueEffects.initialize();
-        net.fabricmc.fabric.api.event.player.AttackEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
-            if (HumanTechniqueHost.isCasting(player.getUUID())) {
-                return net.minecraft.world.InteractionResult.FAIL;
+        HumanStaggerLock.initialize();
+        HumanTempo.initialize();
+        AttackEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
+            if (HumanTechniqueHost.isCasting(player.getUUID()) || HumanStaggerLock.isLocked(player.getUUID())) {
+                return InteractionResult.FAIL;
             }
-            return net.minecraft.world.InteractionResult.PASS;
+            return InteractionResult.PASS;
         });
-        net.fabricmc.fabric.api.event.player.AttackBlockCallback.EVENT.register((player, world, hand, pos, side) -> {
-            if (HumanTechniqueHost.isCasting(player.getUUID())) {
-                return net.minecraft.world.InteractionResult.FAIL;
+        AttackBlockCallback.EVENT.register((player, world, hand, pos, side) -> {
+            if (HumanTechniqueHost.isCasting(player.getUUID()) || HumanStaggerLock.isLocked(player.getUUID())) {
+                return InteractionResult.FAIL;
             }
-            return net.minecraft.world.InteractionResult.PASS;
+            return InteractionResult.PASS;
         });
         // 右键与左键在同处拦：用物品、放方块或与方块交互、与实体交互；目录声明放行右键的式（如服药）不拦。
-        net.fabricmc.fabric.api.event.player.UseItemCallback.EVENT.register((player, world, hand) ->
-                useWhileCasting(player));
-        net.fabricmc.fabric.api.event.player.UseBlockCallback.EVENT.register((player, world, hand, hit) ->
-                useWhileCasting(player));
-        net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.register((player, world, hand, entity, hit) ->
-                useWhileCasting(player));
+        UseItemCallback.EVENT.register((player, world, hand) ->
+                useWhileCasting(player, hand, null));
+        UseBlockCallback.EVENT.register((player, world, hand, hit) ->
+                useWhileCasting(player, hand, hit.getBlockPos()));
+        UseEntityCallback.EVENT.register((player, world, hand, entity, hit) ->
+                useWhileCasting(player, hand, null));
         HumanHealthHost.bind(this::health);
+        HumanActivityHost.bind(this::activity);
         HumanDebugHost.bind(this::debugQi);
         HumanEnvironmentHost.bind(this::environment);
         ServerLifecycleEvents.SERVER_STARTING.register(server -> ProgressionFabric.installStore(server, new ProgressionStore() {
@@ -316,13 +330,13 @@ public final class HumanFabric implements ModInitializer {
                 });
     }
 
-    private static net.minecraft.world.InteractionResult useWhileCasting(
-            net.minecraft.world.entity.player.Player player) {
+    private static InteractionResult useWhileCasting(
+            Player player, InteractionHand hand, BlockPos target) {
         // FAIL 让原版不再处理这次右键；放方块被拦时原版随后补发方块更新，客户端预测的方块会被纠正。
-        if (HumanTechniqueHost.blocksUse(player.getUUID())) {
-            return net.minecraft.world.InteractionResult.FAIL;
+        if (HumanTechniqueHost.blocksUse(player, hand, target)) {
+            return InteractionResult.FAIL;
         }
-        return net.minecraft.world.InteractionResult.PASS;
+        return InteractionResult.PASS;
     }
 
     private void join(ServerPlayer player, MinecraftServer server) {
@@ -445,6 +459,41 @@ public final class HumanFabric implements ModInitializer {
             throw HumanErrors.hostRejected(FailureCode.ENVIRONMENT_UNAVAILABLE);
         }
         return world;
+    }
+
+    private byte[] activity(String callerId, byte[] payload) {
+        // 活动与健康查询共用路由、暂停判断和主线程约束，不创建替代身体。
+        DefinitionId source = new DefinitionId(callerId);
+        var request = ActivityHostProtobuf.decodeRequest(payload);
+        var inspect = HealthHostRequest.newBuilder()
+                .setProtocolVersion(MeridianProtocol.VERSION)
+                .setRequestId(request.getRequestId())
+                .setSubjectId(request.getSubjectId())
+                .setInspect(true /* inspect */)
+                .build();
+        var inspected = HealthHostProtobuf.decodeResponse(health(HealthHostProtobuf.encodeRequest(inspect)));
+        if (!inspected.hasBody()) {
+            return HealthHostProtobuf.encodeResponse(inspected);
+        }
+        var response = HealthHostResponse.newBuilder()
+                .setProtocolVersion(MeridianProtocol.VERSION)
+                .setRequestId(request.getRequestId());
+        if (!request.getActivity().getBodyCommand().getBodyId().equals(inspected.getBody().getId())) {
+            return healthFailure(response, FailureCode.ACCESS_DENIED);
+        }
+        UUID subjectId = UUID.fromString(request.getSubjectId());
+        HumanPlayerBody body = state.find(subjectId);
+        ServerPlayer player = activeServer.getPlayerList().getPlayer(subjectId);
+        try {
+            var result = body.applyAddonActivity(millis(activeServer), source.value(), request.getActivity());
+            if (result.hasFailure()) {
+                return healthFailure(response, result.getFailure().getCode());
+            }
+            HumanTechniqueHost.recoverIfDead(player);
+            return HealthHostProtobuf.encodeResponse(response.setBody(BodyProtobuf.toMessage(body.snapshot())).build());
+        } finally {
+            state.setDirty();
+        }
     }
 
     private byte[] health(byte[] payload) {
@@ -654,6 +703,7 @@ public final class HumanFabric implements ModInitializer {
                 }
                 HumanPlayerBody.Motion motion = observer.sample(player);
                 boolean changed = body.observe(millis, motion, observer.moved());
+                HumanTempo.update(player, body.snapshot(), millis);
                 HumanTechniqueHost.recoverIfDead(player);
                 if (changed || breathingChanged) {
                     animations.synchronize(player, body.motion(), body.breathingActive(), body.breathingAutomatic());

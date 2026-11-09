@@ -14,6 +14,9 @@ import dev.kizuna.meridian.technique.server.TechniqueHost;
 import dev.kizuna.meridian.technique.server.TechniqueErrors;
 import dev.kizuna.meridian.technique.server.TechniqueProtocol;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,9 +41,9 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
         return effects.isCasting(playerId);
     }
 
-    public static boolean blocksUse(UUID playerId) {
-        // 原版右键入口同样只查询实体效果锁；目录声明放行右键的式不拦。
-        return effects.blocksUse(playerId);
+    public static boolean blocksUse(Player player, InteractionHand hand, BlockPos target) {
+        // 目标来自服务端交互事件，空气使用与实体交互不能借方块白名单放行。
+        return HumanStaggerLock.isLocked(player.getUUID()) || effects.blocksUse(player, hand, target);
     }
 
     static void markImpulseMovement(UUID playerId) {
