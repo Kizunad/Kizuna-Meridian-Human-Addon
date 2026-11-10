@@ -9,8 +9,8 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 
 ## 身体与活动
 
-读档先经 Framework 授权命令补齐旧身体的空模块标签，再恢复玩家与功法认领；
-迁移保留实际构型与历史回执，成功后标脏保存。非空冲突拒绝而不覆盖，细则见[人体定义](Human-Definition.md)。
+读档先经 Framework 授权命令给旧身体追加缺少的模块标签（含五脏诀用的五行标签），再恢复玩家与功法认领；
+迁移保留实际构型与历史回执，成功后标脏保存。已有模板之外的标签时拒绝而不覆盖，细则见[人体定义](Human-Definition.md)。
 
 所有操作在服务器主线程执行，其他线程返回 `ACCESS_DENIED`。`inspect` 先结算身体到主世界累计 tick
 乘以 50 毫秒，与 Human 其他入口使用相同时钟；返回的 `BodySnapshot.settled_at` 含身体时刻。
@@ -119,6 +119,37 @@ Human 会标记已结算的功法冲量，下一次玩家位置采样只更新�
 做功；之后的正常位移恢复原有采样规则。
 GameTest 使用 10 m/s，验证服务端为 0.5 格/tick，并检查同步标记与速度包。
 
+## 五脏炼化宿主
+
+`EffectIntent.organ_refine` 由 `HumanOrganRefineHost` 接管。它注册在功法库的
+`TechniqueFabric.EFFECT_HANDLER`，只处理在线、已就绪且未暂停的玩家；非玩家实体返回 `notApplicable`，
+交给其他宿主。玩家身体未就绪时返回 `REFINE_BODY_MISSING`，功法库据此结束整次施放。
+`SERVICE_STARTED` 时按已加载功法声明的 `recipe_family` 预读内容包的器官配方，经 Framework 校验，
+形状错误或重复配方在首次施放前暴露；`CAST_ENDED` 在收势、打断、取消、死亡和断线等所有结束路径停止起批。
+
+功法库按目录排定每一批（五脏诀上卷为 1.0 s 起、每 2 s 一批、30 s 窗口），每批交给
+`HumanOrganRefining.batch`，规则在 `server`，结果是一项 Framework 活动：
+
+1. 同一施放同一批只取一次料，重复交付视为已处理。
+2. 器官或所属部位 HP 为零的不能炼；成对的肺、肾一侧受损时另一侧照常炼，全部不可用返回
+   `REFINE_ORGAN_UNAVAILABLE`。只用与本脏双向相通且未断裂的本脏经取料和送回，表里腑经只付强身费用；
+   缺少通路返回 `REFINE_PATH_MISSING`。
+3. 配方按器官种类和身体境界的相态选取（游炁 `FREE`、真炁 `GAS`、化元 `LIQUID`）；没有对应相态返回
+   `REFINE_RECIPE_MISSING`。
+4. 器官仍在加工时跳过这一批。否则从本脏经只取当前相态的无属性真元，投料不超过器官剩余缓存与本批吞吐；
+   加工时长等于批次间隔，慢速施放时一起拉长。
+5. 产物按配方的炼化率换成本行属性、保持投料密度；余量由 Framework 在加工完成时释放到环境，总账守恒。
+6. 加工完成后才送回：先进本脏经内腔（扣除在途预约），内腔满时存进同一经脉外壁，仍放不下的留在本脏缓存，
+   下次推进再送，不丢失。
+
+施放结束时不再起批，已完成的产物立即送回，仍在加工的那一批由 `HumanCultivation` 的周期推进收尾；
+没有结束事件（例如离线）时任务在起批窗口过后、器官空闲时自行移除。任务进度保存在
+`meridian_human:organ_refine`（`organ_refine.proto`，schema 1）的身体进度里，随玩家身体存档。
+
+互斥：肺炼起批时若正在手动或自动吐纳，先按结束按钮的同一意图停下吐纳；肺炼任务未收尾前，
+开始吐纳与设置自动吐纳的请求都返回 `ORGAN_BUSY`，结束与查看照常。脾炼期间中焦储备暂停入库，
+已完成的储备产物照常扫入外壁，外壁取用和主动动员不受影响，见[中焦周天](Middle-Jiao-Cultivation.md#脾与外壁)。
+
 ## 取消与组织占用
 
 Fabric 断线和停服事件显式排序：先由功法库默认阶段调用取消，再由 Human 结束自己的活动、撤销认领。
@@ -146,7 +177,8 @@ Framework 尚无复活规则，原版重生不会创建新身体或恢复 HP；�
 
 ## 回归验证
 
-`HumanModuleTagsTest` 校验正式模板的六个公开标签、精确成员与左右对称。
+`HumanModuleTagsTest` 校验正式模板的六个公开标签与五行标签、精确成员与左右对称，以及五脏耐力和 18 条本脏通路。
+`HumanOrganRefiningTest` 经真实 Framework 事务执行炼化：吞吐上限、缓存上限、炼化率、打断后不再起批、窗口收尾、脾炼暂停储备、器官损毁/缺通路/无配方拒绝及真炁用气态配方；`HumanPlayerBodyRefineTest` 覆盖肺炼停吐纳并拒绝重开。玩家学卷、经 `TechniqueService` 施放的整链 GameTest 在五脏诀仓（`Kizuna-Meridian-Evoker-Elements-Addon` 的 `gametest`）。
 `HumanTechniqueGameTest` 使用经过真实登录、频道注册和断线事件的服务端测试玩家，
 覆盖在线认领、身体时钟、版本冲突、持久活动重放、冲量方向与去重、速度包、未知表现、
 学习命令到收势、释放归位、断线不退费、重新认领前清理残留施放及吐纳共享组织。

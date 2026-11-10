@@ -115,6 +115,27 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
         return new HumanTechniqueRecovery(player, body, effects);
     }
 
+    static HumanPlayerBody effectBody(UUID playerId) {
+        // 周期效果与宿主请求同样只认领已就绪、未暂停的在线玩家身体。
+        Binding current = binding;
+        if (current == null || !ready.contains(playerId) || current.failed().test(playerId)) {
+            return null;
+        }
+        return current.state().find(playerId);
+    }
+
+    static long nowMillis() {
+        // 周期效果处理器与宿主请求共用同一主世界时钟。
+        return nowMillis(binding);
+    }
+
+    static void bodyChanged(UUID playerId) {
+        // 效果处理器改动身体后与宿主请求一样保存并推送投影。
+        Binding current = binding;
+        current.state().setDirty();
+        current.changed().accept(playerId);
+    }
+
     private static long nowMillis(Binding current) {
         // 所有功法路径共用 Human 主世界累计 tick 时钟。
         return Math.multiplyExact(current.server().overworld().getGameTime(), MILLIS_PER_TICK);

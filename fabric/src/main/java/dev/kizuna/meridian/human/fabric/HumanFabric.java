@@ -102,6 +102,7 @@ public final class HumanFabric implements ModInitializer {
         HumanControl.initialize();
         HumanStaggerLock.initialize();
         HumanTempo.initialize();
+        HumanOrganRefineHost.initialize();
         AttackEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
             if (HumanTechniqueHost.isCasting(player.getUUID()) || HumanStaggerLock.isLocked(player.getUUID())
                     || HumanControl.blocksAction(player.getUUID())) {

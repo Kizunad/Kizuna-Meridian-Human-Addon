@@ -9,6 +9,16 @@ final class HumanAnatomy {
     private static final double MUSCLE_TRAINING_MAXIMUM_GROWTH = 0.5;
     private static final double MUSCLE_TRAINING_HALF_LIFE_SECONDS = 600;
     private static final double MUSCLE_TRAINING_WORK_JOULES_PER_GROWTH = 3_125_000;
+    private static final double ORGAN_RECOVERY_HALF_LIFE_SECONDS = 30;
+    private static final double ZANG_PATH_DISTANCE_METERS = 0.1;
+    private static final List<String> SIDES = List.of("left", "right");
+    /** 五脏按五行归类：本脏、本脏经与表里腑经共用同一行标签。 */
+    private static final List<Zang> ZANG = List.of(
+            new Zang("metal", List.of("left_lung", "right_lung"), "lung", "large_intestine"),
+            new Zang("earth", List.of("spleen"), "spleen", "stomach"),
+            new Zang("fire", List.of("heart"), "heart", "small_intestine"),
+            new Zang("water", List.of("left_kidney", "right_kidney"), "kidney", "bladder"),
+            new Zang("wood", List.of("liver"), "liver", "gallbladder"));
 
     private HumanAnatomy() {
         // 构型构造不接触任何角色实例；修改模板不会重置已经保存的身体。
@@ -90,19 +100,23 @@ final class HumanAnatomy {
         addOrgan(body, "liver", "肝脏", "abdomen", 20);
         addOrgan(body, "gallbladder", "胆囊", "abdomen", 8);
         addOrgan(body, "spleen", "脾脏", "abdomen", 12);
-        // 脾的主动动员使用独立耐力，不借用经脉容量或脑疲劳。
-        int spleenIndex = body.getOrgansCount() - 1;
-        body.setOrgans(spleenIndex, body.getOrgans(spleenIndex).toBuilder()
-                .setEndurance(OrganEndurance.newBuilder().setEnduranceJoules(600).setMaximumWatts(20)
-                        .setRecoveryHalfLifeSeconds(30)));
         addOrgan(body, "stomach", "胃", "abdomen", 15);
         addOrgan(body, "small_intestine", "小肠", "abdomen", 15);
         addOrgan(body, "large_intestine", "大肠", "abdomen", 15);
         addOrgan(body, "left_kidney", "左肾", "abdomen", 12);
         addOrgan(body, "right_kidney", "右肾", "abdomen", 12);
         addOrgan(body, "bladder", "膀胱", "pelvis", 10);
+        // 五脏做功各用独立耐力；脾的主动动员和土行功法有意共用脾的这一份。
+        addEndurance(body, "heart", 800, 30);
+        addEndurance(body, "liver", 600, 20);
+        addEndurance(body, "spleen", 600, 20);
+        for (String side : SIDES) {
+            addEndurance(body, side + "_lung", 400, 15);
+            addEndurance(body, side + "_kidney", 400, 15);
+        }
 
         addMeridians(body);
+        addZangPaths(body);
         addModuleTags(body);
         return body.build();
     }
@@ -129,6 +143,73 @@ final class HumanAnatomy {
         for (var organ : body.getOrgansBuilderList()) {
             if (organ.getKind().equals("human:lung")) {
                 organ.addTags("human:breathing");
+            }
+        }
+        addElementTags(body);
+    }
+
+    private static void addElementTags(BodyStructure.Builder body) {
+        // 五行标签追加在原有标签之后，读档补标签时旧标签顺序保持不变。
+        for (Zang zang : ZANG) {
+            for (var organ : body.getOrgansBuilderList()) {
+                if (zang.organIds().contains(organ.getId())) {
+                    organ.addTags("human:zang_" + zang.element());
+                }
+            }
+            List<String> meridianIds = SIDES.stream()
+                    .flatMap(side -> List.of(zang.zangMeridian(), zang.fuMeridian()).stream()
+                            .map(kind -> side + "_" + kind + "_meridian"))
+                    .toList();
+            for (var meridian : body.getMeridiansBuilderList()) {
+                if (meridianIds.contains(meridian.getId())) {
+                    meridian.addTags("human:meridian_" + zang.element());
+                }
+            }
+        }
+    }
+
+    private static void addZangPaths(BodyStructure.Builder body) {
+        // 本脏经与本脏双向相通，供炼化取料和送回；肺出口沿用摄入已有的那条连接。
+        for (Zang zang : ZANG) {
+            for (String organId : zang.organIds()) {
+                for (String meridianId : zangMeridians(zang, organId)) {
+                    connect(body, meridianId + ".to." + organId, meridianId + ".out", organId + ".in",
+                            ZANG_PATH_DISTANCE_METERS);
+                    if (!connected(body, organId + ".out", meridianId + ".in")) {
+                        connect(body, organId + ".to." + meridianId, organId + ".out", meridianId + ".in",
+                                ZANG_PATH_DISTANCE_METERS);
+                    }
+                }
+            }
+        }
+    }
+
+    private static List<String> zangMeridians(Zang zang, String organId) {
+        // 成对的肺、肾只通同侧本脏经；居中的心、肝、脾通左右两条。
+        for (String side : SIDES) {
+            if (organId.startsWith(side + "_")) {
+                return List.of(side + "_" + zang.zangMeridian() + "_meridian");
+            }
+        }
+        return SIDES.stream().map(side -> side + "_" + zang.zangMeridian() + "_meridian").toList();
+    }
+
+    private static boolean connected(BodyStructure.Builder body, String from, String to) {
+        // 同一对端口只能有一条有向连接，框架会拒绝重复边。
+        return body.getConnectionsList().stream()
+                .anyMatch(connection -> connection.getFrom().equals(from) && connection.getTo().equals(to));
+    }
+
+    private static void addEndurance(BodyStructure.Builder body, String organId, double joules, double watts) {
+        // 器官耐力按 30 秒半衰期恢复，不借用经脉容量或脑疲劳。
+        OrganEndurance endurance = OrganEndurance.newBuilder()
+                .setEnduranceJoules(joules)
+                .setMaximumWatts(watts)
+                .setRecoveryHalfLifeSeconds(ORGAN_RECOVERY_HALF_LIFE_SECONDS)
+                .build();
+        for (var organ : body.getOrgansBuilderList()) {
+            if (organ.getId().equals(organId)) {
+                organ.setEndurance(endurance);
             }
         }
     }
@@ -324,5 +405,9 @@ final class HumanAnatomy {
             return "左";
         }
         return "右";
+    }
+
+    private record Zang(String element, List<String> organIds, String zangMeridian, String fuMeridian) {
+        // 行名即 Human 标签后缀；本脏经和表里腑经只写经脉种类，左右实例由构型展开。
     }
 }

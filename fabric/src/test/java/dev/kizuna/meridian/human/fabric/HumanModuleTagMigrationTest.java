@@ -46,6 +46,30 @@ public final class HumanModuleTagMigrationTest {
     }
 
     @Test
+    public void appendsElementTagsAfterLegacyTagsInTemplateOrder() {
+        // 五脏诀之前的存档缺五行标签；加载时补在原有标签之后，结果与当前模板一致。
+        var initial = HumanPlayerBody.born(UUID.randomUUID(), UUID.randomUUID().toString(), 0);
+        var message = BodyProtobuf.toMessage(initial.snapshot());
+        var structure = message.getStructure().toBuilder();
+        for (var organ : structure.getOrgansBuilderList()) {
+            List<String> legacyTags = organ.getTagsList().stream()
+                    .filter(tag -> !tag.startsWith("human:zang_"))
+                    .toList();
+            organ.clearTags().addAllTags(legacyTags);
+        }
+        for (var meridian : structure.getMeridiansBuilderList()) {
+            List<String> legacyTags = meridian.getTagsList().stream()
+                    .filter(tag -> !tag.startsWith("human:meridian_"))
+                    .toList();
+            meridian.clearTags().addAllTags(legacyTags);
+        }
+        var legacyBody = BodyProtobuf.fromMessage(message.toBuilder().setStructure(structure).build());
+        var store = new InMemoryBodyStore(List.of(legacyBody), initial.receipts(), initial.releasedQi());
+        var restored = new HumanPlayerBody(legacyBody, store, Set.of());
+        assertEquals(message.getStructure(), BodyProtobuf.toMessage(restored.snapshot()).getStructure());
+    }
+
+    @Test
     public void conflictingExistingTagsRejectLoadWithoutModifyingAuthoritativeBody() {
         // 非空差异必须由授权命令明确拒绝，不允许加载适配器直接覆盖。
         var initial = HumanPlayerBody.born(UUID.randomUUID(), UUID.randomUUID().toString(), 0);

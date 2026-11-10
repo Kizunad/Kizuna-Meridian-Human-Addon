@@ -27,6 +27,13 @@ public final class HumanErrors {
     public static final String SPILLOVER_LOAD_FAILED = "人体伤害蔓延配置读取失败";
     public static final String DEBUG_PERMISSION = "真元调试需要管理员权限等级 2";
     public static final String DIFFUSION_ENTRY_MISSING = "当前身体不存在指定经脉或有效摄入出口";
+    public static final String INVALID_REFINE_RECIPE = "炼化配方族必须按器官种类与相态唯一，且只有一项无属性投料和一项本行产物";
+    public static final String INVALID_REFINE_PROGRESS = "五脏炼化进度类型或版本无效";
+    public static final String REFINE_ORGAN_UNAVAILABLE = "本脏已伤，炼化中止";
+    public static final String REFINE_PATH_MISSING = "本脏经未开，炼化无从取料";
+    public static final String REFINE_RECIPE_MISSING = "当前境界炼不了这一脏";
+    public static final String REFINE_BODY_MISSING = "炼化的施放者没有人体";
+    public static final String REFINE_END_REJECTED = "炼化收尾被身体拒绝，任务按起批窗口自行收尾";
 
     public static String debugRejected(FailureCode code) {
         // 调试不能跳过容量预约和身体状态，保留失败码方便定位。

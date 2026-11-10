@@ -137,6 +137,8 @@ public final class HumanCultivation {
         if (state.getBreakthrough()) {
             breakthrough(plan, state, transit, wasBreakingThrough ? seconds : 0);
         }
+        // 炼化产物先送回本脏经，再结算储备，避免脾缓存里的本行产物被当作储备扫入外壁。
+        HumanOrganRefining.advance(plan);
         // 新按下动员只建立当前动作，不能追溯提取或扣除之前的空闲时间。
         HumanReserves.advance(plan, state, state.getMobilizing() && !wasMobilizing ? 0 : seconds);
         syncAction(plan, HumanReserves.ACTION, state.getMobilizing(), true);
@@ -202,6 +204,9 @@ public final class HumanCultivation {
         // 静止且没有储备交换的身体不轮询；活动和生理阈值变化才安排有限事件。
         CultivationState state = state(body);
         if (state.getRunning() || state.getAutomaticWaiting() || state.getMobilizing()) {
+            return true;
+        }
+        if (HumanOrganRefining.needsAdvance(body)) {
             return true;
         }
         return HumanReserves.needsAdvance(body, state);

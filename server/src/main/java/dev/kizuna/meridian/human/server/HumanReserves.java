@@ -42,7 +42,8 @@ final class HumanReserves {
                     Double.MAX_VALUE, Math.max(0, item.wallVolume() - plan.get("w:" + item.id().value()).volume()))
                     .entries().isEmpty());
         }
-        return occupancy >= DEPOSIT_THRESHOLD && spleen.buffer().totalQi() == 0
+        boolean refining = HumanOrganRefining.refining(body, "spleen");
+        return !refining && occupancy >= DEPOSIT_THRESHOLD && spleen.buffer().totalQi() == 0
                 && (plan.get("l:left_spleen_meridian").totalQi() > 1e-8
                 || plan.get("l:right_spleen_meridian").totalQi() > 1e-8);
     }
@@ -72,7 +73,9 @@ final class HumanReserves {
             double rate = state.getMobilizing() ? ACTIVE_WITHDRAW_PER_SECOND : PASSIVE_WITHDRAW_PER_SECOND;
             withdraw(plan, rate * seconds, false);
         }
-        if (occupancy < DEPOSIT_THRESHOLD || state.getMobilizing() || state.getBreakthrough()
+        // 脾炼期间中焦储备暂停入库；已完成的储备产物照常扫入外壁，外壁取用也不受影响。
+        boolean refining = HumanOrganRefining.refining(plan.body, "spleen");
+        if (refining || occupancy < DEPOSIT_THRESHOLD || state.getMobilizing() || state.getBreakthrough()
                 || state.getReserveProcessing() || spleen.process() != null || plan.get("o:spleen").totalQi() > 0) {
             return;
         }

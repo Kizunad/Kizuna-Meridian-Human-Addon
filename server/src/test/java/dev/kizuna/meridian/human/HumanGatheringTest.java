@@ -55,7 +55,7 @@ public class HumanGatheringTest {
         var initial = new Host(source(100), null).message();
         var structure = initial.getStructure();
         assertEquals(36, structure.getMeridiansCount());
-        assertEquals(62, structure.getConnectionsCount());
+        assertEquals(80, structure.getConnectionsCount());
         var unlocked = HumanContent.bundle().getOpeningRulesList().stream()
                 .filter(rule -> HumanOpening.minimumRealm(rule.getTargetMeridianId()) == BodyMessages.Realm.WANDERING_QI)
                 .map(BodyMessages.MeridianOpeningRule::getTargetMeridianId).collect(Collectors.toSet());

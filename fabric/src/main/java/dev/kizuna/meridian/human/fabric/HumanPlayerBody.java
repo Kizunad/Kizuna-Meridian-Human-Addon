@@ -15,6 +15,8 @@ import dev.kizuna.meridian.human.server.HumanCultivationNumbers;
 import dev.kizuna.meridian.human.server.HumanDamage;
 import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.human.server.HumanOpening;
+import dev.kizuna.meridian.human.server.HumanOrganRefining;
+import dev.kizuna.meridian.human.server.HumanRefineRecipes;
 import dev.kizuna.meridian.human.server.HumanRevival;
 import dev.kizuna.meridian.progression.ProgressionProtocol;
 import dev.kizuna.meridian.progression.pb.ProgressionMessages.PlayerProgress;
@@ -53,6 +55,7 @@ import dev.kizuna.meridian.server.BodyTimeSource;
 import dev.kizuna.meridian.server.GatheringSession;
 import dev.kizuna.meridian.server.InMemoryBodyStore;
 import dev.kizuna.meridian.server.OpeningSession;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostRequest;
 import dev.kizuna.meridian.technique.server.TechniqueErrors;
 import dev.kizuna.meridian.technique.server.TechniqueHost;
@@ -72,6 +75,7 @@ final class HumanPlayerBody {
     static final double WALK_ENDURANCE_SECONDS = 300;
     static final double SPRINT_ENDURANCE_SECONDS = 75;
     private static final double MILLIS_PER_SECOND = 1000;
+    private static final int GATHERING_PROTOCOL_VERSION = 1;
     private static final AddonRegistry CONTENT = installContent();
 
     enum Motion {
@@ -274,7 +278,7 @@ final class HumanPlayerBody {
         // 每 tick 只比较动作和下一边界；持续做功及空闲恢复最多每秒结算一次。
         boolean stoppedBreathing = moved && lastBreathing.getActive() && !lastBreathing.getAutomatic();
         if (stoppedBreathing) {
-            stopBreathingForMovement(millis);
+            stopBreathing(millis);
         }
         if (observed == motion && millis < nextBoundaryMillis && !stoppedBreathing) {
             return false;
@@ -300,8 +304,8 @@ final class HumanPlayerBody {
         return true;
     }
 
-    private void stopBreathingForMovement(long millis) {
-        // 与界面结束按钮使用同一个意图，先结清气流并解除呼吸占用。
+    private void stopBreathing(long millis) {
+        // 移动和肺炼都与界面结束按钮使用同一个意图，先结清气流并解除呼吸占用。
         BreathControl control = BreathControl.newBuilder()
                 .setAction(BreathAction.END_BREATHING)
                 .setSequence(lastBreathing.getSequence() + 1)
@@ -439,8 +443,11 @@ final class HumanPlayerBody {
     GatheringResponse gather(long millis, GatheringRequest request) {
         // 请求只有输入方向与序号；玩家、时钟、环境和能力由当前宿主绑定。
         if (!progress().getQiNotesRead() || !progress().getGatheringScrollRead()) {
-            return GatheringResponse.newBuilder().setProtocolVersion(1).setRequestId(request.getRequestId())
-                    .setFailure(RequestFailure.newBuilder().setCode(FailureCode.ACCESS_DENIED)).build();
+            return gatheringFailure(request, FailureCode.ACCESS_DENIED);
+        }
+        if (startsBreathing(request) && refiningBreathingOrgan()) {
+            // 肺炼期间肺忙于炼化，开始吐纳与纳气都要等炼化收尾；结束与查看照常。
+            return gatheringFailure(request, FailureCode.ORGAN_BUSY);
         }
         targetMillis = millis;
         gathering.synchronizeBodyRevision();
@@ -458,6 +465,70 @@ final class HumanPlayerBody {
             rememberBreathingActions(previous);
             scheduleNextBoundary();
         }
+    }
+
+    private static GatheringResponse gatheringFailure(GatheringRequest request, FailureCode code) {
+        // 吐纳入口的拒绝只带失败码，不推进身体也不改吐纳会话。
+        var failure = RequestFailure.newBuilder()
+                .setCode(code)
+                .build();
+        return GatheringResponse.newBuilder()
+                .setProtocolVersion(GATHERING_PROTOCOL_VERSION)
+                .setRequestId(request.getRequestId())
+                .setFailure(failure)
+                .build();
+    }
+
+    private static boolean startsBreathing(GatheringRequest request) {
+        // 只拦截会让肺开始工作的请求；吸、呼、屏息在没有吐纳时本就无效。
+        if (request.hasStart()) {
+            return true;
+        }
+        if (!request.hasBreath()) {
+            return false;
+        }
+        BreathAction action = request.getBreath().getAction();
+        return action == BreathAction.BEGIN_BREATHING || action == BreathAction.SET_AUTOMATIC_BREATHING;
+    }
+
+    private boolean refiningBreathingOrgan() {
+        // 吐纳器官来自人体内容声明，任一侧肺仍有炼化任务都算占用。
+        return breathingOrganIds().stream()
+                .anyMatch(organId -> HumanOrganRefining.refining(snapshot(), organId));
+    }
+
+    private static List<String> breathingOrganIds() {
+        // 吐纳与肺炼共用人体内容声明的呼吸器官，不在宿主另写器官名。
+        return HumanContent.breathing().getOrgansList().stream()
+                .map(organ -> organ.getOrganId())
+                .toList();
+    }
+
+    HumanOrganRefining.Batch refine(long millis, EffectIntent effect, HumanRefineRecipes recipes) {
+        // 起批前结清身体时间，使上一批在同一毫秒完成；肺炼与吐纳互斥，先停下吐纳再取料。
+        settle(millis);
+        boolean usesLungs = effect.getOrganRefine().getOrganIdsList().stream()
+                .anyMatch(breathingOrganIds()::contains);
+        if (usesLungs && (lastBreathing.getActive() || lastBreathing.getAutomatic())) {
+            stopBreathing(millis);
+        }
+        HumanOrganRefining.Batch batch = HumanOrganRefining.batch(snapshot(), effect, recipes);
+        if (batch.changesBody()) {
+            applyActivity(batch.activity());
+        }
+        scheduleNextBoundary();
+        return batch;
+    }
+
+    boolean endRefine(long millis, String castId) {
+        // 只有本次施放仍占用器官时才结算；之后不再起批，已完成的产物立即送回，仍在加工的一批由周期推进收尾。
+        if (!HumanOrganRefining.casting(snapshot(), castId)) {
+            return false;
+        }
+        settle(millis);
+        HumanOrganRefining.end(snapshot(), castId).ifPresent(this::applyActivity);
+        scheduleNextBoundary();
+        return true;
     }
 
     boolean advanceGathering(long millis) {

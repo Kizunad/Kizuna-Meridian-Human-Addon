@@ -1,0 +1,23 @@
+syntax = "proto3";
+package kizuna.meridian.human;
+option java_package = "dev.kizuna.meridian.human.pb";
+option java_outer_classname = "OrganRefineMessages";
+
+import "kizuna/meridian/v1/body.proto";
+
+// 五脏炼化的宿主进度，随唯一 BodySnapshot 保存；真元余额仍只在 Framework 账户里。
+message OrganRefineState {
+  int32 schema_version = 1;
+  repeated OrganRefineTask tasks = 2; // 一器官一任务，organ_id 唯一
+}
+
+// 一个器官的炼化任务：本脏经取料进本脏，加工完成后产物送回本脏经。
+message OrganRefineTask {
+  string organ_id = 1;
+  string cast_id = 2;
+  string last_effect_id = 3; // 已处理的最近一批；同一批重复交付不再取料
+  repeated string meridian_ids = 4; // 起手绑定中与本脏双向相通的本脏经
+  kizuna.meridian.v1.QiInventory pending_output = 5; // 已起批、尚未送回本脏经的产物
+  int64 window_end_millis = 6; // 起批窗口终点，身体时钟毫秒
+  bool cast_ended = 7; // 施放已结束或被打断，不再起新批
+}

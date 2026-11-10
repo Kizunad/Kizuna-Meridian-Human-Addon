@@ -12,6 +12,8 @@
 
 `HumanBreathingNumbers` 集中声明 `AUTOMATIC_MIN_STAMINA_RATIO=0.8`、`AUTOMATIC_RESUME_STAMINA_RATIO=0.9`、`AUTOMATIC_CAPTURE_EFFICIENCY=0.5`。有效膈肌耐力低于80%时暂停吸呼并释放占用，自动意图保留；服务端等待身体自然恢复至至少90%后续跑，80%～90%之间保持休息。首次启动仍使用80%门槛。等待期间不产生粒子接触或摄入证据。相同接触的环境采样体积为手动的一半，炼化仍为20%，摄入证据只记录实际扣取原料。手动吐纳在实际移动时结束；自动吐纳由服务端持续运行，走跑时动作显示切换为移动步态。明确停止、关窗和断线仍会结束吐纳。开脉及外壁动员自己的精力费用保持独立。
 
+五脏诀的肺炼与吐纳互斥：肺炼起批时，正在进行的手动或自动吐纳按结束按钮的同一意图停下；肺炼任务收尾前，开始吐纳与设置自动吐纳的请求返回 `ORGAN_BUSY`，结束与查看照常。细则见[玩家功法宿主](Technique-Host.md#五脏炼化宿主)。
+
 ## 呼吸能力
 
 `HumanContent.breathing()` 返回框架生成的 `BreathingProfile`，同时导出至服务端 JAR 的 `META-INF/kizuna_meridian/human-breathing.pb`，其他语言宿主可直接读取并装配。
