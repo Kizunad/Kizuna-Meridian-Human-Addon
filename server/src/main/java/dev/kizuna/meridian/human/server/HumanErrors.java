@@ -30,7 +30,7 @@ public final class HumanErrors {
     public static final String INVALID_REFINE_RECIPE = "炼化配方族必须按器官种类与相态唯一，且只有一项无属性投料和一项本行产物";
     public static final String INVALID_REFINE_PROGRESS = "五脏炼化进度类型或版本无效";
     public static final String REFINE_ORGAN_UNAVAILABLE = "本脏已伤，炼化中止";
-    public static final String REFINE_PATH_MISSING = "本脏经未开，炼化无从取料";
+    public static final String REFINE_PATH_MISSING = "这具身体没有本脏与本脏经之间的通路，炼化无从取料";
     public static final String REFINE_RECIPE_MISSING = "当前境界炼不了这一脏";
     public static final String REFINE_BODY_MISSING = "炼化的施放者没有人体";
     public static final String REFINE_END_REJECTED = "炼化收尾被身体拒绝，任务按起批窗口自行收尾";
