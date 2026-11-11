@@ -200,6 +200,22 @@ public final class HumanCultivation {
         return plan.build();
     }
 
+    public static BodyActivity ascend(BodySnapshot body) {
+        // 管理命令直接突破：照突破成功那一步把内腔候选相变为 0.1 并写入真炁；不查八脉、候选和燃料，也不扣燃料。
+        // 在途货物原样留着，回到经脉后仍是游离态；境界只允许由游炁上一层，越级由 Framework 拒绝。
+        var plan = new HumanQiPlan(body);
+        for (MeridianState meridian : body.meridianStates()) {
+            String key = "l:" + meridian.id().value();
+            plan.put(key, phaseChange(plan.get(key)));
+        }
+        plan.activity.setRealm(BodyMessages.Realm.TRUE_QI);
+        var state = state(body).toBuilder().setLastMillis(body.settledAt().elapsedMillis())
+                .setBreakthrough(false).setMobilizing(false).setBreakthroughSeconds(0).setFuelSeconds(0)
+                .setReason("命令突破：真炁");
+        plan.activity.putProgress(PROGRESS, Any.pack(state.build()));
+        return plan.build();
+    }
+
     public static boolean needsAdvance(BodySnapshot body) {
         // 静止且没有储备交换的身体不轮询；活动和生理阈值变化才安排有限事件。
         CultivationState state = state(body);

@@ -6,6 +6,7 @@ import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.core.BodyTimeAdvancement;
 import dev.kizuna.meridian.core.Qi;
 import dev.kizuna.meridian.core.QiInventory;
+import dev.kizuna.meridian.core.Realm;
 import dev.kizuna.meridian.core.TissueCapabilities;
 import dev.kizuna.meridian.human.pb.CultivationMessages.CultivationInput;
 import dev.kizuna.meridian.human.server.HumanBirth;
@@ -636,6 +637,17 @@ final class HumanPlayerBody {
         applyActivity(plan.build());
         scheduleNextBoundary();
         return FailureCode.FAILURE_CODE_UNSPECIFIED;
+    }
+
+    BodyMessages.Realm ascend(long millis) {
+        // 管理命令把游炁直接推到真炁，走中焦突破成功时同一次相变与境界写入；已是真炁或更高时不提交。
+        settle(millis);
+        if (snapshot().realm() != Realm.WANDERING_QI) {
+            return BodyMessages.Realm.valueOf(snapshot().realm().name());
+        }
+        applyActivity(HumanCultivation.ascend(snapshot()));
+        scheduleNextBoundary();
+        return BodyMessages.Realm.TRUE_QI;
     }
 
     private void applyActivity(ActivityMessages.BodyActivity plan) {

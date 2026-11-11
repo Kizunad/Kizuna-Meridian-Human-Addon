@@ -8,5 +8,10 @@
   "commands.meridian_human_host.qi.all_meridians": "全身经脉",
   "commands.meridian_human_host.qi.meridian": "%s：内腔 %s / 稳定容量 %s 元，%s",
   "commands.meridian_human_host.qi.body": "身体总量 %s 元；经脉内腔 %s 元；外壁 %s 元；在途 %s 元。",
-  "commands.meridian_human_host.opening.complete": "开脉完成（%s）：%s"
+  "commands.meridian_human_host.opening.complete": "开脉完成（%s）：%s",
+  "commands.meridian_human_host.body.realm.set": "%s 的境界：%s",
+  "commands.meridian_human_host.body.realm.one_way": "%s 现在是%s：境界只能由游炁往上突破一层，人体目前只到真炁，退不回去",
+  "commands.meridian_human_host.body.realm.unknown": "没有这个境界：%s。可选 wandering_qi（游炁）、true_qi（真炁）",
+  "commands.meridian_human_host.body.realm.name.wandering_qi": "游炁",
+  "commands.meridian_human_host.body.realm.name.true_qi": "真炁"
 }

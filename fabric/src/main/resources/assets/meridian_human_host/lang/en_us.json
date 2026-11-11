@@ -8,5 +8,10 @@
   "commands.meridian_human_host.qi.all_meridians": "all meridians",
   "commands.meridian_human_host.qi.meridian": "%s: lumen %s / stable capacity %s yuan, %s",
   "commands.meridian_human_host.qi.body": "Body total %s yuan; meridian lumens %s yuan; walls %s yuan; in transit %s yuan.",
-  "commands.meridian_human_host.opening.complete": "Opening completed (%s): %s"
+  "commands.meridian_human_host.opening.complete": "Opening completed (%s): %s",
+  "commands.meridian_human_host.body.realm.set": "Realm of %s: %s",
+  "commands.meridian_human_host.body.realm.one_way": "%s is %s: a realm can only rise one step from Wandering Qi; the human body only reaches True Qi and cannot go back",
+  "commands.meridian_human_host.body.realm.unknown": "Unknown realm: %s. Use wandering_qi or true_qi",
+  "commands.meridian_human_host.body.realm.name.wandering_qi": "Wandering Qi",
+  "commands.meridian_human_host.body.realm.name.true_qi": "True Qi"
 }

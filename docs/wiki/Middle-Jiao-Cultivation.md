@@ -48,6 +48,10 @@
 
 权限等级 2，可从控制台指定玩家：开脉完成用 `/meridian opening complete`（本包登记），按经脉设定内腔或外壁的真元数量与密度用 `/meridian qi set` 的带参数形式（Debug 登记，经本包的调试入口提交）。写法见 [Framework 指令页](https://github.com/Kizunad/Kizuna-Meridian-Mod-Framework/wiki/Commands)。
 
+改境界用 `/meridian body realm [<targets>] <wandering_qi|true_qi>`（本包登记，权限 2，Tab 补全两层境界）：游炁直接升到真炁，
+照突破成功那一步把内腔 0.09 候选转为 0.1、写入真炁并清掉突破进度；不查八脉、候选和燃料，也不扣燃料，本次周天在途的货物不变。
+Framework 只许境界一次升一层，所以已是真炁时再写 `true_qi` 算成功，写 `wandering_qi` 拒绝；要回到游炁只能新建角色。
+
 完成 `all` 指全部现存经脉；只测游炁应逐条指定八脉。已开经脉不重复扩容。真元 `all` 的数量是全身总量，按扣除在途预约后的可用体积分配，0可清空；不能挤超体积或在途预约。调试不授予残卷或熟练度。
 
 长期回归覆盖授权、伪造拒绝、幂等扩容、19秒运输、手动提纯、封顶、脾加工及突破成败；Fabric GameTest 验证真实人体宿主与撤权。Human-UI 单机 smoke 使用正式 OP 命令、客户端网络及真实60秒计时验证完整链路。
