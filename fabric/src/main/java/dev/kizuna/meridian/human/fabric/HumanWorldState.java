@@ -1,12 +1,16 @@
 package dev.kizuna.meridian.human.fabric;
 
 import dev.kizuna.meridian.core.BodySnapshot;
+import dev.kizuna.meridian.core.Qi;
+import dev.kizuna.meridian.core.QiAccounting;
 import dev.kizuna.meridian.core.QiInventory;
 import dev.kizuna.meridian.environment.EnvironmentAbsorption;
 import dev.kizuna.meridian.environment.EnvironmentConfigLoader;
 import dev.kizuna.meridian.environment.EnvironmentQiRules;
 import dev.kizuna.meridian.environment.TerrainQiGenerator;
+import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.DrawResult;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.ForgetReleaseResult;
+import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionDraw;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionRelease;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionView;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.ReleaseResult;
@@ -61,10 +65,18 @@ final class HumanWorldState {
     private static final long WINDOW_MILLIS = 30_000;
     private static final int CHUNK_WIDTH_BLOCKS = 16;
     private static final int UNSAVED_TICK = -1;
+    /** 装置每次取用记成从受理时刻起的一秒区间。 */
+    private static final long DRAW_INTERVAL_MILLIS = 1_000;
+    /** 取用去重保留两个供给窗口；装置重试必须在这之内。 */
+    private static final long DRAW_RETENTION_MILLIS = 2 * WINDOW_MILLIS;
+    /** 按比例分摊会有舍入，取用速率比窗口上限少留这一比例，避免越过上限。 */
+    private static final double DRAW_RATE_MARGIN = 1e-9;
     // 未获发送端持久删除证明的请求不能按时间回收。
     private final Map<String, ReleaseRecord> releaseIds = new HashMap<>();
     private final Set<String> persistedReleaseIds = new HashSet<>();
     private final Set<String> unsavedForgetIds = new HashSet<>();
+    private final Map<String, DrawRecord> drawIds = new LinkedHashMap<>();
+    private final Set<String> persistedDrawIds = new HashSet<>();
     private final DurableStateFile.DirectorySync directorySync;
     private MinecraftServer server;
     private int lastSaveTick = UNSAVED_TICK;
@@ -80,6 +92,8 @@ final class HumanWorldState {
 
     private record ReleaseRecord(RegionRelease request, long millis) { }
     private record PendingCredit(String sourceId, QiInventory qi, boolean fromDefault, String releaseId) { }
+    /** 结果只存来源和实际取到的明细；重复与持久化标记按查询时的状态另填。 */
+    private record DrawRecord(RegionDraw request, DrawResult result, long millis) { }
 
     HumanWorldState() {
         // 每个新世界获得稳定时钟世代，重启时读取保存的值。
@@ -144,6 +158,11 @@ final class HumanWorldState {
             var state = new HumanWorldState(epoch, store);
             state.readReleaseIds(nbt.getList("release_ids").orElseThrow());
             state.readPendingCredits(nbt.getList("pending_credits").orElseThrow());
+            // 装置取用是后加的字段，旧存档没有就按空表读入；有就严格校验。
+            if (nbt.contains("draw_ids")) {
+                requireList(nbt, "draw_ids", Tag.TAG_COMPOUND);
+                state.readDrawIds(nbt.getList("draw_ids").orElseThrow());
+            }
 
             // 失败队列也须恢复，余额不一致留待执行时报告，不能让重启吞掉重试机会。
             for (BodySnapshot body : saved.bodies()) {
@@ -155,6 +174,7 @@ final class HumanWorldState {
                 }
             }
             state.persistedReleaseIds.addAll(state.releaseIds.keySet());
+            state.persistedDrawIds.addAll(state.drawIds.keySet());
             return state;
         } catch (Exception failure) {
             throw HumanErrors.invalidSave(failure);
@@ -241,6 +261,29 @@ final class HumanWorldState {
             long millis = entry.getLong("millis").orElseThrow();
             if (millis < 0 || releaseIds.putIfAbsent(request.getReleaseId(),
                     new ReleaseRecord(request, millis)) != null) {
+                throw HumanErrors.invalid(HumanErrors.INVALID_SAVED_BODY);
+            }
+        }
+    }
+
+    private void readDrawIds(ListTag entries) throws IOException {
+        // 原请求、首次结果和受理时间一起恢复；重复 ID 或结果来源对不上原位置都说明存档损坏。
+        for (int index = 0; index < entries.size(); index++) {
+            CompoundTag entry = entries.getCompound(index).orElseThrow();
+            requireField(entry, "request", Tag.TAG_BYTE_ARRAY);
+            requireField(entry, "result", Tag.TAG_BYTE_ARRAY);
+            requireField(entry, "millis", Tag.TAG_LONG);
+            var request = RegionDraw.parseFrom(entry.getByteArray("request").orElseThrow());
+            validateDraw(request);
+            var result = DrawResult.parseFrom(entry.getByteArray("result").orElseThrow());
+            BodyProtobuf.fromInventory(result.getDrawnQi());
+            long millis = entry.getLong("millis").orElseThrow();
+            String expectedSource = drawSourceId(request);
+            boolean sourceMatches = result.hasSourceId()
+                    ? result.getSourceId().equals(expectedSource)
+                    : expectedSource.isEmpty();
+            if (millis < 0 || !sourceMatches
+                    || drawIds.putIfAbsent(request.getDrawId(), new DrawRecord(request, result, millis)) != null) {
                 throw HumanErrors.invalid(HumanErrors.INVALID_SAVED_BODY);
             }
         }
@@ -399,7 +442,8 @@ final class HumanWorldState {
         return RegionView.newBuilder().setSourceId(sourceId).setVolumeBlocks(volume)
                 .setInventory(source.getInventory())
                 .setConcentration(BodyProtobuf.fromInventory(source.getInventory()).totalQi() / volume)
-                .setSourceRevision(source.getRevision()).build();
+                .setSourceRevision(source.getRevision())
+                .setSpareAbsorptionPerSecond(drawableRate(source, millis)).build();
     }
 
     ReleaseResult release(RegionRelease request, ServerLevel world, long millis) {
@@ -454,6 +498,108 @@ final class HumanWorldState {
                 .build();
     }
 
+    DrawResult draw(RegionDraw request, ServerLevel world, long millis) {
+        // 去重先比完整原请求；首次受理才真正取，取到的量当场进默认账户并排队在下个窗口放回原区域。
+        time(millis);
+        validateDraw(request);
+        String drawId = request.getDrawId();
+        var position = request.getPosition();
+        if (!position.getDimensionId().equals(world.dimension().identifier().toString())) {
+            throw HumanErrors.hostRejected(FailureCode.INVALID_REQUEST);
+        }
+        DrawRecord previous = drawIds.get(drawId);
+        if (previous != null) {
+            if (!previous.request().equals(request)) {
+                throw HumanErrors.hostRejected(FailureCode.REQUEST_ID_CONFLICT);
+            }
+            return previous.result().toBuilder().setDuplicate(true)
+                    .setPersisted(persistedDrawIds.contains(drawId)).build();
+        }
+
+        // 主世界外没有区域，登记一笔空结果，重试同样拿到零。
+        int chunkX = Math.floorDiv(position.getBlockX(), CHUNK_WIDTH_BLOCKS);
+        int chunkZ = Math.floorDiv(position.getBlockZ(), CHUNK_WIDTH_BLOCKS);
+        String sourceId = ensureRegion(world, new ChunkPos(chunkX, chunkZ), millis);
+        var result = DrawResult.newBuilder().setDrawnQi(BodyProtobuf.toInventory(QiInventory.empty()));
+        if (sourceId != null) {
+            QiInventory drawn = drawFromRegion(sourceId, request.getAmount(), millis);
+            result.setSourceId(sourceId).setDrawnQi(BodyProtobuf.toInventory(drawn));
+        }
+
+        // 首次结果随取用记录保存，tick 末写盘后重发才确认持久化。
+        DrawResult accepted = result.build();
+        drawIds.put(drawId, new DrawRecord(request, accepted, millis));
+        setDirty();
+        return accepted;
+    }
+
+    private QiInventory drawFromRegion(String sourceId, double wantedQi, long millis) {
+        // 先结清到期窗口，保证区间落在当前窗口内；窗口剩不到一秒就截到窗尾。
+        renewEnvironment(millis);
+        EnvironmentQiSource source = store.environmentSource(sourceId).orElseThrow();
+        long untilMillis = drawUntil(source, millis);
+        BodyMessages.TimeCursor from = time(millis);
+        BodyMessages.TimeCursor until = time(untilMillis);
+
+        // 能取的量受三者限制：想要的、这一秒剩下的共享速率、区域实际库存。
+        double intervalSeconds = (untilMillis - millis) / 1000.0;
+        double rateBudgetQi = drawableRate(source, millis) * intervalSeconds;
+        QiInventory stock = BodyProtobuf.fromInventory(source.getInventory());
+        double drawableQi = Math.min(wantedQi, Math.min(rateBudgetQi, stock.totalQi()));
+        QiInventory drawn = proportionalShare(stock, drawableQi);
+        if (drawn.entries().isEmpty()) {
+            return drawn;
+        }
+
+        // Framework 扣区域、占速率、把取出量放进默认账户；这里登记下个窗口放回同一区域。
+        store.drawEnvironmentSource(sourceId, source.getRevision(), from, until, drawn);
+        queueDefaultRelease(sourceId, drawn);
+        return drawn;
+    }
+
+    private static long drawUntil(EnvironmentQiSource source, long millis) {
+        // 取用区间从受理时刻起一秒，窗口剩不到一秒就截到窗尾。
+        return Math.min(Math.addExact(millis, DRAW_INTERVAL_MILLIS), source.getValidUntil().getElapsedMillis());
+    }
+
+    private double drawableRate(EnvironmentQiSource source, long millis) {
+        // 这一秒装置还能取的速率：共享速率剩下的部分，再按窗口上限的固定比例留一点余量，
+        // 占满后再取得到的是零，而不是一点舍入尘埃。查询和取用共用这一条，起熬预估和实际取到的对得上。
+        // 窗口已到期、还没续上时，续窗会清空占用，按当前上限算。
+        double marginRate = source.getMaxAbsorptionPerSecond() * DRAW_RATE_MARGIN;
+        long untilMillis = drawUntil(source, millis);
+        if (untilMillis <= millis) {
+            return transferableRate(source.getMaxAbsorptionPerSecond() - marginRate);
+        }
+        double spareRate = EnvironmentAbsorption.spareRate(source, time(millis), time(untilMillis));
+        return transferableRate(spareRate - marginRate);
+    }
+
+    private static double transferableRate(double rate) {
+        // 占满后余量再减一次留量，会剩下正的舍入尘埃；低于最小可流转量的速率一秒也取不出任何一份，按零报，
+        // 和 proportionalShare 实际取到的一致。
+        return rate < QiAccounting.MIN_TRANSFER_QI ? 0 : rate;
+    }
+
+    private static QiInventory proportionalShare(QiInventory stock, double wantedQi) {
+        // 任何属性都能用：按库存里各属性所占比例分摊，不先把某一种取空。
+        double stockQi = stock.totalQi();
+        if (wantedQi <= 0 || stockQi <= 0) {
+            return QiInventory.empty();
+        }
+        double fraction = Math.min(1, wantedQi / stockQi);
+        var shares = new ArrayList<Qi>();
+        for (Qi entry : stock.entries()) {
+            double shareQi = entry.amount() * fraction;
+            // 低于最小可流转量、或大余额减不动的那份留在区域里，不让 Framework 整笔拒绝。
+            if (shareQi < QiAccounting.MIN_TRANSFER_QI || entry.amount() - shareQi == entry.amount()) {
+                continue;
+            }
+            shares.add(entry.withAmount(shareQi));
+        }
+        return new QiInventory(shares);
+    }
+
     void bind(MinecraftServer server) {
         // 普通世界保存和 tick 末交接共用同一个保存次数限制。
         this.server = server;
@@ -461,7 +607,8 @@ final class HumanWorldState {
 
     void flushHandoffs(Path file) {
         // 同 tick 的所有新受理和遗忘合并；重复查询已持久请求不会再触发保存。
-        if (!persistedReleaseIds.containsAll(releaseIds.keySet()) || !unsavedForgetIds.isEmpty()) {
+        if (!persistedReleaseIds.containsAll(releaseIds.keySet()) || !unsavedForgetIds.isEmpty()
+                || !persistedDrawIds.containsAll(drawIds.keySet())) {
             save(file.toFile());
         }
     }
@@ -505,6 +652,8 @@ final class HumanWorldState {
         persistedReleaseIds.clear();
         persistedReleaseIds.addAll(releaseIds.keySet());
         unsavedForgetIds.clear();
+        persistedDrawIds.clear();
+        persistedDrawIds.addAll(drawIds.keySet());
         dirty = false;
     }
 
@@ -515,6 +664,26 @@ final class HumanWorldState {
                 || BodyProtobuf.fromInventory(request.getReleasedQi()).entries().isEmpty()) {
             throw HumanErrors.hostRejected(FailureCode.INVALID_REQUEST);
         }
+    }
+
+    private static void validateDraw(RegionDraw request) {
+        // 数量必须是正有限数；位置格式与释放相同，维度是否存在由入口检查。
+        if (request.getDrawId().isBlank() || !request.hasPosition()
+                || request.getPosition().getDimensionId().isBlank()
+                || !Double.isFinite(request.getAmount()) || request.getAmount() <= 0) {
+            throw HumanErrors.hostRejected(FailureCode.INVALID_REQUEST);
+        }
+    }
+
+    private String drawSourceId(RegionDraw request) {
+        // 存档校验用：取用结果的来源必须就是原位置所在区域。
+        String dimension = request.getPosition().getDimensionId();
+        if (!dimension.equals("minecraft:overworld")) {
+            return "";
+        }
+        int x = rules.regionCoordinate(Math.floorDiv(request.getPosition().getBlockX(), CHUNK_WIDTH_BLOCKS));
+        int z = rules.regionCoordinate(Math.floorDiv(request.getPosition().getBlockZ(), CHUNK_WIDTH_BLOCKS));
+        return "human:world_" + epoch + "/" + dimension.replace(':', '/') + "/" + x + "/" + z;
     }
 
     private String releaseSourceId(RegionRelease request) {
@@ -540,6 +709,12 @@ final class HumanWorldState {
             var source = store.environmentSource(sourceId).orElseThrow();
             BodyMessages.TimeCursor validUntil = time(Math.addExact(millis, WINDOW_MILLIS));
             store.renewEnvironmentWindow(sourceId, source.getRevision(), validFrom, validUntil, rules);
+            setDirty();
+        }
+        // 取用去重只保留两个窗口；取到的量另在放回队列里，清理记录不影响放回。
+        boolean expired = drawIds.values().removeIf(record -> millis - record.millis() >= DRAW_RETENTION_MILLIS);
+        if (expired) {
+            persistedDrawIds.retainAll(drawIds.keySet());
             setDirty();
         }
     }
@@ -664,6 +839,7 @@ final class HumanWorldState {
         nbt.put("environment_sources", savedSources());
         nbt.put("release_ids", savedReleaseIds());
         nbt.put("pending_credits", savedPendingCredits());
+        nbt.put("draw_ids", savedDrawIds());
         return nbt;
     }
 
@@ -706,6 +882,19 @@ final class HumanWorldState {
         for (ReleaseRecord record : releaseIds.values()) {
             var entry = new CompoundTag();
             entry.putByteArray("request", record.request().toByteArray());
+            entry.putLong("millis", record.millis());
+            ids.add(entry);
+        }
+        return ids;
+    }
+
+    private ListTag savedDrawIds() {
+        // 原请求和首次结果都存原始 Protobuf 字节，重载后同 ID 重发仍拿到同一结果。
+        var ids = new ListTag();
+        for (DrawRecord record : drawIds.values()) {
+            var entry = new CompoundTag();
+            entry.putByteArray("request", record.request().toByteArray());
+            entry.putByteArray("result", record.result().toByteArray());
             entry.putLong("millis", record.millis());
             ids.add(entry);
         }

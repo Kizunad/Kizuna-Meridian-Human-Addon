@@ -14,6 +14,7 @@ Human 为可信服务端宿主提供位置查询、真元释放、交接回收�
 | `release`（11） | `RegionRelease`：全局唯一 ID、原位置、库存明细 | `released`：可选来源 ID、`duplicate`、`persisted` |
 | `clock`（12） | 必须为 true | `now`：时间域、世界 epoch、毫秒 |
 | `forget_release`（新增 13） | 已持久删除原释放的 ID | `forgotten`（新增 15）：`ForgetReleaseResult.persisted` |
+| `draw`（新增 14） | `RegionDraw`：全局唯一 ID、装置位置、想取的元数 | `drawn`（新增 16）：可选来源 ID、实际取到的明细、`duplicate`、`persisted` |
 
 `ForgetReleaseResult.persisted` 的字段号为 1，值为 true 才确认遗忘。请求和响应的新增编号分别接原最大号 12、14 之后，不复用编号。`ReleaseResult.persisted` 为字段 3，`duplicate` 语义保持不变。两个必装模块一起更新，无旧接口接线或降级。
 
@@ -21,7 +22,7 @@ Human 为可信服务端宿主提供位置查询、真元释放、交接回收�
 
 ## 查询、受理与入账
 
-查询按方块坐标换算区域，负坐标向下整除。主世界区域按固定中心群系初始化一次，后续读取已保存库存。来源 ID 为 `human:world_<epoch>/minecraft/overworld/<区域X>/<区域Z>`。`RegionView` 包含来源 ID、体积、逐属性/相态库存、浓度和 revision，不限制属性命名空间。
+查询按方块坐标换算区域，负坐标向下整除。主世界区域按固定中心群系初始化一次，后续读取已保存库存。来源 ID 为 `human:world_<epoch>/minecraft/overworld/<区域X>/<区域Z>`。`RegionView` 包含来源 ID、体积、逐属性/相态库存、浓度、revision 和 `spare_absorption_per_second`，不限制属性命名空间。`spare_absorption_per_second` 是从查询时刻起一秒内还剩的共享速率（元/秒），扣掉了吐纳的身体和装置取用已占的部分，也扣掉了取用规则里防舍入的那点余量，所以等于这一秒装置取用最多能拿到的速率；低于最小可流转量（`QiAccounting.MIN_TRANSFER_QI`）的余数一份也取不出，按 0 报；窗口已到期、还没续上时按当前上限算。Brewing 起熬前用它估环境能给这一锅多少。
 
 释放库存必须非空，数量、密度、相态及重复明细由 Framework 校验。同 ID 同完整内容返回 `duplicate=true`，不重新排队；同 ID 改变位置或库存返回 `REQUEST_ID_CONFLICT`。重试始终携带原内容，释放 ID 不得复用。
 
@@ -30,6 +31,20 @@ Human 为可信服务端宿主提供位置查询、真元释放、交接回收�
 只有该 ID 已包含在一次完整成功的保存中，重发 `release` 才返回 `persisted=true`；加载正式文件时也恢复该确认集合。不能用 `duplicate` 代替持久化确认。正常磁盘、每 tick 重试时，受理到取得确认最多两个服务器 tick，20 TPS 时约 100 毫秒；这包含模组回调顺序及当 tick 已保存的情况。保存耗时会拉长 tick；故障、暂停或低 TPS 下没有有限墙钟保证。
 
 主世界外部释放到对应来源的下一个 30 秒供给窗才入账，非主世界到受理后的下一个 30 秒边界进入默认账户。入账失败保留队列，下次续窗重试；本窗内不改变玩家使用的来源 revision。身体、区域、默认账户、`release_ids` 与 `pending_credits` 同存 `data/meridian_human.dat`。
+
+## 装置取用
+
+`draw` 给炼药釜这类装置从所在区域取真元，接 Framework 的[装置取用](https://github.com/Kizunad/Kizuna-Meridian-Mod-Framework/wiki/Environment-Qi#装置取用)：
+
+1. 同 ID 同完整内容返回首次结果和 `duplicate=true`，不再取；同 ID 改了位置或数量返回 `REQUEST_ID_CONFLICT`。`amount` 必须是正有限数，否则 `INVALID_REQUEST`。
+2. 主世界外没有区域，返回不设 `source_id` 的空结果。
+3. 受理时先结清已到期的供给窗口，再从受理时刻起记一秒区间 `[now, now+1s)`，窗口剩下不到一秒就截到窗尾。
+4. 能取的量 = 想取的、`(spareRate − 窗口上限 × 1e-9) × 区间秒数`（速率低于最小可流转量时记 0）、区域实际库存三者取最小（留的一点余量防止按比例分摊的舍入越过上限），按库存里各属性的比例分摊；低于最小可流转量的那份不取。取到多少回多少，可以比想要的少，也可以是零，零不算失败。
+5. 取出的真元进 Framework 默认释放账户，同时按区域登记一笔待放回，和玩家释放共用同一队列，到这个区域的下个窗口整批放回原区域。总账守恒，区域不会被熬干，抢的是速率。
+
+取用记录（原请求、结果、受理时刻）和其他交接事实一起存进 `data/meridian_human.dat` 的 `draw_ids`，tick 末统一写盘；写过一次后重发同一请求才返回 `persisted=true`。取用记录在受理后两个供给窗口（60 秒模拟时间）后的续窗时清理，所以重试必须在这之内；这和释放不同，没有 `forget` 操作。旧存档没有 `draw_ids` 时按空表读入。
+
+以后的浓度或密度门槛接在这个操作上，由 Human 判断后少取或不取，调用方的协议不变。
 
 ## 写盘确认
 
@@ -106,6 +121,9 @@ Human 为可信服务端宿主提供位置查询、真元释放、交接回收�
 | `failedBatchOnlyRetriesNextTick` | 失败也限每 tick 一次，下 tick 恢复 |
 | `unsupportedDirectorySyncStillConfirmsPersistence` | Windows 能力路径实际保存并返回持久化确认 |
 | `forgetWaitsForCreditAndDurableDeletionThenReclaimsHistory` | 入账前保留，删除写失败恢复、丢响应重试及余额守恒 |
+| `deviceDrawTakesFromRegionAndReturnsNextWindow` | 取到的量按属性比例扣区域、进默认账户，下个窗口放回原区域，总账不变 |
+| `deviceDrawIsCappedBySharedRateAndInventory` | 想取很多只拿到一秒的窗口速率，同一秒再取得零、下一秒恢复；查询报的剩余速率取前等于取到的量、占满后为零；窗尾截短，到期窗口先续再取，非主世界不设来源 |
+| `deviceDrawDeduplicatesAcrossReloadAndRejectsConflicts` | 同 ID 重发不再取，重载存档后仍去重并确认写盘，改内容拒绝，两窗后清理 |
 
 执行命令：
 

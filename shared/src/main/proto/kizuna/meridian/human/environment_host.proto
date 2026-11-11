@@ -17,6 +17,7 @@ message EnvironmentHostRequest {
     RegionRelease release = 11;
     bool clock = 12; // 必须为 true。
     string forget_release = 13; // 发送端已持久删除原请求；ID 不得再次用于 release。
+    RegionDraw draw = 14;
   }
 }
 
@@ -32,6 +33,9 @@ message RegionView {
   kizuna.meridian.v1.QiInventory inventory = 3;
   double concentration = 4;
   int64 source_revision = 5;
+  // 从查询时刻起一秒内还剩的共享速率（元/秒），已扣掉吐纳的身体和装置取用占的部分；
+  // 装置取用在这一秒里最多取到这么多。窗口刚到期、还没续上时按新窗口的上限算。
+  double spare_absorption_per_second = 6;
 }
 
 message RegionRelease {
@@ -44,6 +48,21 @@ message ReleaseResult {
   optional string source_id = 1;
   bool duplicate = 2; // 只表示此前已受理，不代表持久化。
   bool persisted = 3; // ID、完整原请求和待入账事实或已入账余额已同步写盘。
+}
+
+// 装置（如炼药釜）从所在区域取真元。按 Human 时钟记成从受理时刻起的一秒区间，
+// 与同区域吐纳的身体共用窗口速率；取到的量在下个供给窗口放回原区域。
+message RegionDraw {
+  string draw_id = 1; // 全局唯一；同 ID 同内容返回首次结果，不再取。重试必须保留原内容。
+  RegionQuery position = 2;
+  double amount = 3; // 想取的元数，正有限值；实际可以更少，也可以为零。
+}
+
+message DrawResult {
+  optional string source_id = 1; // 没有区域时不设置，此时 drawn_qi 为空。
+  kizuna.meridian.v1.QiInventory drawn_qi = 2; // 实际取到的逐属性明细，可为空。
+  bool duplicate = 3; // 同 ID 已受理过，本次没有再取。
+  bool persisted = 4; // 取用记录、区域库存和待放回事实已同步写盘。
 }
 
 message ForgetReleaseResult {
@@ -60,5 +79,6 @@ message EnvironmentHostResponse {
     kizuna.meridian.v1.TimeCursor now = 13;
     kizuna.meridian.v1.RequestFailure failure = 14;
     ForgetReleaseResult forgotten = 15;
+    DrawResult drawn = 16;
   }
 }

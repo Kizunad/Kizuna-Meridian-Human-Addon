@@ -63,6 +63,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.LevelResource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -119,11 +120,11 @@ public final class HumanFabric implements ModInitializer {
         });
         // 右键与左键在同处拦：用物品、放方块或与方块交互、与实体交互；目录声明放行右键的式（如服药）不拦。
         UseItemCallback.EVENT.register((player, world, hand) ->
-                useWhileCasting(player, hand, null));
+                useWhileCasting(world, player, hand, null));
         UseBlockCallback.EVENT.register((player, world, hand, hit) ->
-                useWhileCasting(player, hand, hit.getBlockPos()));
+                useWhileCasting(world, player, hand, hit.getBlockPos()));
         UseEntityCallback.EVENT.register((player, world, hand, entity, hit) ->
-                useWhileCasting(player, hand, null));
+                useWhileCasting(world, player, hand, null));
         HumanHealthHost.bind(this::health);
         HumanActivityHost.bind(this::activity);
         HumanDebugHost.bind(this::debugQi);
@@ -335,7 +336,12 @@ public final class HumanFabric implements ModInitializer {
     }
 
     private static InteractionResult useWhileCasting(
-            Player player, InteractionHand hand, BlockPos target) {
+            Level world, Player player, InteractionHand hand, BlockPos target) {
+        // 只在服务端拦。单人游戏的客户端线程读得到同一份施放表，在客户端把主手拦成 FAIL 后原版不再试副手；
+        // 多人客户端本来就读不到这张表，两边因此一致。
+        if (world.isClientSide()) {
+            return InteractionResult.PASS;
+        }
         // FAIL 让原版不再处理这次右键；放方块被拦时原版随后补发方块更新，客户端预测的方块会被纠正。
         if (HumanControl.controlled(player.getUUID()) || HumanTechniqueHost.blocksUse(player, hand, target)) {
             return InteractionResult.FAIL;
@@ -425,6 +431,12 @@ public final class HumanFabric implements ModInitializer {
         }
         if (request.hasForgetRelease()) {
             return response.setForgotten(state.forgetRelease(request.getForgetRelease())).build().toByteArray();
+        }
+        if (request.hasDraw()) {
+            // 装置取用和释放一样先确认维度真实存在，再交给世界状态去重和扣账。
+            var draw = request.getDraw();
+            var world = environmentWorld(server, draw.getPosition().getDimensionId());
+            return response.setDrawn(state.draw(draw, world, now)).build().toByteArray();
         }
         boolean queryingRegion = request.hasQuery();
         var query = request.getQuery();

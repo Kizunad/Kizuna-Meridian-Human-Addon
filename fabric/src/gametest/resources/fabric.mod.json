@@ -18,6 +18,7 @@
       "dev.kizuna.meridian.human.fabric.HumanRevivalGameTest",
       "dev.kizuna.meridian.human.fabric.HumanMeridianGameTest",
       "dev.kizuna.meridian.human.fabric.HumanReleasePersistenceGameTest",
+      "dev.kizuna.meridian.human.fabric.HumanDeviceDrawGameTest",
       "dev.kizuna.meridian.human.fabric.HumanTechniqueGameTest",
       "dev.kizuna.meridian.human.fabric.HumanTechnique6aGameTest",
       "dev.kizuna.meridian.human.fabric.HumanExertionGameTest",
