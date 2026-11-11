@@ -415,8 +415,8 @@ final class HumanPlayerBody {
     }
 
     List<CommandReceipt> receipts() {
-        // 去重事实与身体放进同一份世界持久化记录。
-        return store.receipts().stream().filter(receipt -> receipt.getCommand().getBodyId().equals(id.value())).toList();
+        // 去重事实与身体放进同一份世界持久化记录；Store 按身体分开存，直接取这一具的，不用遍历全体玩家再过滤。
+        return store.receipts(id);
     }
 
     void selectEnvironment(String sourceId, long millis) {

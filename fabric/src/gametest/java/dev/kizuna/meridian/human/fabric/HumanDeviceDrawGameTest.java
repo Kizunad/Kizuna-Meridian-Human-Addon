@@ -5,6 +5,7 @@ import dev.kizuna.meridian.core.QiInventory;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.DrawResult;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionDraw;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionQuery;
+import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionRelease;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionView;
 import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
@@ -18,6 +19,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.server.level.ServerLevel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static dev.kizuna.meridian.human.fabric.HumanGameTestTicks.DEFAULT_TIMEOUT;
 
@@ -153,6 +155,49 @@ public final class HumanDeviceDrawGameTest {
         ListTag ids = reloaded.save(new CompoundTag()).getListOrEmpty("draw_ids");
         context.assertTrue(ids.isEmpty(), "两窗之后取用记录还在：" + ids.size());
         context.succeed();
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT + HumanWorldState.DRAW_SAVE_INTERVAL_TICKS)
+    public void boundDrawsWaitForTheSaveIntervalWhileReleasesSaveAtOnce(GameTestHelper context) throws Exception {
+        // 绑了服务端时钟：取用攒到距上次保存满间隔才写盘，期间重发仍报未写盘；释放不等间隔，下一 tick 就写。
+        ServerLevel world = context.getLevel();
+        var state = new HumanWorldState();
+        state.bind(world.getServer());
+        Path file = Files.createTempDirectory(Path.of("."), "device-draw-interval-").resolve("human.dat");
+        state.query(world, REGION_BLOCK, 2 * REGION_BLOCK, 0);
+        // 先做一次保存，当作刚过的世界保存，间隔从这一 tick 起算。
+        state.setDirty();
+        state.save(file.toFile());
+        context.assertTrue(Files.exists(file), "起算用的保存没有写出文件");
+        RegionDraw request = draw("gametest:draw-interval", world, SMALL_DRAW_QI, REGION_BLOCK, 2 * REGION_BLOCK);
+        int clearlyEarly = HumanWorldState.DRAW_SAVE_INTERVAL_TICKS / 2;
+        int clearlyDue = HumanWorldState.DRAW_SAVE_INTERVAL_TICKS + 5;
+        context.runAfterDelay(1, () -> {
+            state.draw(request, world, 1_000);
+            state.flushHandoffs(file);
+            context.assertTrue(!state.draw(request, world, 1_000).getPersisted(), "刚受理的取用当 tick 就写盘了");
+        });
+        context.runAfterDelay(clearlyEarly, () -> {
+            state.flushHandoffs(file);
+            context.assertTrue(!state.draw(request, world, 1_000).getPersisted(), "没到保存间隔就把取用写盘了");
+        });
+        context.runAfterDelay(clearlyDue, () -> {
+            state.flushHandoffs(file);
+            context.assertTrue(state.draw(request, world, 1_000).getPersisted(), "满了保存间隔还没把取用写盘");
+        });
+        context.runAfterDelay(clearlyDue + 1, () -> {
+            // 上一 tick 刚存过盘，释放照样当 tick 写，不等取用的间隔。
+            var release = RegionRelease.newBuilder()
+                    .setPosition(request.getPosition())
+                    .setReleaseId("gametest:release-after-draw")
+                    .setReleasedQi(BodyProtobuf.toInventory(new QiInventory(List.of(
+                            new Qi(Qi.QiAttribute.WOOD, SMALL_DRAW_QI, 0.01)))))
+                    .build();
+            state.release(release, world, 1_000);
+            state.flushHandoffs(file);
+            context.assertTrue(state.release(release, world, 1_000).getPersisted(), "释放等了取用的保存间隔");
+            context.succeed();
+        });
     }
 
     private static RegionDraw draw(String id, ServerLevel world, double amountQi) {

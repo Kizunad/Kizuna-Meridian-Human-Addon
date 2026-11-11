@@ -69,6 +69,11 @@ final class HumanWorldState {
     private static final long DRAW_INTERVAL_MILLIS = 1_000;
     /** 取用去重保留两个供给窗口；装置重试必须在这之内。 */
     private static final long DRAW_RETENTION_MILLIS = 2 * WINDOW_MILLIS;
+    /**
+     * 只有取用要存时，距上次保存至少隔这么多 tick（5 秒）才写盘。装置每秒都取，整份保存不能跟着每秒一次；
+     * 崩服最多丢这段时间里的取用，它们和改动的区域库存、待放回同在一个文件，一起丢，账不会乱。
+     */
+    static final int DRAW_SAVE_INTERVAL_TICKS = 100;
     /** 按比例分摊会有舍入，取用速率比窗口上限少留这一比例，避免越过上限。 */
     private static final double DRAW_RATE_MARGIN = 1e-9;
     // 未获发送端持久删除证明的请求不能按时间回收。
@@ -156,6 +161,10 @@ final class HumanWorldState {
             var sources = readSources(nbt.getList("environment_sources").orElseThrow(), epoch);
             var store = new InMemoryBodyStore(saved.bodies(), saved.receipts(), released, sources);
             var state = new HumanWorldState(epoch, store);
+            // 旧存档的回执比 Store 保留的多，读入时已裁短；标记待保存，下次保存就把文件写小。
+            if (store.receipts().size() != saved.receipts().size()) {
+                state.setDirty();
+            }
             state.readReleaseIds(nbt.getList("release_ids").orElseThrow());
             state.readPendingCredits(nbt.getList("pending_credits").orElseThrow());
             // 装置取用是后加的字段，旧存档没有就按空表读入；有就严格校验。
@@ -526,7 +535,7 @@ final class HumanWorldState {
             result.setSourceId(sourceId).setDrawnQi(BodyProtobuf.toInventory(drawn));
         }
 
-        // 首次结果随取用记录保存，tick 末写盘后重发才确认持久化。
+        // 首次结果随取用记录保存，攒满保存间隔写盘后重发才确认持久化。
         DrawResult accepted = result.build();
         drawIds.put(drawId, new DrawRecord(request, accepted, millis));
         setDirty();
@@ -607,10 +616,18 @@ final class HumanWorldState {
 
     void flushHandoffs(Path file) {
         // 同 tick 的所有新受理和遗忘合并；重复查询已持久请求不会再触发保存。
-        if (!persistedReleaseIds.containsAll(releaseIds.keySet()) || !unsavedForgetIds.isEmpty()
-                || !persistedDrawIds.containsAll(drawIds.keySet())) {
+        // 释放和遗忘要在两 tick 内确认，当 tick 就写；取用攒到间隔满了再写，期间任何一次保存都会顺带写进去。
+        if (!persistedReleaseIds.containsAll(releaseIds.keySet()) || !unsavedForgetIds.isEmpty() || drawsDue()) {
             save(file.toFile());
         }
+    }
+
+    private boolean drawsDue() {
+        // 没有未写的取用就不用存；没绑服务端时（单元测试）没有 tick 可数，照旧立即写。
+        if (persistedDrawIds.containsAll(drawIds.keySet())) {
+            return false;
+        }
+        return server == null || server.getTickCount() - lastSaveTick >= DRAW_SAVE_INTERVAL_TICKS;
     }
 
     void setDirty() {
