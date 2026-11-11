@@ -17,6 +17,8 @@ import java.util.List;
 /** 仅测试装配使用：操作已登录玩家的正式吐纳会话并读取已提交回执。 */
 public final class HumanGameTestAccess {
     private static final long MILLIS_PER_TICK = 50;
+    private static final int BEGIN_SEQUENCE = 1;
+    private static final int END_SEQUENCE = 2;
 
     private HumanGameTestAccess() {
         // 不替换身体、时钟或环境，服务器 tick 正常推进吐纳。
@@ -33,18 +35,32 @@ public final class HumanGameTestAccess {
         var control = BreathControl.newBuilder()
                 .setAction(BreathAction.BEGIN_BREATHING)
                 .setAutomatic(true /* automatic */)
-                .setSequence(1)
+                .setSequence(BEGIN_SEQUENCE)
                 .build();
+        return send(player, "human-test-breathe", control);
+    }
+
+    public static GatheringView endBreathing(ServerPlayer player) {
+        // 和玩家关掉修炼窗口相同：按公开吐纳请求结束 breathe 开始的这次吐纳。
+        var control = BreathControl.newBuilder()
+                .setAction(BreathAction.END_BREATHING)
+                .setSequence(END_SEQUENCE)
+                .build();
+        return send(player, "human-test-end-breathing", control);
+    }
+
+    private static GatheringView send(ServerPlayer player, String requestId, BreathControl control) {
+        // 正式吐纳入口按当前游戏时刻处理；拒绝说明测试准备有误。
         var request = GatheringRequest.newBuilder()
                 .setProtocolVersion(1)
-                .setRequestId("human-test-breathe")
+                .setRequestId(requestId)
                 .setBodyId(player.getStringUUID())
                 .setBreath(control)
                 .build();
         long now = player.level().getServer().overworld().getGameTime() * MILLIS_PER_TICK;
-        var response = body.gather(now, request);
+        var response = HumanTechniqueHost.state().find(player.getUUID()).gather(now, request);
         if (response.hasFailure()) {
-            throw new IllegalStateException("真实吐纳启动失败：" + response.getFailure());
+            throw new IllegalStateException("真实吐纳请求失败：" + control.getAction() + " " + response.getFailure());
         }
         return response.getView();
     }

@@ -25,6 +25,8 @@ public final class HumanErrors {
     public static final String INVALID_DAMAGE_KIND = "人体伤害需要已知的致伤机制";
     public static final String INVALID_SPILLOVER = "人体伤害蔓延配置或剂量无效";
     public static final String SPILLOVER_LOAD_FAILED = "人体伤害蔓延配置读取失败";
+    public static final String INVALID_BREATHING = "人体吐纳配置无效：true_qi_gas_share 要是 0 到 1 之间的小数";
+    public static final String BREATHING_LOAD_FAILED = "人体吐纳配置读取失败";
     public static final String DEBUG_PERMISSION = "真元调试需要管理员权限等级 2";
     public static final String DIFFUSION_ENTRY_MISSING = "当前身体不存在指定经脉或有效摄入出口";
     public static final String INVALID_REFINE_RECIPE = "炼化配方族必须按器官种类与相态唯一，且只有一项无属性投料和一项本行产物";
@@ -32,6 +34,7 @@ public final class HumanErrors {
     public static final String REFINE_ORGAN_UNAVAILABLE = "本脏已伤，炼化中止";
     public static final String REFINE_PATH_MISSING = "这具身体没有本脏与本脏经之间的通路，炼化无从取料";
     public static final String REFINE_RECIPE_MISSING = "当前境界炼不了这一脏";
+    public static final String REFINE_QI_MISSING = "%s里没有可炼的%s真元";
     public static final String REFINE_BODY_MISSING = "炼化的施放者没有人体";
     public static final String REFINE_END_REJECTED = "炼化收尾被身体拒绝，任务按起批窗口自行收尾";
 

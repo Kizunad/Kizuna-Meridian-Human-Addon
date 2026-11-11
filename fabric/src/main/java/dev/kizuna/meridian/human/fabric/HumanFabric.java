@@ -9,6 +9,7 @@ import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.Environment
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.EnvironmentHostResponse;
 import dev.kizuna.meridian.human.server.HumanContent;
 import dev.kizuna.meridian.human.server.HumanDamage;
+import dev.kizuna.meridian.human.server.HumanBreathingRules;
 import dev.kizuna.meridian.human.server.HumanDamageRules;
 import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.human.server.HumanRevival;
@@ -98,6 +99,9 @@ public final class HumanFabric implements ModInitializer {
         // 身体创建前固定模板伤害规则，玩家与类人共用同一服务端配置。
         HumanDamage.configure(FabricLoader.getInstance().getConfigDir()
                 .resolve(HumanDamageRules.FILE_NAME));
+        // 吐纳配方随人体内容包一次建成，份额要在任何身体宿主载入内容之前读好。
+        HumanBreathingRules.configure(FabricLoader.getInstance().getConfigDir()
+                .resolve(HumanBreathingRules.FILE_NAME));
         // 宿主生命周期独立于客户端窗口，关掉 UI 后玩家移动仍正常记入同一身体。
         HumanTechniqueEffects.initialize();
         HumanControl.initialize();

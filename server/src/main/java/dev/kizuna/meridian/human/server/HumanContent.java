@@ -1,6 +1,7 @@
 package dev.kizuna.meridian.human.server;
 
 import dev.kizuna.meridian.protocol.AddonProtobuf;
+import dev.kizuna.meridian.protocol.QiDensity;
 import dev.kizuna.meridian.protocol.pb.AddonMessages.*;
 import dev.kizuna.meridian.protocol.pb.BodyMessages.*;
 import dev.kizuna.meridian.protocol.pb.BreathingMessages.*;
@@ -20,12 +21,23 @@ public final class HumanContent {
     public static final double RAW_QI_PER_BATCH = 1;
     public static final double REFINED_QI_PER_BATCH = 0.2;
     public static final long REFINING_MILLIS = 1000;
+    /** 真炁吐纳配方 ID 的后缀，接在 human:breath_<属性> 之后。 */
+    public static final String TRUE_QI_BREATH_SUFFIX = "_true_qi";
+    private static final String NONE = "meridian:none";
+    private static final double BREATH_INPUT_QI = 0.05;
+    private static final double BREATH_OUTPUT_QI = 0.01;
+    private static final long BREATH_MILLIS = 100;
 
     private HumanContent() {
         // 所有内容都是可重复生成的不可变消息，不缓存玩家运行状态。
     }
 
     public static AddonBundle bundle() {
+        // 运行时取服务端配置的吐纳份额；内容导出与无宿主测试取随包初值。
+        return bundle(HumanBreathingRules.configured());
+    }
+
+    public static AddonBundle bundle(HumanBreathingRules breathingRules) {
         // 框架本身不是内容包；前置用 API 和通用能力表达，human 没有其他生物包前置。
         var manifest = AddonManifest.newBuilder().setNamespace(NAMESPACE).setContentVersion(CONTENT_VERSION)
                 .setApiVersions(ContentVersionRange.newBuilder().setMinimum(1).setMaximum(1))
@@ -69,10 +81,22 @@ public final class HumanContent {
                     .setDurationMillis(REFINING_MILLIS).setMinimumRealm(Realm.WANDERING_QI));
             // 手动接触摄入读取此配方的转换比例，实际剂量由环境浓度和粒子采样体积决定。
             bundle.addOrganRecipes(OrganRecipe.newBuilder()
-                    .setId("human:breath_" + attribute.substring(attribute.indexOf(':') + 1))
-                    .setVersion(CONTENT_VERSION).setOrganKind("human:lung")
-                    .setInput(inventory(attribute, .05)).setOutput(inventory("meridian:none", .01))
-                    .setDurationMillis(100).setMinimumRealm(Realm.WANDERING_QI));
+                    .setId(breathRecipeId(attribute))
+                    .setVersion(CONTENT_VERSION)
+                    .setOrganKind("human:lung")
+                    .setInput(inventory(attribute, BREATH_INPUT_QI))
+                    .setOutput(inventory(NONE, BREATH_OUTPUT_QI))
+                    .setDurationMillis(BREATH_MILLIS)
+                    .setMinimumRealm(Realm.WANDERING_QI));
+            // 真炁以后同一口气的产物一部分直接是气态；框架吐纳先用境界要求高的这一条。
+            bundle.addOrganRecipes(OrganRecipe.newBuilder()
+                    .setId(trueQiBreathRecipeId(attribute))
+                    .setVersion(CONTENT_VERSION)
+                    .setOrganKind("human:lung")
+                    .setInput(inventory(attribute, BREATH_INPUT_QI))
+                    .setOutput(trueQiBreathOutput(breathingRules.trueQiGasShare()))
+                    .setDurationMillis(BREATH_MILLIS)
+                    .setMinimumRealm(Realm.TRUE_QI));
         }
         AddonBundle result = bundle.build();
         AddonProtobuf.validateBundle(result);
@@ -109,9 +133,43 @@ public final class HumanContent {
             profile.addOrgans(organ);
         }
         for (String attribute : INPUT_ATTRIBUTES) {
-            profile.addRecipeIds("human:breath_" + attribute.substring(attribute.indexOf(':') + 1));
+            profile.addRecipeIds(breathRecipeId(attribute));
+            profile.addRecipeIds(trueQiBreathRecipeId(attribute));
         }
         return profile.build();
+    }
+
+    public static String breathRecipeId(String attribute) {
+        // 吐纳配方按灵气属性各一条，ID 取属性名的路径部分。
+        return "human:breath_" + attribute.substring(attribute.indexOf(':') + 1);
+    }
+
+    public static String trueQiBreathRecipeId(String attribute) {
+        // 真炁吐纳配方与同属性的基础配方成对。
+        return breathRecipeId(attribute) + TRUE_QI_BREATH_SUFFIX;
+    }
+
+    private static QiInventory trueQiBreathOutput(double gasShare) {
+        // 产物总量与基础配方相同，按份额分成气态与游离态两行；份额为 0 或 1 时只留一行。
+        double gasQi = BREATH_OUTPUT_QI * gasShare;
+        double freeQi = BREATH_OUTPUT_QI - gasQi;
+        var output = QiInventory.newBuilder();
+        if (freeQi > 0) {
+            output.addEntries(qi(NONE, freeQi, QiDensity.FREE));
+        }
+        if (gasQi > 0) {
+            output.addEntries(qi(NONE, gasQi, QiDensity.baseline(QiPhase.GAS)));
+        }
+        return output.build();
+    }
+
+    private static Qi qi(String attribute, double amount, double density) {
+        // 单行真元明细。
+        return Qi.newBuilder()
+                .setAttribute(attribute)
+                .setDensity(density)
+                .setAmount(amount)
+                .build();
     }
 
     private static BreathingActionReference breathingAction(String id) {

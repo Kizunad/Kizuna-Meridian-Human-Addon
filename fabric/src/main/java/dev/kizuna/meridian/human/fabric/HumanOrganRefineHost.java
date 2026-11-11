@@ -5,11 +5,16 @@ import dev.kizuna.meridian.human.server.HumanOrganRefining;
 import dev.kizuna.meridian.human.server.HumanRefineRecipes;
 import dev.kizuna.meridian.protocol.pb.BodyMessages.OrganRecipe;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BindingOutcome;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastRequest;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.OrganRefine;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.OrganRefineIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueEffect;
 import dev.kizuna.meridian.technique.server.EffectHandling;
 import dev.kizuna.meridian.technique.server.TechniqueAddonResources;
+import dev.kizuna.meridian.technique.server.TechniqueBinder;
 import dev.kizuna.meridian.technique.server.TechniqueCastEnded;
 import dev.kizuna.meridian.technique.server.TechniqueEffectEvent;
 import dev.kizuna.meridian.technique.server.TechniqueService;
@@ -19,7 +24,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 /** 五脏炼化的玩家效果处理器：功法库排定的每一批交给玩家身体执行，施放结束时停止起批。 */
 public final class HumanOrganRefineHost {
@@ -54,6 +61,40 @@ public final class HumanOrganRefineHost {
                 .map(effect -> effect.getOrganRefine().getRecipeFamily())
                 .distinct()
                 .forEach(recipes::validate);
+        service.addCastCheck((entityUuid, request) -> startRejection(service, entityUuid, request));
+    }
+
+    private static Optional<String> startRejection(TechniqueService service, UUID entityUuid, CastRequest request) {
+        // 炼化功法扣费前先看本脏经里有没有可炼的真元；非玩家、非炼化功法和绑定不成交给功法库自己判定。
+        Optional<TechniqueDefinition> definition = service.registry().find(request.getTechnique());
+        Optional<OrganRefine> refine = definition.stream()
+                .flatMap(found -> found.getEffectsList().stream())
+                .filter(TechniqueEffect::hasOrganRefine)
+                .map(TechniqueEffect::getOrganRefine)
+                .findFirst();
+        HumanPlayerBody body = HumanTechniqueHost.effectBody(entityUuid);
+        if (refine.isEmpty() || body == null || server.getPlayerList().getPlayer(entityUuid) == null) {
+            return Optional.empty();
+        }
+        var snapshot = body.snapshot();
+        BindingOutcome binding = TechniqueBinder.bind(snapshot, definition.orElseThrow());
+        if (!binding.hasBinding()) {
+            return Optional.empty();
+        }
+        OrganRefineIntent planned = OrganRefineIntent.newBuilder()
+                .addAllOrganIds(moduleIds(binding, refine.get().getOrganSlotId()))
+                .addAllMeridianIds(moduleIds(binding, refine.get().getMeridianSlotId()))
+                .setRecipeFamily(refine.get().getRecipeFamily())
+                .build();
+        return HumanOrganRefining.startRejection(snapshot, planned, recipes);
+    }
+
+    private static List<String> moduleIds(BindingOutcome binding, String slotId) {
+        // 起手绑定按槽位记录的实际器官或经脉。
+        return binding.getBinding().getSlotsList().stream()
+                .filter(slot -> slot.getSlotId().equals(slotId))
+                .flatMap(slot -> slot.getModuleIdsList().stream())
+                .toList();
     }
 
     private static List<OrganRecipe> recipes(TechniqueAddonResources resources, String namespace) {

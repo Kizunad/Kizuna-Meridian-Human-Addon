@@ -21,6 +21,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.OrganRefineIn
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static dev.kizuna.meridian.human.server.HumanCultivationNumbers.MIN_TRANSFER_QI;
@@ -31,6 +32,14 @@ public final class HumanOrganRefining {
     private static final int SCHEMA_VERSION = 1;
     private static final double MILLIS_PER_SECOND = 1000;
     private static final int ACCOUNT_PREFIX_LENGTH = "l:".length();
+    private static final String NAME_SEPARATOR = "、";
+    private static final Map<Qi.QiPhase, String> PHASE_NAMES = Map.of(
+            Qi.QiPhase.FREE, "游离态",
+            Qi.QiPhase.GAS, "气态",
+            Qi.QiPhase.LIQUID, "液态",
+            Qi.QiPhase.SOLID, "固态",
+            Qi.QiPhase.ORDERED, "有序态",
+            Qi.QiPhase.COHERENT, "相干态");
 
     private HumanOrganRefining() {
         // 规则只生成受校验的活动计划，不持有任何身体或施放状态。
@@ -123,6 +132,45 @@ public final class HumanOrganRefining {
         }
         plan.activity.putProgress(PROGRESS, Any.pack(state.build()));
         return Batch.accepted(plan.build());
+    }
+
+    public static Optional<String> startRejection(BodySnapshot body, OrganRefineIntent intent,
+                                                  HumanRefineRecipes recipes) {
+        // 与第一批同样选器官、通路和配方；本脏经内腔里没有当前相态的无属性真元时起手就拒，不空站整段窗口。
+        List<String> organIds = availableOrgans(body, intent.getOrganIdsList());
+        if (organIds.isEmpty()) {
+            return Optional.of(HumanErrors.REFINE_ORGAN_UNAVAILABLE);
+        }
+        List<Source> sources = sources(body, organIds, intent.getMeridianIdsList());
+        if (sources.isEmpty()) {
+            return Optional.of(HumanErrors.REFINE_PATH_MISSING);
+        }
+        Qi.QiPhase phase = Realm.phaseAtDensity(body.realm().capacityRatio());
+        List<String> meridianIds = sources.stream()
+                .filter(source -> recipes.find(intent.getRecipeFamily(), source.kind(), phase).isPresent())
+                .flatMap(source -> source.meridianIds().stream())
+                .distinct()
+                .toList();
+        if (meridianIds.isEmpty()) {
+            return Optional.of(HumanErrors.REFINE_RECIPE_MISSING);
+        }
+        boolean stocked = meridianIds.stream()
+                .anyMatch(meridianId -> refinableQi(body, meridianId, phase) >= MIN_TRANSFER_QI);
+        if (stocked) {
+            return Optional.empty();
+        }
+        String names = String.join(NAME_SEPARATOR, meridianIds.stream()
+                .map(meridianId -> meridian(body, meridianId).displayName())
+                .toList());
+        return Optional.of(String.format(HumanErrors.REFINE_QI_MISSING, names, PHASE_NAMES.get(phase)));
+    }
+
+    private static double refinableQi(BodySnapshot body, String meridianId, Qi.QiPhase phase) {
+        // 投料只取本脏经内腔里当前相态的无属性真元，外壁与别的属性、相态不算。
+        return meridianState(body, meridianId).lumenQi().entries().stream()
+                .filter(qi -> qi.attribute().equals(Qi.QiAttribute.NONE) && qi.phase() == phase)
+                .mapToDouble(Qi::amount)
+                .sum();
     }
 
     static void advance(HumanQiPlan plan) {
@@ -411,6 +459,14 @@ public final class HumanOrganRefining {
         // 绑定来自同一具身体的构型，缺失是装配错误。
         return body.structure().organs().stream()
                 .filter(organ -> organ.id().value().equals(organId))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private static Anatomy.MeridianDefinition meridian(BodySnapshot body, String meridianId) {
+        // 经脉定义与状态来自同一具身体的构型。
+        return body.structure().meridians().stream()
+                .filter(meridian -> meridian.id().value().equals(meridianId))
                 .findFirst()
                 .orElseThrow();
     }

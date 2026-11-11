@@ -215,6 +215,27 @@ public class HumanOrganRefiningTest {
                         + element(host.body(), "right_heart_meridian", Qi.QiAttribute.FIRE), TOLERANCE);
     }
 
+    @Test
+    public void startIsRejectedWhenTheBoundMeridiansHoldNoQiOfTheRealmPhase() {
+        // 真炁炼心只取气态无属性真元：心经里只有游离态时起手就拒并写出经名与相态，补进气态后放行。
+        Host host = new Host(body(Realm.TRUE_QI));
+        List<String> heartMeridians = List.of("left_heart_meridian", "right_heart_meridian");
+        host.open(heartMeridians);
+        host.set("left_heart_meridian", SOURCE_QI, FREE_DENSITY);
+        host.advance(START);
+        OrganRefineIntent heart = intent(List.of("heart"), heartMeridians, 0).getOrganRefine();
+        String rejection = HumanOrganRefining.startRejection(host.body(), heart, host.recipes).orElseThrow();
+        assertEquals("左手少阴心经、右手少阴心经里没有可炼的气态真元", rejection);
+
+        host.set("left_heart_meridian", SOURCE_QI, GAS_DENSITY);
+        assertTrue(HumanOrganRefining.startRejection(host.body(), heart, host.recipes).isEmpty());
+        // 通路、配方缺失与第一批同一原因。
+        Host wandering = new Host(body(Realm.WANDERING_QI));
+        OrganRefineIntent noRecipe = intent(List.of("heart"), List.of("left_heart_meridian"), 0).getOrganRefine();
+        assertEquals(HumanErrors.REFINE_RECIPE_MISSING,
+                HumanOrganRefining.startRejection(wandering.body(), noRecipe, wandering.recipes).orElseThrow());
+    }
+
     private static HumanRefineRecipes recipes() {
         // 测试配方族按器官种类与相态各一条，产物率取设计表的游炁肺、脾与真炁心。
         return new HumanRefineRecipes(namespace -> List.of(

@@ -577,6 +577,49 @@ public class HumanGatheringTest {
     }
 
     @Test
+    public void automaticBreathingKeepsReachingParticlesAfterTheFirstExhale() throws IOException {
+        // 自动呼气不吹散粒子：第一口呼完之后的吸气仍有真实口鼻接触，自动吐纳不会只摄入第一口。
+        final int stepLimit = 400;
+        final int stepMillis = 250;
+        final int minimumLaterIntakes = 5;
+        Host host = new Host(source(100), null);
+        var session = host.session();
+        session.enableBreathing(HumanContent.breathing());
+        var control = BreathControl.newBuilder()
+                .setSequence(1)
+                .setAction(BreathAction.BEGIN_BREATHING)
+                .setAutomatic(true)
+                .build();
+        var request = GatheringRequest.newBuilder()
+                .setProtocolVersion(1)
+                .setBodyId("test-human")
+                .setRequestId("automatic-later-breaths")
+                .setBreath(control)
+                .build();
+        assertTrue(GatheringResponse.parseFrom(session.handle(request.toByteArray())).hasView());
+        boolean exhaled = false;
+        int laterIntakes = 0;
+        for (int step = 0; step < stepLimit && session.view().getBreathing().getActive(); step++) {
+            int intakesBefore = intakes(session.view().getBreathing());
+            host.now += stepMillis;
+            session.advance();
+            BreathingView after = session.view().getBreathing();
+            exhaled |= after.getAction() == BreathAction.EXHALE;
+            if (exhaled) {
+                laterIntakes += intakes(after) - intakesBefore;
+            }
+        }
+        assertTrue("第一口呼气之后只吸入 " + laterIntakes + " 颗", laterIntakes >= minimumLaterIntakes);
+    }
+
+    private static int intakes(BreathingView view) {
+        // 粒子被口鼻吸入后重生、代数加一，全场代数之和就是累计吸入的颗数。
+        return view.getParticlesList().stream()
+                .mapToInt(BreathParticle::getGeneration)
+                .sum();
+    }
+
+    @Test
     public void manualBreathingIsRepeatableBoundedAndConservesRealResources() throws IOException {
         // 人体内容经真实会话完成两次吸呼；输入没有剂量字段，服务端粒子命中才会摄入。
         var mixedSource = source(100).toBuilder();
