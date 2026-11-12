@@ -170,9 +170,9 @@ python3 "scripts/check_docs.py"
 
 真正暂停时，健康与功法宿主均返回 `BODY_PAUSED`，聊天只提示一次。玩家退出世界后重新加入即可重新认领原身体；不会重置伤势、真元或其他已保存状态。若重登仍失败，保留日志并检查必装模组与通道，不能通过新建身体覆盖错误。
 
-“经脉”窗口通过 `meridian:opening_request` 提交框架 `MeridianOpeningRequest`，`meridian:opening_response` 返回 `ResponseEnvelope`。宿主绑定当前玩家、在服务器线程串行执行，与吐纳共享每秒 40 包额度；格式异常只拒绝该包，旧连接消息丢弃。登录、订阅内观、进度变化或换维度后的第一份 `meridian:body_view` 附带 Human 规则选项（外部视图带空表撤掉客户端手里的规则），之后只在内观和外部视图互换时再带；身体按 revision 推送变化，tick 里的推送每名玩家每 5 tick 最多一份（20 TPS 时每秒 4 份），上述第一份不等；内观里的操作卡只认同版本身体，所以内观中的每份吐纳回执立刻跟一份同版本视图；客户端不上传时间或开脉结果。断线暂停开脉并清除连接回执缓存，已完成成长仍由原身体保存。这些 `meridian:*` 频道的 ID、方向与字节上限统一由 Framework 的 `MeridianChannels` 登记，`meridian_human:cultivation` 由本仓 `HumanChannels` 登记；Human 只注册收包处理。
+“经脉”窗口通过 `meridian:opening_request` 提交框架 `MeridianOpeningRequest`，`meridian:opening_response` 返回 `ResponseEnvelope`。宿主绑定当前玩家、在服务器线程串行执行，与吐纳共享每秒 40 包额度；格式异常只拒绝该包，旧连接消息丢弃。登录、订阅内观、进度变化或换维度后的第一份 `meridian:body_view` 附带 Human 规则选项（外部视图带空表撤掉客户端手里的规则），之后只在内观和外部视图互换时再带；身体按 revision 推送变化，tick 里的推送每名玩家每 5 tick 最多一份（20 TPS 时每秒 4 份），上述第一份不等。构型和这条连接上次发出的相同时省略 `structure` 并置 `structure_omitted`，登录后第一份和构型变化后照常带上。UI 只在经脉窗或操作窗开着时订阅内观，都关上就退订；换维度、重生不动订阅，撤权时丢掉。开脉请求处理完的这一 tick 末推当前视图，不等限频。`meridian:gathering_response` 的吐纳回执不带身体：对请求的回复、吐纳状态翻转、粒子走步和阶段变化立刻发，只是余量在变的推送每名玩家每 5 tick 最多一份，最新一份到时补发。客户端不上传时间或开脉结果。断线暂停开脉并清除连接回执缓存，已完成成长仍由原身体保存。这些 `meridian:*` 频道的 ID、方向与字节上限统一由 Framework 的 `MeridianChannels` 登记，`meridian_human:cultivation` 由本仓 `HumanChannels` 登记；Human 只注册收包处理。
 
-普通身体推送与吐纳回执统一携带 `HumanCultivation.bodyView` 的当前突破资格投影，避免回执覆盖入口状态。吐纳更新身体版本时同步发布相同版本的开脉目录；内观订阅和残卷权限仍由服务端独立检查。
+身体推送携带 `HumanCultivation.bodyView` 的当前突破资格投影；吐纳回执不带身体，客户端把它接在最新身体上，不会覆盖入口状态。内观视图里的开脉目录总和同一份视图里的身体同版本；内观订阅和残卷权限仍由服务端独立检查。
 
 本包登记 `/meridian body status`（当前动作、下肢最小余力、身体 revision；注册了行走负荷提供者时末尾追加一行负荷说明）、`/meridian body tissue`（单个组织的实际疲劳、当前耐力/力量/功率，ID 支持补全）和观察频道 `/meridian watch body`（快捷栏上方的实时下肢余力），写法见 [Framework 指令页](https://github.com/Kizunad/Kizuna-Meridian-Mod-Framework/wiki/Commands)。
 

@@ -24,6 +24,7 @@ import dev.kizuna.meridian.protocol.ActivityHostProtobuf;
 import dev.kizuna.meridian.core.DefinitionId;
 import dev.kizuna.meridian.protocol.MeridianProtocol;
 import dev.kizuna.meridian.protocol.OpeningProtobuf;
+import dev.kizuna.meridian.protocol.pb.BodyMessages.BodyStructure;
 import dev.kizuna.meridian.protocol.pb.GatheringMessages.GatheringRequest;
 import dev.kizuna.meridian.protocol.pb.GatheringMessages.GatheringResponse;
 import dev.kizuna.meridian.protocol.pb.HealthHostMessages.HealthHostRequest;
@@ -85,13 +86,16 @@ public final class HumanFabric implements ModInitializer {
     private static final Logger LOG = LoggerFactory.getLogger("meridian_human_host");
     private static final Identifier DISCONNECT_CLEANUP =
             Identifier.fromNamespaceAndPath("meridian_human", "disconnect_cleanup");
-    /** 每名玩家最多每 5 tick 推一次身体视图（每秒 4 次）；内观中跟着吐纳回执的那份不限。 */
+    /** 每名玩家最多每 5 tick 推一次身体视图（每秒 4 次）。 */
     private static final int BODY_VIEW_INTERVAL_TICKS = 5;
     private final Map<UUID, Integer> gatheringPackets = new HashMap<>();
     private final Map<UUID, HumanMovementObserver> observers = new HashMap<>();
     private final Map<UUID, Long> sentRevisions = new HashMap<>();
     private final Map<UUID, Integer> bodyViewTicks = new HashMap<>();
     private final Map<UUID, OpeningRules> openingRules = new HashMap<>();
+    /** 这条连接上客户端手里的构型；一样时视图省掉构型，客户端沿用手里那份。 */
+    private final Map<UUID, BodyStructure> sentStructures = new HashMap<>();
+    private final HumanGatheringReceipts receipts = new HumanGatheringReceipts();
     private final Set<UUID> watching = new HashSet<>();
     private final Set<UUID> failed = new HashSet<>();
     private final Set<UUID> introspecting = new HashSet<>();
@@ -162,6 +166,7 @@ public final class HumanFabric implements ModInitializer {
                     }
                     if (!progress.getQiNotesRead()) {
                         animations.stop(player);
+                        receipts.forget(playerId);
                         body.connectGathering(millis(server), response -> sendGathering(player, response));
                     }
                     refreshBodyView(playerId);
@@ -279,6 +284,8 @@ public final class HumanFabric implements ModInitializer {
                 }
                 var response = body.open(millis(context.server()), request);
                 state.setDirty();
+                // 这一 tick 末就推当前视图，不等 5 tick 限频：成功时操作卡换了状态，版本冲突时 UI 等新版本重试。
+                bodyViewTicks.remove(player.getUUID());
                 requireChannel(player, MeridianChannels.OPENING_RESPONSE);
                 ServerPlayNetworking.send(player, MeridianChannels.OPENING_RESPONSE.payload(response.toByteArray()));
             } catch (RuntimeException failure) {
@@ -325,6 +332,8 @@ public final class HumanFabric implements ModInitializer {
             sentRevisions.clear();
             bodyViewTicks.clear();
             openingRules.clear();
+            sentStructures.clear();
+            receipts.clear();
             watching.clear();
             introspecting.clear();
             failed.clear();
@@ -390,6 +399,8 @@ public final class HumanFabric implements ModInitializer {
             HumanPlayerBody body = state.join(player, millis(server));
             HumanTechniqueHost.reconnect(player);
             state.selectEnvironment(player, millis(server));
+            sentStructures.remove(player.getUUID());
+            receipts.forget(player.getUUID());
             body.connectGathering(millis(server), response -> sendGathering(player, response));
             observers.put(player.getUUID(), new HumanMovementObserver());
             refreshBodyView(player.getUUID());
@@ -679,6 +690,8 @@ public final class HumanFabric implements ModInitializer {
         }
         observers.remove(player.getUUID());
         refreshBodyView(player.getUUID());
+        sentStructures.remove(player.getUUID());
+        receipts.forget(player.getUUID());
         watching.remove(player.getUUID());
         introspecting.remove(player.getUUID());
         gatheringPackets.remove(player.getUUID());
@@ -712,12 +725,14 @@ public final class HumanFabric implements ModInitializer {
         try {
             long nowMillis = millis(player.level().getServer());
             state.bindReleaseSink(player);
+            receipts.forget(player.getUUID());
             body.connectGathering(nowMillis, response -> sendGathering(player, response));
             body.observe(nowMillis, HumanPlayerBody.Motion.IDLE);
             observers.put(player.getUUID(), new HumanMovementObserver());
             state.selectEnvironment(player, nowMillis);
             body.publishGathering();
-            introspecting.remove(player.getUUID());
+            // 内观订阅跟着客户端的经脉窗、操作窗走，这里不动；每份视图推送时都重查内观权限。
+            // 重生时连接还指着旧实体，下面的进度同步到不了客户端，丢掉订阅客户端也不会重订。
             refreshBodyView(player.getUUID());
             ProgressionFabric.publishProgress(player);
             state.setDirty();
@@ -769,6 +784,7 @@ public final class HumanFabric implements ModInitializer {
                     var projection = dev.kizuna.meridian.human.server.HumanCultivation.bodyView(body.snapshot());
                     publishBodyView(player, projection);
                 }
+                receipts.due(id, server.getTickCount()).ifPresent(receipt -> sendReceipt(player, receipt));
                 if (watching.contains(id) && (changed || server.getTickCount() % 20 == 0)) {
                     player.sendOverlayMessage(Component.literal(HumanNumbers.summary(body)));
                 }
@@ -787,32 +803,17 @@ public final class HumanFabric implements ModInitializer {
             animations.synchronize(player, body.motion(), response.getView().getBreathing().getActive(),
                     response.getView().getBreathing().getAutomatic());
         }
-        // 关闭连接无需发送；已连接却缺少必装 UI 通道必须报告错误。
+        // 关闭连接无需发送；回执不带身体，连续推送限频，见 HumanGatheringReceipts。
         if (player.connection.isAcceptingMessages()) {
-            requireChannel(player, MeridianChannels.GATHERING_RESPONSE);
-            GatheringResponse projected = projectGathering(response);
-            ServerPlayNetworking.send(player, MeridianChannels.GATHERING_RESPONSE.payload(projected.toByteArray()));
-            // 内观里的操作卡只认同版本身体，跟着回执立刻发；外部视图交给 tick 里限频的推送。
-            if (projected.hasView() && internalView(player)) {
-                var snapshot = projected.getView().getBody();
-                if (sentRevisions.getOrDefault(player.getUUID(), -1L) != snapshot.getRevision()) {
-                    publishBodyView(player, snapshot);
-                }
-            }
+            int tick = player.level().getServer().getTickCount();
+            receipts.offer(player.getUUID(), response, tick).ifPresent(receipt -> sendReceipt(player, receipt));
         }
     }
 
-    private GatheringResponse projectGathering(GatheringResponse response) {
-        // 吐纳回执和普通身体推送携带同一资格投影，不能互相覆盖掉突破入口。
-        if (!response.hasView()) {
-            return response;
-        }
-        var body = BodyProtobuf.fromMessage(response.getView().getBody());
-        var projection = dev.kizuna.meridian.human.server.HumanCultivation.bodyView(body);
-        var view = response.getView().toBuilder()
-                .setBody(projection)
-                .build();
-        return response.toBuilder().setView(view).build();
+    private void sendReceipt(ServerPlayer player, GatheringResponse receipt) {
+        // 已连接却缺少必装 UI 通道必须报告错误。
+        requireChannel(player, MeridianChannels.GATHERING_RESPONSE);
+        ServerPlayNetworking.send(player, MeridianChannels.GATHERING_RESPONSE.payload(receipt.toByteArray()));
     }
 
     private void publishBodyView(ServerPlayer player, dev.kizuna.meridian.protocol.pb.BodyMessages.BodySnapshot body) {
@@ -825,6 +826,12 @@ public final class HumanFabric implements ModInitializer {
                 .setBody(body)
                 .setPresentationResource("meridian_human:meridian/adult.pb")
                 .setIntrospection(internalView);
+        // 构型很少变，客户端手里那份一样就不再带。
+        BodyStructure structure = body.getStructure();
+        if (structure.equals(sentStructures.get(id))) {
+            update.getBodyBuilder().clearStructure();
+            update.setStructureOmitted(true);
+        }
         OpeningRules wanted = OpeningRules.CLEARED;
         if (internalView) {
             var rules = HumanContent.bundle().getOpeningRulesList();
@@ -839,6 +846,7 @@ public final class HumanFabric implements ModInitializer {
         if (rulesChanged) {
             openingRules.put(id, wanted);
         }
+        sentStructures.put(id, structure);
         sentRevisions.put(id, body.getRevision());
         bodyViewTicks.put(id, player.level().getServer().getTickCount());
     }
