@@ -128,6 +128,7 @@ public final class HumanDeviceDrawGameTest {
         Path directory = Files.createTempDirectory(Path.of("."), "device-draw-");
         Path file = directory.resolve("human.dat");
         state.flushHandoffs(file);
+        state.awaitSaves();
         HumanWorldState reloaded = HumanWorldState.load(file);
         DrawResult afterReload = reloaded.draw(request, world, 2_000);
         context.assertTrue(afterReload.getDuplicate() && afterReload.getPersisted(), "重载后没有去重或没确认写盘");
@@ -157,6 +158,28 @@ public final class HumanDeviceDrawGameTest {
         context.succeed();
     }
 
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void expiredDrawIdReusedDuringABackgroundSaveStaysUnsaved(GameTestHelper context) throws Exception {
+        // 后台保存截下一笔取用，写完之前这个 ID 过期又被新取用占了：文件里是旧的那笔，新的不能报已写盘。
+        ServerLevel world = context.getLevel();
+        var state = new HumanWorldState();
+        state.query(world, -REGION_BLOCK, -REGION_BLOCK, 0);
+        RegionDraw request = draw("gametest:draw-reused", world, SMALL_DRAW_QI, -REGION_BLOCK, -REGION_BLOCK);
+        state.draw(request, world, 1_000);
+        Path file = Files.createTempDirectory(Path.of("."), "device-draw-reused-").resolve("human.dat");
+        state.saveInBackground(file.toFile());
+        // 两个窗口后续窗时清掉旧记录，同一个 ID 再取一次就是新的一笔。
+        long reusedMillis = 2 * WINDOW_MILLIS + 1_000;
+        state.renewEnvironment(WINDOW_MILLIS);
+        state.renewEnvironment(reusedMillis);
+        DrawResult reused = state.draw(request, world, reusedMillis);
+        context.assertTrue(!reused.getDuplicate(), "过期的取用 ID 没有按新取用受理");
+        state.awaitSaves();
+        DrawResult again = state.draw(request, world, reusedMillis);
+        context.assertTrue(again.getDuplicate() && !again.getPersisted(), "旧保存把过期后重新受理的取用确认成已写盘");
+        context.succeed();
+    }
+
     @GameTest(maxTicks = DEFAULT_TIMEOUT + HumanWorldState.DRAW_SAVE_INTERVAL_TICKS)
     public void boundDrawsWaitForTheSaveIntervalWhileReleasesSaveAtOnce(GameTestHelper context) throws Exception {
         // 绑了服务端时钟：取用攒到距上次保存满间隔才写盘，期间重发仍报未写盘；释放不等间隔，下一 tick 就写。
@@ -175,14 +198,18 @@ public final class HumanDeviceDrawGameTest {
         context.runAfterDelay(1, () -> {
             state.draw(request, world, 1_000);
             state.flushHandoffs(file);
+            // 先等写盘线程：真的提前写了，这里就会收回并报已写盘。
+            state.awaitSaves();
             context.assertTrue(!state.draw(request, world, 1_000).getPersisted(), "刚受理的取用当 tick 就写盘了");
         });
         context.runAfterDelay(clearlyEarly, () -> {
             state.flushHandoffs(file);
+            state.awaitSaves();
             context.assertTrue(!state.draw(request, world, 1_000).getPersisted(), "没到保存间隔就把取用写盘了");
         });
         context.runAfterDelay(clearlyDue, () -> {
             state.flushHandoffs(file);
+            state.awaitSaves();
             context.assertTrue(state.draw(request, world, 1_000).getPersisted(), "满了保存间隔还没把取用写盘");
         });
         context.runAfterDelay(clearlyDue + 1, () -> {
@@ -195,6 +222,7 @@ public final class HumanDeviceDrawGameTest {
                     .build();
             state.release(release, world, 1_000);
             state.flushHandoffs(file);
+            state.awaitSaves();
             context.assertTrue(state.release(release, world, 1_000).getPersisted(), "释放等了取用的保存间隔");
             context.succeed();
         });

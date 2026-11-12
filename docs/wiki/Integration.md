@@ -170,7 +170,7 @@ python3 "scripts/check_docs.py"
 
 真正暂停时，健康与功法宿主均返回 `BODY_PAUSED`，聊天只提示一次。玩家退出世界后重新加入即可重新认领原身体；不会重置伤势、真元或其他已保存状态。若重登仍失败，保留日志并检查必装模组与通道，不能通过新建身体覆盖错误。
 
-“经脉”窗口通过 `meridian:opening_request` 提交框架 `MeridianOpeningRequest`，`meridian:opening_response` 返回 `ResponseEnvelope`。宿主绑定当前玩家、在服务器线程串行执行，与吐纳共享每秒 40 包额度；格式异常只拒绝该包，旧连接消息丢弃。首次 `meridian:body_view` 附带 Human 规则选项，后续按身体 revision 推送变化；客户端不上传时间或开脉结果。断线暂停开脉并清除连接回执缓存，已完成成长仍由原身体保存。这些 `meridian:*` 频道的 ID、方向与字节上限统一由 Framework 的 `MeridianChannels` 登记，`meridian_human:cultivation` 由本仓 `HumanChannels` 登记；Human 只注册收包处理。
+“经脉”窗口通过 `meridian:opening_request` 提交框架 `MeridianOpeningRequest`，`meridian:opening_response` 返回 `ResponseEnvelope`。宿主绑定当前玩家、在服务器线程串行执行，与吐纳共享每秒 40 包额度；格式异常只拒绝该包，旧连接消息丢弃。登录、订阅内观、进度变化或换维度后的第一份 `meridian:body_view` 附带 Human 规则选项（外部视图带空表撤掉客户端手里的规则），之后只在内观和外部视图互换时再带；身体按 revision 推送变化，tick 里的推送每名玩家每 5 tick 最多一份（20 TPS 时每秒 4 份），上述第一份不等；内观里的操作卡只认同版本身体，所以内观中的每份吐纳回执立刻跟一份同版本视图；客户端不上传时间或开脉结果。断线暂停开脉并清除连接回执缓存，已完成成长仍由原身体保存。这些 `meridian:*` 频道的 ID、方向与字节上限统一由 Framework 的 `MeridianChannels` 登记，`meridian_human:cultivation` 由本仓 `HumanChannels` 登记；Human 只注册收包处理。
 
 普通身体推送与吐纳回执统一携带 `HumanCultivation.bodyView` 的当前突破资格投影，避免回执覆盖入口状态。吐纳更新身体版本时同步发布相同版本的开脉目录；内观订阅和残卷权限仍由服务端独立检查。
 

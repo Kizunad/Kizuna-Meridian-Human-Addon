@@ -1,9 +1,11 @@
 package dev.kizuna.meridian.human.fabric;
 
+import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.core.MeridianOpening;
 import dev.kizuna.meridian.core.Qi;
 import dev.kizuna.meridian.core.QiInventory;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.*;
+import dev.kizuna.meridian.human.server.HumanCultivation;
 import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.DebugQi;
@@ -26,6 +28,10 @@ public final class HumanMeridianGameTest {
     private static final double LIQUID_RELEASE_AMOUNT = 2;
     private static final double GAS_RELEASE_DENSITY = 0.01;
     private static final double LIQUID_RELEASE_DENSITY = 0.1;
+    private static final double RESERVE_DENSITY = 0.01;
+    private static final double RESTING_OCCUPANCY = 0.7;
+    private static final double DRAINED_OCCUPANCY = 0.3;
+    private static final long RESTING_MILLIS = 5_000;
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void regionReleaseSurvivesSaveAndCreditsOnlyAtWindowBoundary(GameTestHelper context) {
@@ -311,6 +317,49 @@ public final class HumanMeridianGameTest {
         // 测试输入与正式客户端相同，不携带资源或成功判定。
         return dev.kizuna.meridian.human.pb.CultivationMessages.CultivationInput.newBuilder()
                 .setSequence(sequence).setOperation(operation).setKeyTick(now / 50).build();
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void restingBodyWithdrawsReservesOnceItsLumensDrain(GameTestHelper context) {
+        // 读档时壁满、内腔七成的身体不用推进储备；内腔被抽到三成以后，结算必须重新判断，把壁里的储备退回内腔。
+        var player = context.makeMockPlayer(GameType.SURVIVAL);
+        HumanPlayerBody born = HumanPlayerBody.born(player.getUUID(), "resting-gametest", 0);
+        BodySnapshot fresh = born.snapshot();
+        double wallVolume = fresh.structure().meridians().stream()
+                .mapToDouble(definition -> definition.wallVolume())
+                .sum();
+        born.debugQi(0, setWalls(wallVolume));
+        born.debugQi(0, setLumens(RESTING_OCCUPANCY * fresh.structure().lumenVolume()));
+        var body = new HumanPlayerBody(born.snapshot(), born.receipts(), born.releasedQi());
+        context.assertTrue(!HumanCultivation.needsAdvance(body.snapshot()), "壁满、内腔七成的身体仍要推进储备");
+        long now = RESTING_MILLIS;
+        body.settle(now);
+        double wall = wallQi(body.snapshot());
+        body.debugQi(now, setLumens(DRAINED_OCCUPANCY * body.snapshot().structure().lumenVolume()));
+        body.settle(now + RESTING_MILLIS);
+        context.assertTrue(wallQi(body.snapshot()) < wall, "内腔抽空后壁里的储备没有退回内腔");
+        context.succeed();
+    }
+
+    private static DebugQi setLumens(double volume) {
+        // 调试命令按各经脉可用体积摊开给定的量；密度固定，所以按体积换算数量。
+        return DebugQi.newBuilder()
+                .setMode(DebugQiMode.SET_INVENTORY)
+                .setAmount(volume * RESERVE_DENSITY)
+                .setDensity(RESERVE_DENSITY)
+                .build();
+    }
+
+    private static DebugQi setWalls(double volume) {
+        // 同样的量改设到全身外壁。
+        return setLumens(volume).toBuilder()
+                .setWall(true)
+                .build();
+    }
+
+    private static double wallQi(BodySnapshot body) {
+        // 全身外壁储备的真元总量。
+        return body.meridianStates().stream().mapToDouble(state -> state.wallQi().totalQi()).sum();
     }
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)

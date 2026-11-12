@@ -52,8 +52,13 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Minecraft 持久化容器只包装 Protobuf 字节，正文仍由框架负责定义和校验。
@@ -85,7 +90,13 @@ final class HumanWorldState {
     private final DurableStateFile.DirectorySync directorySync;
     private MinecraftServer server;
     private int lastSaveTick = UNSAVED_TICK;
-    private boolean dirty;
+    /** setDirty 的次数；写完的那份快照截于第几次之后，记在 savedChanges。 */
+    private long changes;
+    private long savedChanges;
+    private final Queue<Written> written = new ConcurrentLinkedQueue<>();
+    private CompletableFuture<Void> writing = CompletableFuture.completedFuture(null);
+    /** 写盘线程编码时抛出的程序错误，留到 tick 末交接或等待保存时抛出。 */
+    private RuntimeException encodeFailure;
     private final List<PendingCredit> pendingCredits = new ArrayList<>();
     private final Map<ReleasedQiAllocation.Kind, String> reportedCreditFailures = new HashMap<>();
     private final String epoch;
@@ -99,6 +110,25 @@ final class HumanWorldState {
     private record PendingCredit(String sourceId, QiInventory qi, boolean fromDefault, String releaseId) { }
     /** 结果只存来源和实际取到的明细；重复与持久化标记按查询时的状态另填。 */
     private record DrawRecord(RegionDraw request, DrawResult result, long millis) { }
+    /** 存盘那一刻的一名玩家：快照、吐纳占用和回执都是不可变值。 */
+    private record SavedPlayer(BodySnapshot body, Set<String> breathingActions, List<CommandReceipt> receipts) { }
+    /** 存盘那一刻的交接事实。 */
+    private record SavedHandoffs(List<ReleaseRecord> releases, List<PendingCredit> credits, List<DrawRecord> draws) { }
+    /** 存盘那一刻的整个世界状态，写盘线程拿它编码，主线程照常往下改。 */
+    private record SavedState(String epoch, List<SavedPlayer> players, QiInventory releasedQi,
+                              List<EnvironmentQiSource> sources, SavedHandoffs handoffs) { }
+    /** 一份快照写进文件后能确认的东西：截于第几次变化、哪些受理、遗忘和取用记录。 */
+    private record Covered(long changes, Set<String> releaseIds, Set<String> forgetIds,
+                           Map<String, DrawRecord> draws) { }
+    /** 写盘线程交回主线程的结果；failure 为空表示已原子替换进正式文件。 */
+    private record Written(Covered covered, Exception failure) { }
+
+    /** 编码、压缩、fsync 和改名都在这条线程上做；单线程，按提交顺序一份一份写。 */
+    private static final ExecutorService WRITER = Executors.newSingleThreadExecutor(task -> {
+        var thread = new Thread(task, "meridian-human-save");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     HumanWorldState() {
         // 每个新世界获得稳定时钟世代，重启时读取保存的值。
@@ -457,8 +487,9 @@ final class HumanWorldState {
 
     ReleaseResult release(RegionRelease request, ServerLevel world, long millis) {
         // 去重先比较完整原请求，再排队；失败不消耗 ID，也不直接改变本窗库存。
-        // 校验受理时间；负值会抛出 INVALID_REQUEST。
+        // 校验受理时间；负值会抛出 INVALID_REQUEST。先收回写完的存盘，persisted 才是最新的。
         time(millis);
+        collectWrites();
         validateRelease(request);
         String releaseId = request.getReleaseId();
         var position = request.getPosition();
@@ -495,6 +526,7 @@ final class HumanWorldState {
         if (releaseId.isBlank()) {
             throw HumanErrors.hostRejected(FailureCode.INVALID_REQUEST);
         }
+        collectWrites();
         if (pendingCredits.stream().anyMatch(credit -> credit.releaseId().equals(releaseId))) {
             return ForgetReleaseResult.getDefaultInstance();
         }
@@ -511,6 +543,7 @@ final class HumanWorldState {
         // 去重先比完整原请求；首次受理才真正取，取到的量当场进默认账户并排队在下个窗口放回原区域。
         time(millis);
         validateDraw(request);
+        collectWrites();
         String drawId = request.getDrawId();
         var position = request.getPosition();
         if (!position.getDimensionId().equals(world.dimension().identifier().toString())) {
@@ -617,8 +650,15 @@ final class HumanWorldState {
     void flushHandoffs(Path file) {
         // 同 tick 的所有新受理和遗忘合并；重复查询已持久请求不会再触发保存。
         // 释放和遗忘要在两 tick 内确认，当 tick 就写；取用攒到间隔满了再写，期间任何一次保存都会顺带写进去。
+        // 本 tick 早些时候的世界保存还在写盘线程上时先不写：下一 tick 开始收回它以后，再看还缺什么。
+        throwEncodeFailure();
+        if (!writing.isDone()) {
+            return;
+        }
+        collectWrites();
+        throwEncodeFailure();
         if (!persistedReleaseIds.containsAll(releaseIds.keySet()) || !unsavedForgetIds.isEmpty() || drawsDue()) {
-            save(file.toFile());
+            startWrite(file);
         }
     }
 
@@ -632,46 +672,97 @@ final class HumanWorldState {
 
     void setDirty() {
         // 变化只做标记，写盘集中在世界保存与 tick 末交接。
-        dirty = true;
+        changes++;
     }
 
     boolean isDirty() {
-        // 写盘失败时标记保留，下次保存继续重试。
-        return dirty;
+        // 最新的变化还没写进文件：在写盘线程上没写完、写失败都算，下次保存继续重试。
+        return changes != savedChanges;
     }
 
     void save(File file) {
-        // 世界保存与交接使用相同的原子写入，后续保存失败不能截断已确认的文件。
+        // 停服和 flush 保存：写盘线程把这份和之前排着的都写完再返回，后续保存失败不能截断已确认的文件。
+        startWrite(file.toPath());
+        awaitSaves();
+    }
+
+    void saveInBackground(File file) {
+        // 普通世界保存：主线程只截快照，编码、压缩、fsync 在写盘线程做，写完下次收回时确认。
+        startWrite(file.toPath());
+    }
+
+    void awaitSaves() {
+        // 等写盘线程把已提交的写完，再在主线程收回结果；每 tick 开始、停服、flush 保存和测试用。
+        writing.join();
+        collectWrites();
+        throwEncodeFailure();
+    }
+
+    private void startWrite(Path file) {
+        // 世界保存与交接共用同 tick 一次的机会，失败也算用掉；ID、原请求、待入账事实及余额截进同一份快照。
+        // 停服时运行循环已经退出、tick 不再走，不受这个限制：最后一 tick 刚写过，也要把下线结算写进去。
         if (!isDirty()) {
             return;
         }
-        if (server != null && !server.isShutdown()) {
+        if (server != null && server.isRunning()) {
             int tick = server.getTickCount();
             if (lastSaveTick == tick) {
                 return;
             }
             lastSaveTick = tick;
         }
+        SavedState saved = capture();
+        var covered = new Covered(changes, Set.copyOf(releaseIds.keySet()), Set.copyOf(unsavedForgetIds),
+                Map.copyOf(drawIds));
+        writing = CompletableFuture.runAsync(() -> written.add(write(file, saved, covered)), WRITER);
+    }
+
+    private Written write(Path file, SavedState saved, Covered covered) {
+        // 写盘线程上编码、压缩并原子替换正式文件；任何失败都带回主线程，旧文件保持原样。
         try {
-            saveDurably(file.toPath());
-        } catch (IOException failure) {
-            LOG.error(HumanErrors.SAVE_FAILED, failure);
+            var root = new CompoundTag();
+            root.put("data", encode(saved, new CompoundTag()));
+            NbtUtils.addCurrentDataVersion(root);
+            DurableStateFile.write(file, temporary -> NbtIo.writeCompressed(root, temporary), directorySync);
+            return new Written(covered, null);
+        } catch (IOException | RuntimeException failure) {
+            return new Written(covered, failure);
         }
     }
 
-    private void saveDurably(Path file) throws IOException {
-        // ID、原请求、待入账事实及余额一起保存；任何失败都保留 dirty 供重试。
-        setDirty();
-        var root = new CompoundTag();
-        root.put("data", save(new CompoundTag()));
-        NbtUtils.addCurrentDataVersion(root);
-        DurableStateFile.write(file, temporary -> NbtIo.writeCompressed(root, temporary), directorySync);
+    private void collectWrites() {
+        // 主线程按写完的顺序收回结果：写盘失败记日志、保留 dirty；编码出错是程序错误，先记下。
+        for (Written result = written.poll(); result != null; result = written.poll()) {
+            if (result.failure() instanceof RuntimeException failure) {
+                encodeFailure = failure;
+            } else if (result.failure() != null) {
+                LOG.error(HumanErrors.SAVE_FAILED, result.failure());
+            } else {
+                confirm(result.covered());
+            }
+        }
+    }
+
+    private void throwEncodeFailure() {
+        // 和同步写盘时一样从 tick 末交接或保存处抛出，不能被释放、取用把错误转成失败回执吞掉。
+        if (encodeFailure != null) {
+            throw new IllegalStateException(HumanErrors.SAVE_FAILED, encodeFailure);
+        }
+    }
+
+    private void confirm(Covered covered) {
+        // 文件里就是这份快照：持久确认按快照里的 ID 重算，快照之后的受理、遗忘和取用仍等下一份。
+        savedChanges = covered.changes();
         persistedReleaseIds.clear();
-        persistedReleaseIds.addAll(releaseIds.keySet());
-        unsavedForgetIds.clear();
+        persistedReleaseIds.addAll(covered.releaseIds());
+        unsavedForgetIds.removeAll(covered.forgetIds());
+        // 取用 ID 过期后可以重新受理：文件里那条和现在这条是同一笔取用，才算已写盘。
         persistedDrawIds.clear();
-        persistedDrawIds.addAll(drawIds.keySet());
-        dirty = false;
+        covered.draws().forEach((drawId, record) -> {
+            if (record.equals(drawIds.get(drawId))) {
+                persistedDrawIds.add(drawId);
+            }
+        });
     }
 
     private static void validateRelease(RegionRelease request) {
@@ -850,30 +941,46 @@ final class HumanWorldState {
 
     CompoundTag save(CompoundTag nbt) {
         // 身体、余额及交接事实提交到同一文件，不能分别保存后确认。
-        nbt.putString("epoch", epoch);
-        nbt.put("players", savedPlayers());
-        nbt.putByteArray("released_qi", BodyProtobuf.toInventory(store.environmentQi()).toByteArray());
-        nbt.put("environment_sources", savedSources());
-        nbt.put("release_ids", savedReleaseIds());
-        nbt.put("pending_credits", savedPendingCredits());
-        nbt.put("draw_ids", savedDrawIds());
+        return encode(capture(), nbt);
+    }
+
+    private SavedState capture() {
+        // 主线程上截下存盘要的全部内容；身体快照、回执和来源都是不可变值，表另行复制。
+        var saved = new ArrayList<SavedPlayer>();
+        for (HumanPlayerBody body : players.values()) {
+            saved.add(new SavedPlayer(body.snapshot(), body.breathingActions(), body.receipts()));
+        }
+        var handoffs = new SavedHandoffs(List.copyOf(releaseIds.values()), List.copyOf(pendingCredits),
+                List.copyOf(drawIds.values()));
+        return new SavedState(epoch, List.copyOf(saved), store.environmentQi(), store.environmentSources(), handoffs);
+    }
+
+    private static CompoundTag encode(SavedState saved, CompoundTag nbt) {
+        // 按快照编码成存档格式；写盘线程和内存 save 共用。
+        nbt.putString("epoch", saved.epoch());
+        nbt.put("players", savedPlayers(saved.players()));
+        nbt.putByteArray("released_qi", BodyProtobuf.toInventory(saved.releasedQi()).toByteArray());
+        nbt.put("environment_sources", savedSources(saved.sources()));
+        nbt.put("release_ids", savedReleaseIds(saved.handoffs().releases()));
+        nbt.put("pending_credits", savedPendingCredits(saved.handoffs().credits()));
+        nbt.put("draw_ids", savedDrawIds(saved.handoffs().draws()));
         return nbt;
     }
 
-    private ListTag savedPlayers() {
+    private static ListTag savedPlayers(List<SavedPlayer> players) {
         // 每个玩家快照携带自己的动作与回执，默认释放账户仅保存在世界级字段。
         var entries = new ListTag();
-        for (HumanPlayerBody body : players.values()) {
+        for (SavedPlayer player : players) {
             var entry = new CompoundTag();
-            entry.putByteArray("body", BodyProtobuf.encodeSnapshot(body.snapshot()));
+            entry.putByteArray("body", BodyProtobuf.encodeSnapshot(player.body()));
             entry.putByteArray("released_qi", BodyProtobuf.toInventory(QiInventory.empty()).toByteArray());
             var actions = new ListTag();
-            for (String instance : body.breathingActions()) {
+            for (String instance : player.breathingActions()) {
                 actions.add(net.minecraft.nbt.StringTag.valueOf(instance));
             }
             entry.put("breathing_actions", actions);
             var receipts = new ListTag();
-            for (CommandReceipt receipt : body.receipts()) {
+            for (CommandReceipt receipt : player.receipts()) {
                 var saved = new CompoundTag();
                 saved.putByteArray("value", MeridianProtocol.encodeReceipt(receipt));
                 receipts.add(saved);
@@ -884,19 +991,19 @@ final class HumanWorldState {
         return entries;
     }
 
-    private ListTag savedSources() {
+    private static ListTag savedSources(List<EnvironmentQiSource> environmentSources) {
         // 区域库存与版本使用原始 Protobuf 字节保存，重启不重抽库存。
         var sources = new ListTag();
-        for (EnvironmentQiSource source : store.environmentSources()) {
+        for (EnvironmentQiSource source : environmentSources) {
             sources.add(new net.minecraft.nbt.ByteArrayTag(source.toByteArray()));
         }
         return sources;
     }
 
-    private ListTag savedReleaseIds() {
+    private static ListTag savedReleaseIds(List<ReleaseRecord> releases) {
         // 保留未完成遗忘的完整请求，供冲突检查与待入账恢复校验。
         var ids = new ListTag();
-        for (ReleaseRecord record : releaseIds.values()) {
+        for (ReleaseRecord record : releases) {
             var entry = new CompoundTag();
             entry.putByteArray("request", record.request().toByteArray());
             entry.putLong("millis", record.millis());
@@ -905,10 +1012,10 @@ final class HumanWorldState {
         return ids;
     }
 
-    private ListTag savedDrawIds() {
+    private static ListTag savedDrawIds(List<DrawRecord> draws) {
         // 原请求和首次结果都存原始 Protobuf 字节，重载后同 ID 重发仍拿到同一结果。
         var ids = new ListTag();
-        for (DrawRecord record : drawIds.values()) {
+        for (DrawRecord record : draws) {
             var entry = new CompoundTag();
             entry.putByteArray("request", record.request().toByteArray());
             entry.putByteArray("result", record.result().toByteArray());
@@ -918,10 +1025,10 @@ final class HumanWorldState {
         return ids;
     }
 
-    private ListTag savedPendingCredits() {
+    private static ListTag savedPendingCredits(List<PendingCredit> credits) {
         // 待入账数量与其去重 ID 同时持久化，玩家默认释放仍按区域合并。
         var pending = new ListTag();
-        for (PendingCredit credit : pendingCredits) {
+        for (PendingCredit credit : credits) {
             var entry = new CompoundTag();
             entry.putString("source_id", credit.sourceId());
             entry.putByteArray("qi", BodyProtobuf.toInventory(credit.qi()).toByteArray());

@@ -184,10 +184,11 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
 
     private byte[] execute(Binding current, ServerPlayer player, HumanPlayerBody body,
                            TechniqueHostRequest request) {
-        // 所有分支在服务端主线程串行执行，时间结算的变化也必须保存并投影。
+        // 所有分支在服务端主线程串行执行，时间结算的变化也必须保存并投影；身体版本没变就不必重推视图。
         var response = TechniqueHostResponse.newBuilder()
                 .setRequestId(request.getRequestId());
         long nowMillis = nowMillis(current);
+        long revision = body.snapshot().revision();
         try {
             if (request.hasActivity()) {
                 return activity(body, nowMillis, request);
@@ -215,7 +216,9 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
             return failure(response, FailureCode.INTERNAL_ERROR);
         } finally {
             current.state().setDirty();
-            current.changed().accept(player.getUUID());
+            if (body.snapshot().revision() != revision) {
+                current.changed().accept(player.getUUID());
+            }
         }
     }
 

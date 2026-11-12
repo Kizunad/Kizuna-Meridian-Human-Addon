@@ -85,9 +85,13 @@ public final class HumanFabric implements ModInitializer {
     private static final Logger LOG = LoggerFactory.getLogger("meridian_human_host");
     private static final Identifier DISCONNECT_CLEANUP =
             Identifier.fromNamespaceAndPath("meridian_human", "disconnect_cleanup");
+    /** 每名玩家最多每 5 tick 推一次身体视图（每秒 4 次）；内观中跟着吐纳回执的那份不限。 */
+    private static final int BODY_VIEW_INTERVAL_TICKS = 5;
     private final Map<UUID, Integer> gatheringPackets = new HashMap<>();
     private final Map<UUID, HumanMovementObserver> observers = new HashMap<>();
     private final Map<UUID, Long> sentRevisions = new HashMap<>();
+    private final Map<UUID, Integer> bodyViewTicks = new HashMap<>();
+    private final Map<UUID, OpeningRules> openingRules = new HashMap<>();
     private final Set<UUID> watching = new HashSet<>();
     private final Set<UUID> failed = new HashSet<>();
     private final Set<UUID> introspecting = new HashSet<>();
@@ -160,7 +164,7 @@ public final class HumanFabric implements ModInitializer {
                         animations.stop(player);
                         body.connectGathering(millis(server), response -> sendGathering(player, response));
                     }
-                    sentRevisions.remove(playerId);
+                    refreshBodyView(playerId);
                     ProgressionFabric.publishProgress(player);
                 }
             }
@@ -181,8 +185,14 @@ public final class HumanFabric implements ModInitializer {
         });
         ServerLifecycleEvents.AFTER_SAVE.register((server, flush, force) -> {
             // 跟随原版世界保存（含停服）；/save-off 后只在强制保存时写入，与原版主世界存档数据一致。
-            if (state != null && (force || !server.overworld().noSave())) {
+            // 停服和 save-all flush 等写完再返回；普通自动保存交给写盘线程，主线程只截快照。
+            if (state == null || (!force && server.overworld().noSave())) {
+                return;
+            }
+            if (flush) {
                 state.save(stateFile(server).toFile());
+            } else {
+                state.saveInBackground(stateFile(server).toFile());
             }
         });
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> HumanTechniqueHost.unbind());
@@ -207,6 +217,13 @@ public final class HumanFabric implements ModInitializer {
                 HumanTechniqueHost.beforeDeath(player);
             }
             return true;
+        });
+        ServerTickEvents.START_SERVER_TICK.register(server -> {
+            // 上一 tick 交给写盘线程的文件趁两 tick 之间的空闲写；新 tick 开始时还没写完就等它写完。
+            // 这样上一 tick 受理的释放和遗忘在这一 tick 一定已确认，别的代码也不会碰上写到一半的文件。
+            if (state != null) {
+                state.awaitSaves();
+            }
         });
         ServerTickEvents.END_SERVER_TICK.register(this::tick);
         ServerPlayNetworking.registerGlobalReceiver(MeridianChannels.BODY_VIEW_REQUEST.type(), (packet, context) -> {
@@ -235,8 +252,9 @@ public final class HumanFabric implements ModInitializer {
                         introspecting.remove(player.getUUID());
                     }
                     update.setIntrospection(request.getIntrospection());
-                    sentRevisions.remove(player.getUUID());
                 }
+                // 拒绝时客户端会撤掉手里的开脉规则，批准时要换视图：两种都整份重发。
+                refreshBodyView(player.getUUID());
                 sendBodyView(player, update.build());
             } catch (com.google.protobuf.InvalidProtocolBufferException invalid) {
                 // 无效输入只拒绝本包，不损坏玩家的自然身体运行。
@@ -299,8 +317,14 @@ public final class HumanFabric implements ModInitializer {
             }
         });
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+            // 写盘线程上还没写完的交给它写完，再丢掉这次服务器的世界状态。
+            if (state != null) {
+                state.awaitSaves();
+            }
             observers.clear();
             sentRevisions.clear();
+            bodyViewTicks.clear();
+            openingRules.clear();
             watching.clear();
             introspecting.clear();
             failed.clear();
@@ -368,7 +392,7 @@ public final class HumanFabric implements ModInitializer {
             state.selectEnvironment(player, millis(server));
             body.connectGathering(millis(server), response -> sendGathering(player, response));
             observers.put(player.getUUID(), new HumanMovementObserver());
-            sentRevisions.remove(player.getUUID());
+            refreshBodyView(player.getUUID());
             failed.remove(player.getUUID());
             ProgressionFabric.publishProgress(player);
             player.sendSystemMessage(Component.translatable(HumanLang.BODY_BOUND));
@@ -654,7 +678,7 @@ public final class HumanFabric implements ModInitializer {
             }
         }
         observers.remove(player.getUUID());
-        sentRevisions.remove(player.getUUID());
+        refreshBodyView(player.getUUID());
         watching.remove(player.getUUID());
         introspecting.remove(player.getUUID());
         gatheringPackets.remove(player.getUUID());
@@ -694,7 +718,7 @@ public final class HumanFabric implements ModInitializer {
             state.selectEnvironment(player, nowMillis);
             body.publishGathering();
             introspecting.remove(player.getUUID());
-            sentRevisions.remove(player.getUUID());
+            refreshBodyView(player.getUUID());
             ProgressionFabric.publishProgress(player);
             state.setDirty();
         } catch (RuntimeException failure) {
@@ -738,9 +762,10 @@ public final class HumanFabric implements ModInitializer {
                 if (changed || breathingChanged) {
                     state.setDirty();
                 }
-                // UI 为必装接线，按身体版本推送；缺少接收通道不能静默跳过。
+                // UI 为必装接线，按身体版本推送、每 5 tick 最多一次；缺少接收通道不能静默跳过。
                 requireChannel(player, MeridianChannels.BODY_VIEW);
-                if (sentRevisions.getOrDefault(id, -1L) != body.snapshot().revision()) {
+                if (sentRevisions.getOrDefault(id, -1L) != body.snapshot().revision()
+                        && bodyViewDue(id, server.getTickCount())) {
                     var projection = dev.kizuna.meridian.human.server.HumanCultivation.bodyView(body.snapshot());
                     publishBodyView(player, projection);
                 }
@@ -767,7 +792,8 @@ public final class HumanFabric implements ModInitializer {
             requireChannel(player, MeridianChannels.GATHERING_RESPONSE);
             GatheringResponse projected = projectGathering(response);
             ServerPlayNetworking.send(player, MeridianChannels.GATHERING_RESPONSE.payload(projected.toByteArray()));
-            if (projected.hasView()) {
+            // 内观里的操作卡只认同版本身体，跟着回执立刻发；外部视图交给 tick 里限频的推送。
+            if (projected.hasView() && internalView(player)) {
                 var snapshot = projected.getView().getBody();
                 if (sentRevisions.getOrDefault(player.getUUID(), -1L) != snapshot.getRevision()) {
                     publishBodyView(player, snapshot);
@@ -791,24 +817,64 @@ public final class HumanFabric implements ModInitializer {
 
     private void publishBodyView(ServerPlayer player, dev.kizuna.meridian.protocol.pb.BodyMessages.BodySnapshot body) {
         // 身体和操作目录按同一版本一起发布，持续吐纳时也能立即使用当前开脉条件。
-        boolean internalView = introspecting.contains(player.getUUID()) && ProgressionFabric.canInspect(player);
+        // 开脉规则是固定内容：客户端手里的规则和这次视图要的一样时不再重发。
+        UUID id = player.getUUID();
+        boolean internalView = internalView(player);
         var update = BodyViewUpdate.newBuilder()
                 .setProtocolVersion(1)
                 .setBody(body)
                 .setPresentationResource("meridian_human:meridian/adult.pb")
                 .setIntrospection(internalView);
+        OpeningRules wanted = OpeningRules.CLEARED;
         if (internalView) {
             var rules = HumanContent.bundle().getOpeningRulesList();
             update.addOperations(dev.kizuna.meridian.human.server.HumanOpeningViews.update(body, rules));
-            var opening = MeridianOpeningOptions.newBuilder()
-                    .addAllRules(rules)
-                    .build();
-            update.setOpening(opening);
-        } else {
-            update.setOpening(MeridianOpeningOptions.getDefaultInstance());
+            wanted = OpeningRules.ALL;
+        }
+        boolean rulesChanged = openingRules.get(id) != wanted;
+        if (rulesChanged) {
+            update.setOpening(openingOptions(wanted));
         }
         sendBodyView(player, update.build());
-        sentRevisions.put(player.getUUID(), body.getRevision());
+        if (rulesChanged) {
+            openingRules.put(id, wanted);
+        }
+        sentRevisions.put(id, body.getRevision());
+        bodyViewTicks.put(id, player.level().getServer().getTickCount());
+    }
+
+    private static MeridianOpeningOptions openingOptions(OpeningRules rules) {
+        // 内观视图带全部开脉规则；外部视图发空表，撤掉客户端手里的规则。
+        if (rules == OpeningRules.CLEARED) {
+            return MeridianOpeningOptions.getDefaultInstance();
+        }
+        return MeridianOpeningOptions.newBuilder()
+                .addAllRules(HumanContent.bundle().getOpeningRulesList())
+                .build();
+    }
+
+    private boolean internalView(ServerPlayer player) {
+        // 订阅了内观、进度也允许内观的玩家才拿内部视图。
+        return introspecting.contains(player.getUUID()) && ProgressionFabric.canInspect(player);
+    }
+
+    private boolean bodyViewDue(UUID playerId, int tick) {
+        // 距上次推送满 5 tick 才再推；刚登录、订阅或进度变化后的第一份不等。
+        Integer last = bodyViewTicks.get(playerId);
+        return last == null || tick - last >= BODY_VIEW_INTERVAL_TICKS;
+    }
+
+    private void refreshBodyView(UUID playerId) {
+        // 登录、订阅、进度变化、换维度和断线后忘掉客户端手里的视图：下一份不等限频、开脉规则重新带上。
+        sentRevisions.remove(playerId);
+        bodyViewTicks.remove(playerId);
+        openingRules.remove(playerId);
+    }
+
+    /** 客户端手里的开脉规则：内观视图是全部规则，外部视图是空表。 */
+    private enum OpeningRules {
+        CLEARED,
+        ALL
     }
 
     private void sendBodyView(ServerPlayer player, BodyViewUpdate update) {

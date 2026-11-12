@@ -3,9 +3,12 @@ package dev.kizuna.meridian.human.fabric;
 import dev.kizuna.meridian.core.Qi;
 import dev.kizuna.meridian.core.QiAccounting;
 import dev.kizuna.meridian.core.QiInventory;
+import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.EnvironmentHostRequest;
+import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.EnvironmentHostResponse;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionQuery;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionRelease;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionView;
+import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.ReleaseResult;
 import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.pb.BodyMessages;
@@ -14,11 +17,13 @@ import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.server.level.ServerLevel;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 
 import static dev.kizuna.meridian.human.fabric.HumanGameTestTicks.DEFAULT_TIMEOUT;
 
@@ -152,6 +157,7 @@ public final class HumanReleasePersistenceGameTest {
         var accepted = fixture.state().release(release, world, 1);
         context.assertTrue(!accepted.getPersisted() && !accepted.getDuplicate(), "首次受理不应同步写盘");
         fixture.state().flushHandoffs(file);
+        fixture.state().awaitSaves();
         QiInventory expected = QiAccounting.credit(BodyProtobuf.fromInventory(fixture.original().getInventory()),
                 BodyProtobuf.fromInventory(release.getReleasedQi()));
         for (int restart = 0; restart < RESTART_COUNT; restart++) {
@@ -193,6 +199,7 @@ public final class HumanReleasePersistenceGameTest {
             Files.delete(blocked);
         }
         state.flushHandoffs(file);
+        state.awaitSaves();
         var recovered = state.release(release, world, 1);
         context.assertTrue(recovered.getPersisted() && recovered.getDuplicate(), "磁盘恢复后未完成原请求交接");
         context.succeed();
@@ -254,6 +261,7 @@ public final class HumanReleasePersistenceGameTest {
             context.assertTrue(!state.release(release, context.getLevel(), 1).getPersisted(), "首次受理提前确认");
         }
         state.flushHandoffs(fixture.file());
+        state.awaitSaves();
         context.assertTrue(read(fixture.file()).save(new CompoundTag())
                 .getListOrEmpty("release_ids").size() == BATCH_SIZE, "未合并保存");
         byte[] saved = Files.readAllBytes(fixture.file());
@@ -264,6 +272,7 @@ public final class HumanReleasePersistenceGameTest {
         context.assertTrue(!state.release(fixture.release(), context.getLevel(), 1).getPersisted(), "未写盘却确认");
         context.runAfterDelay(1, () -> {
             state.flushHandoffs(fixture.file());
+            state.awaitSaves();
             context.assertTrue(state.release(fixture.release(), context.getLevel(), 1).getPersisted(),
                     "下一 tick 未保存延后的请求");
             context.succeed();
@@ -281,6 +290,7 @@ public final class HumanReleasePersistenceGameTest {
         Files.createDirectory(blocked);
         try {
             state.flushHandoffs(fixture.file());
+            state.awaitSaves();
         } finally {
             Files.delete(blocked);
         }
@@ -288,6 +298,7 @@ public final class HumanReleasePersistenceGameTest {
         context.assertTrue(!Files.exists(fixture.file()) && state.isDirty(), "同 tick 重试了失败保存");
         context.runAfterDelay(1, () -> {
             state.flushHandoffs(fixture.file());
+            state.awaitSaves();
             context.assertTrue(state.release(fixture.release(), context.getLevel(), 1).getPersisted(),
                     "下一 tick 没有重试失败保存");
             context.succeed();
@@ -300,12 +311,46 @@ public final class HumanReleasePersistenceGameTest {
         Fixture fixture = fixture(context, new HumanWorldState(DurableStateFile.DirectorySync.UNSUPPORTED));
         fixture.state().release(fixture.release(), context.getLevel(), 1);
         fixture.state().flushHandoffs(fixture.file());
+        fixture.state().awaitSaves();
         context.assertTrue(!fixture.state().isDirty(), "目录同步不支持导致保存失败");
         context.assertTrue(fixture.state().release(fixture.release(), context.getLevel(), 1).getPersisted(),
                 "目录同步不支持导致 persisted 永远为 false");
         context.assertTrue(read(fixture.file()).release(fixture.release(), context.getLevel(), 1).getPersisted(),
                 "正式文件没有保存已确认请求");
         context.succeed();
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void backgroundSaveConfirmsOnlyWhatItCaptured(GameTestHelper context) throws Exception {
+        // 后台保存只写截快照那一刻的状态：之后受理的释放不进这份文件，也不能被这份确认。
+        Fixture fixture = fixture(context);
+        HumanWorldState state = fixture.state();
+        var world = context.getLevel();
+        RegionRelease captured = fixture.release();
+        RegionRelease later = captured.toBuilder()
+                .setReleaseId("gametest:after-capture")
+                .build();
+        state.release(captured, world, 1);
+        state.saveInBackground(fixture.file().toFile());
+        state.release(later, world, 1);
+        state.awaitSaves();
+        context.assertTrue(state.release(captured, world, 1).getPersisted(), "后台保存写完没有确认截下的释放");
+        context.assertTrue(!state.release(later, world, 1).getPersisted(), "截快照之后的释放被当成已写盘");
+        context.assertTrue(state.isDirty(), "截快照之后的变化被当成已写盘");
+        int savedReleases = read(fixture.file()).save(new CompoundTag()).getListOrEmpty("release_ids").size();
+        context.assertTrue(savedReleases == 1, "后台保存写进了截快照之后的释放：" + savedReleases);
+        context.succeed();
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void liveReleaseIsPersistedOnTheNextTick(GameTestHelper context) {
+        // 经正式入口受理的释放在 tick 末交给写盘线程；GameTest 服务端两 tick 之间不睡眠，下一 tick 也必须已确认。
+        RegionRelease release = release(context.getLevel(), "gametest:live-release:" + UUID.randomUUID());
+        context.assertTrue(!liveRelease(release).getPersisted(), "首次受理不应同步写盘");
+        context.runAfterDelay(1, () -> {
+            context.assertTrue(liveRelease(release).getPersisted(), "下一 tick 还没确认上一 tick 受理的释放");
+            context.succeed();
+        });
     }
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)
@@ -324,6 +369,7 @@ public final class HumanReleasePersistenceGameTest {
         Files.createDirectory(blocked);
         try {
             state.flushHandoffs(fixture.file());
+            state.awaitSaves();
             context.assertTrue(!state.forgetRelease(releaseId).getPersisted(), "遗忘写失败仍确认");
         } finally {
             Files.delete(blocked);
@@ -340,6 +386,7 @@ public final class HumanReleasePersistenceGameTest {
                 "删除未落盘却丢失去重项");
         restored.forgetRelease(releaseId);
         restored.flushHandoffs(fixture.file());
+        restored.awaitSaves();
         HumanWorldState afterLostResponse = read(fixture.file());
         context.assertTrue(afterLostResponse.forgetRelease(releaseId).getPersisted(), "遗忘重试不幂等");
         context.assertTrue(afterLostResponse.save(new CompoundTag())
@@ -360,6 +407,12 @@ public final class HumanReleasePersistenceGameTest {
         // 测试使用真实世界生成区域，保存能力可以指定为平台不支持目录同步。
         var world = context.getLevel();
         RegionView original = state.query(world, REGION_COORDINATE, REGION_COORDINATE, 0);
+        Path directory = Files.createTempDirectory(Path.of("."), "release-persistence-");
+        return new Fixture(state, release(world, "gametest:durable-release"), directory.resolve("human.dat"), original);
+    }
+
+    private static RegionRelease release(ServerLevel world, String releaseId) {
+        // 测试区域里的一笔凋零真元释放，维度取真实世界。
         var position = RegionQuery.newBuilder()
                 .setDimensionId(world.dimension().identifier().toString())
                 .setBlockX(REGION_COORDINATE)
@@ -367,13 +420,30 @@ public final class HumanReleasePersistenceGameTest {
                 .build();
         var qi = new QiInventory(List.of(new Qi(Qi.QiAttribute.of("qi_variants:wither"),
                 RELEASE_AMOUNT, RELEASE_DENSITY)));
-        var release = RegionRelease.newBuilder()
-                .setReleaseId("gametest:durable-release")
+        return RegionRelease.newBuilder()
+                .setReleaseId(releaseId)
                 .setPosition(position)
                 .setReleasedQi(BodyProtobuf.toInventory(qi))
                 .build();
-        Path directory = Files.createTempDirectory(Path.of("."), "release-persistence-");
-        return new Fixture(state, release, directory.resolve("human.dat"), original);
+    }
+
+    private static ReleaseResult liveRelease(RegionRelease release) {
+        // 经 Framework 环境入口交换字节，走 Human 本局的世界状态和 tick 末写盘。
+        var request = EnvironmentHostRequest.newBuilder()
+                .setProtocolVersion(1)
+                .setRequestId(UUID.randomUUID().toString())
+                .setRelease(release)
+                .build();
+        byte[] reply = new HumanEnvironmentHost().exchange(request.toByteArray());
+        try {
+            var response = EnvironmentHostResponse.parseFrom(reply);
+            if (!response.hasReleased()) {
+                throw new IllegalStateException("环境服务没有受理释放：" + response);
+            }
+            return response.getReleased();
+        } catch (com.google.protobuf.InvalidProtocolBufferException invalid) {
+            throw new IllegalStateException(invalid);
+        }
     }
 
     private static HumanWorldState read(Path file) throws IOException {
@@ -386,6 +456,7 @@ public final class HumanReleasePersistenceGameTest {
         HumanWorldState state = fixture.state();
         state.release(fixture.release(), context.getLevel(), 1);
         state.flushHandoffs(fixture.file());
+        state.awaitSaves();
         context.assertTrue(state.isDirty()
                 && !state.release(fixture.release(), context.getLevel(), 1).getPersisted(), "写失败却确认");
     }

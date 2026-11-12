@@ -110,6 +110,8 @@ final class HumanPlayerBody {
     private boolean debugAuthorized;
     private String trustedActivityCaller;
     private BreathingView lastBreathing = BreathingView.getDefaultInstance();
+    private BodySnapshot cultivationChecked;
+    private boolean cultivationNeeded;
 
     HumanPlayerBody(BodySnapshot saved, List<CommandReceipt> receipts, QiInventory releasedQi) {
         // 同时恢复身体、成功回执及释放账，不能在登录时重建疲劳或重发历史释放。
@@ -349,10 +351,10 @@ final class HumanPlayerBody {
 
     void settle(long millis) {
         // 长区间按活动边界逐步结算，不能把60秒燃料一次检查或在结束后补扣疲劳。
-        while (HumanCultivation.needsAdvance(snapshot()) && !snapshot().vitality().dead()
-                && Math.max(accountedMillis, snapshot().settledAt().elapsedMillis()) + HumanCultivationNumbers.STEP_MILLIS < millis) {
+        // 先比时间：剩下不足一步时不用判断中焦和储备要不要推进。
+        while (nextStepMillis() < millis && !snapshot().vitality().dead() && needsCultivationAdvance(snapshot())) {
             // 吐纳或开脉会先推进身体游标，运动账尚未结清时也不能回拨身体时钟。
-            settleInterval(Math.max(accountedMillis, snapshot().settledAt().elapsedMillis()) + HumanCultivationNumbers.STEP_MILLIS);
+            settleInterval(nextStepMillis());
         }
         settleInterval(millis);
     }
@@ -372,7 +374,7 @@ final class HumanPlayerBody {
         boolean cultivationDue = !snapshot().addonProgress().containsKey(HumanCultivation.PROGRESS)
                 || HumanCultivation.state(snapshot()).getLastMillis() < snapshot().settledAt().elapsedMillis();
         // 同tick的健康读取与提交必须看到同一版本；没有新的活动时间就不能空提交进度。
-        if (!snapshot().vitality().dead() && cultivationDue && HumanCultivation.needsAdvance(snapshot())) {
+        if (!snapshot().vitality().dead() && cultivationDue && needsCultivationAdvance(snapshot())) {
             applyActivity(HumanCultivation.update(snapshot(), null));
         }
         scheduleNextBoundary();
@@ -946,9 +948,23 @@ final class HumanPlayerBody {
         if (motion != Motion.IDLE || hasFatigue) {
             nextBoundaryMillis = Math.min(existingEvent, accountedMillis + 1000);
         }
-        if (HumanCultivation.needsAdvance(body)) {
+        if (needsCultivationAdvance(body)) {
             nextBoundaryMillis = Math.min(nextBoundaryMillis, accountedMillis + HumanCultivationNumbers.STEP_MILLIS);
         }
+    }
+
+    private long nextStepMillis() {
+        // 从身体游标和运动账较晚的一个起再走一步修炼步长。
+        return Math.max(accountedMillis, snapshot().settledAt().elapsedMillis()) + HumanCultivationNumbers.STEP_MILLIS;
+    }
+
+    private boolean needsCultivationAdvance(BodySnapshot body) {
+        // 快照不可变：同一个快照只算一次要不要推进中焦和储备，结算、排下一边界接连问时不再重建真元计划。
+        if (body != cultivationChecked) {
+            cultivationNeeded = HumanCultivation.needsAdvance(body);
+            cultivationChecked = body;
+        }
+        return cultivationNeeded;
     }
 
     private static AddonRegistry installContent() {
