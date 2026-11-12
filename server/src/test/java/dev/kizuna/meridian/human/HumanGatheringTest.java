@@ -473,7 +473,10 @@ public class HumanGatheringTest {
     @Test
     public void automaticBreathingUsesRealContactsAndWaitsForStaminaRecovery() throws IOException {
         // 自动输入不带剂量或摄入证据；整个会话继续使用真实环境、接触、炼化和运输。
-        Host host = new Host(source(100), null);
+        // 来源有效期覆盖下面三段循环（各最多 400 步、每步 250 ms）；source(100) 只到第 10 秒，
+        // 之后的接触全被拒收，第二口以后的吸气测不到真实接触。
+        var environment = source(100).toBuilder().setValidUntil(time(600000)).build();
+        Host host = new Host(environment, null);
         var session = host.session();
         session.enableBreathing(HumanContent.breathing());
         var request = GatheringRequest.newBuilder().setProtocolVersion(1).setBodyId("test-human")
@@ -490,7 +493,10 @@ public class HumanGatheringTest {
                 session.view().getBreathing().getAutomaticCaptureEfficiency(), 0);
         assertTrue(host.body().actions().stream().noneMatch(action -> action.definition().tissueIds()
                 .contains(new dev.kizuna.meridian.core.Anatomy.TissueId("attention_network"))));
-        int contacts = 0;
+        // 每口吸气的接触数在下一次呼气开始时结清；最后一口被耐力暂停截断，不计入。
+        List<Integer> completedInhaleContacts = new ArrayList<>();
+        int inhaleContacts = 0;
+        BreathAction previousAction = BreathAction.INHALE;
         for (int step = 0; step < 400 && session.view().getBreathing().getActive(); step++) {
             BreathingView before = session.view().getBreathing();
             host.now += 250;
@@ -501,7 +507,12 @@ public class HumanGatheringTest {
                 BreathParticle old = before.getParticlesList().stream().filter(item -> item.getId() == particle.getId()).findFirst().orElseThrow();
                 newContacts += particle.getGeneration() - old.getGeneration();
             }
-            contacts += newContacts;
+            inhaleContacts += newContacts;
+            if (after.getAction() == BreathAction.EXHALE && previousAction != BreathAction.EXHALE) {
+                completedInhaleContacts.add(inhaleContacts);
+                inhaleContacts = 0;
+            }
+            previousAction = after.getAction();
             double absorbed = after.getAbsorbedQi() - before.getAbsorbedQi();
             if (newContacts == 0) {
                 assertEquals("没有真实接触不能伪造摄入", 0, absorbed, 0);
@@ -513,7 +524,10 @@ public class HumanGatheringTest {
             assertEquals(1, after.getAttentionRatio(), 1e-10);
         }
         BreathingView stopped = session.view().getBreathing();
-        assertTrue(contacts > 0);
+        // 第二口以后的吸气同样碰到粒子，接触与摄入的对应关系不只在第一口成立。
+        assertTrue("暂停前应完成不止一口吸气: " + completedInhaleContacts, completedInhaleContacts.size() > 1);
+        assertTrue("每口吸气都应有真实接触: " + completedInhaleContacts,
+                completedInhaleContacts.stream().allMatch(count -> count > 0));
         assertFalse(stopped.getActive());
         assertTrue(stopped.getAutomatic());
         assertTrue(stopped.getStaminaRatio() < .8 && stopped.getStaminaRatio() > .79);
@@ -581,8 +595,10 @@ public class HumanGatheringTest {
         // 自动呼气不吹散粒子：第一口呼完之后的吸气仍有真实口鼻接触，自动吐纳不会只摄入第一口。
         final int stepLimit = 400;
         final int stepMillis = 250;
-        final int minimumLaterIntakes = 5;
-        Host host = new Host(source(100), null);
+        // 来源有效期覆盖整段循环；source(100) 只到第 10 秒，第一口呼气后只剩第二口吸气的前 2 秒能接触，
+        // 计数取决于随机粒子当时的落点。
+        var environment = source(100).toBuilder().setValidUntil(time(stepLimit * stepMillis)).build();
+        Host host = new Host(environment, null);
         var session = host.session();
         session.enableBreathing(HumanContent.breathing());
         var control = BreathControl.newBuilder()
@@ -598,18 +614,24 @@ public class HumanGatheringTest {
                 .build();
         assertTrue(GatheringResponse.parseFrom(session.handle(request.toByteArray())).hasView());
         boolean exhaled = false;
+        int firstIntakes = 0;
         int laterIntakes = 0;
         for (int step = 0; step < stepLimit && session.view().getBreathing().getActive(); step++) {
             int intakesBefore = intakes(session.view().getBreathing());
             host.now += stepMillis;
             session.advance();
             BreathingView after = session.view().getBreathing();
+            int stepIntakes = intakes(after) - intakesBefore;
             exhaled |= after.getAction() == BreathAction.EXHALE;
             if (exhaled) {
-                laterIntakes += intakes(after) - intakesBefore;
+                laterIntakes += stepIntakes;
+            } else {
+                firstIntakes += stepIntakes;
             }
         }
-        assertTrue("第一口呼气之后只吸入 " + laterIntakes + " 颗", laterIntakes >= minimumLaterIntakes);
+        // 之后几口加起来不少于第一口；呼气把粒子吹回边缘时，之后几口几乎碰不到粒子。
+        assertTrue("第一口吸入 " + firstIntakes + " 颗，之后只吸入 " + laterIntakes + " 颗",
+                laterIntakes >= firstIntakes);
     }
 
     private static int intakes(BreathingView view) {
