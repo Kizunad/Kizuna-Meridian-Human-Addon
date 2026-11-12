@@ -27,6 +27,9 @@ public final class HumanErrors {
     public static final String SPILLOVER_LOAD_FAILED = "人体伤害蔓延配置读取失败";
     public static final String INVALID_BREATHING = "人体吐纳配置无效：true_qi_gas_share 要是 0 到 1 之间的小数";
     public static final String BREATHING_LOAD_FAILED = "人体吐纳配置读取失败";
+    public static final String INVALID_CULTIVATION_RULES = "中焦周天配置无效：true_qi_density_gain 要是大于 0 的小数，"
+            + "true_qi_min_batch 要是大于 0、不超过 10 的小数";
+    public static final String CULTIVATION_RULES_LOAD_FAILED = "中焦周天配置读取失败";
     public static final String DEBUG_PERMISSION = "真元调试需要管理员权限等级 2";
     public static final String DIFFUSION_ENTRY_MISSING = "当前身体不存在指定经脉或有效摄入出口";
     public static final String INVALID_REFINE_RECIPE = "炼化配方族必须按器官种类与相态唯一，且只有一项无属性投料和一项本行产物";

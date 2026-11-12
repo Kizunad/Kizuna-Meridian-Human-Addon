@@ -38,7 +38,11 @@ final class HumanQiPlan {
 
     QiInventory take(String key, double amount, double volume) {
         // 每种明细先过滤浮点尾差再扣源，不能因合计够大就搬运其中不可计量的小项。
-        QiInventory selected = available(key, amount, volume);
+        return take(key, available(key, amount, volume));
+    }
+
+    QiInventory take(String key, QiInventory selected) {
+        // 扣下先前查得的可取明细，查询和扣账看到的是同一份。
         if (selected.totalQi() > 0) {
             put(key, QiAccounting.debit(get(key), selected));
         }
@@ -47,7 +51,25 @@ final class HumanQiPlan {
 
     QiInventory available(String key, double amount, double volume) {
         // 查询与执行共用最小转移量；不足部分保留原密度与余额，不删除、不当作损耗。
-        return new QiInventory(get(key).take(amount, volume).entries().stream()
+        return measurable(get(key).take(amount, volume));
+    }
+
+    QiInventory availableFree(String key, double amount, double volume) {
+        // 只查无属性游离态的可取量，尾差过滤与 available 相同。
+        return measurable(freeQi(get(key)).take(amount, volume));
+    }
+
+    static QiInventory freeQi(QiInventory inventory) {
+        // 账户里的无属性游离态这一项；没有就是空账户。
+        return new QiInventory(inventory.entries().stream()
+                .filter(qi -> qi.attribute().equals(Qi.QiAttribute.NONE))
+                .filter(qi -> qi.phase() == Qi.QiPhase.FREE)
+                .toList());
+    }
+
+    private static QiInventory measurable(QiInventory selected) {
+        // 去掉低于最小转移量的单项尾差。
+        return new QiInventory(selected.entries().stream()
                 .filter(qi -> qi.amount() >= HumanCultivationNumbers.MIN_TRANSFER_QI).toList());
     }
 
@@ -60,13 +82,18 @@ final class HumanQiPlan {
 
     double freeLumen(String id) {
         // 普通运输和闭环返回都已占位，不能用它们暂时空出的空间沉淀后再塞回。
+        return Math.max(0, lumenRoom(id));
+    }
+
+    double lumenRoom(String id) {
+        // 内腔容量减去当前余额和快照里全部入向预约；超额预约时为负数。
         var definition = body.structure().meridians().stream().filter(item -> item.id().value().equals(id)).findFirst().orElseThrow();
         var ports = definition.ports().stream().map(Anatomy.Port::id).toList();
         var incoming = body.structure().connections().stream().filter(item -> ports.contains(item.to()))
                 .map(Anatomy.Connection::id).toList();
         double reserved = body.transits().stream().filter(item -> incoming.contains(item.connectionId()))
                 .mapToDouble(item -> item.cargo().volume()).sum();
-        return Math.max(0, definition.lumenVolume() - get("l:" + id).volume() - reserved);
+        return definition.lumenVolume() - get("l:" + id).volume() - reserved;
     }
 
     void release(double amount) {

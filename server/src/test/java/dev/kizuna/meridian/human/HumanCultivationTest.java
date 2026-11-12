@@ -16,6 +16,10 @@ import static org.junit.Assert.*;
 
 /** 整体回归：真实原子入口的闭环、提纯守恒、脾加工、持久化与突破成败。 */
 public class HumanCultivationTest {
+    private static final HumanCultivation.Purification WANDERING = HumanCultivation.Purification.WANDERING;
+    private static final double YIELD_PER_DECADE = Math.pow(10, -HumanCultivationNumbers.LOSS_EXPONENT);
+    private static final double BRAIN_FATIGUE_BELOW_PAUSE_LINE = .05; // 焦耳；一步 250 ms 自动周天耗脑 0.25 J。
+
     @Test
     public void breakthroughAvailabilityTracksTheCurrentBodyAndDisappearsAfterStopping() throws Exception {
         // 同一权威投影控制入口显隐，停止周天后不能残留可突破资格。
@@ -41,11 +45,11 @@ public class HumanCultivationTest {
         double savedAmount = 9.173569236430977;
         double roundedDensity = Math.nextDown(HumanCultivationNumbers.MAX_DENSITY);
         var cargo = new QiInventory(List.of(new Qi(Qi.QiAttribute.NONE, savedAmount, roundedDensity)));
-        QiInventory purified = HumanCultivation.purify(cargo, HumanCultivationNumbers.AUTOMATIC_EFFICIENCY);
+        QiInventory purified = HumanCultivation.purify(cargo, HumanCultivationNumbers.AUTOMATIC_EFFICIENCY, WANDERING);
         assertEquals("不可流转的损耗应连同原密度保留在气团中", cargo, purified);
-        assertEquals(cargo, HumanCultivation.purify(purified, 1));
+        assertEquals(cargo, HumanCultivation.purify(purified, 1, WANDERING));
         var tiny = new QiInventory(List.of(new Qi(Qi.QiAttribute.NONE, QiAccounting.MIN_TRANSFER_QI, 0.01)));
-        assertEquals("不足一次损耗的微量真元不能免费提高密度", tiny, HumanCultivation.purify(tiny, 1));
+        assertEquals("不足一次损耗的微量真元不能免费提高密度", tiny, HumanCultivation.purify(tiny, 1, WANDERING));
     }
 
     @Test
@@ -130,8 +134,9 @@ public class HumanCultivationTest {
         assertFalse(stoppedByPlayer.getAutomatic());
         assertFalse(stoppedByPlayer.getAutomaticWaiting());
         var cargo = new QiInventory(List.of(new Qi(Qi.QiAttribute.NONE, 10, .01)));
-        assertTrue(HumanCultivation.purify(cargo, HumanCultivationNumbers.AUTOMATIC_EFFICIENCY).entries().get(0).density()
-                < HumanCultivation.purify(cargo, 1).entries().get(0).density());
+        QiInventory automatic = HumanCultivation.purify(cargo, HumanCultivationNumbers.AUTOMATIC_EFFICIENCY, WANDERING);
+        QiInventory struck = HumanCultivation.purify(cargo, 1, WANDERING);
+        assertTrue(automatic.entries().get(0).density() < struck.entries().get(0).density());
     }
 
     @Test
@@ -185,10 +190,26 @@ public class HumanCultivationTest {
         var restored = new InMemoryBodyStore(List.of(host.body()), host.store.receipts(), host.store.environmentQi());
         assertEquals(total, restored.find(host.id).orElseThrow().totalQi() + restored.environmentQi().totalQi(), 1e-7);
         var nearCap = new QiInventory(List.of(new Qi(Qi.QiAttribute.NONE, 10, .0989)));
-        QiInventory capped = HumanCultivation.purify(nearCap, 1);
+        QiInventory capped = HumanCultivation.purify(nearCap, 1, WANDERING);
         assertEquals(.099, capped.entries().get(0).density(), 1e-12);
         assertEquals(10 * Math.pow(.099 / .0989, -.66), capped.totalQi(), 1e-10);
-        assertEquals(capped, HumanCultivation.purify(capped, 1));
+        assertEquals(capped, HumanCultivation.purify(capped, 1, WANDERING));
+    }
+
+    @Test
+    public void trueQiPurificationReachesGasWithinTwoAutomaticLapsAndKeepsTheLossRule() {
+        // 随包增益 1.3：自动效率 0.5 下 10 元游离态第一圈到 0.045，第二圈到 0.1 成为气态；
+        // 损耗仍按实际增量，一个数量级剩 10^-0.66。
+        var trueQi = HumanCultivation.Purification.trueQi(HumanCultivationRules.defaults());
+        QiInventory batch = new QiInventory(List.of(new Qi(Qi.QiAttribute.NONE, 10, .01)));
+        batch = HumanCultivation.purify(batch, HumanCultivationNumbers.AUTOMATIC_EFFICIENCY, trueQi);
+        assertEquals("第一圈还不该到气态", Qi.QiPhase.FREE, batch.entries().get(0).phase());
+        QiInventory gas = HumanCultivation.purify(batch, HumanCultivationNumbers.AUTOMATIC_EFFICIENCY, trueQi);
+        assertEquals(HumanCultivationNumbers.GAS_DENSITY, gas.entries().get(0).density(), 0);
+        assertEquals(Qi.QiPhase.GAS, gas.entries().get(0).phase());
+        assertEquals(10 * YIELD_PER_DECADE, gas.totalQi(), 1e-9);
+        assertEquals("到气态后继续转圈不再提纯也不再损耗", gas,
+                HumanCultivation.purify(gas, HumanCultivationNumbers.AUTOMATIC_EFFICIENCY, trueQi));
     }
 
     @Test
@@ -351,6 +372,128 @@ public class HumanCultivationTest {
         assertEquals(0, HumanCultivation.state(missingCandidate.body()).getBreakthroughSeconds(), 0);
         assertTrue(missingCandidate.body().wallQiTotal() <= 59);
         assertEquals(Realm.WANDERING_QI, missingCandidate.body().realm());
+    }
+
+    @Test
+    public void trueQiCircuitUnloadsGasRefillsFreeQiAndStopsWhenTheRingHasNone() {
+        // 突破后停周天，内腔放 12 元游离态再开自动周天五分钟：炼成的气态卸回八脉内腔，八脉游离态减少，
+        // 身体加环境的总账守恒。随后清空内腔和外壁储备（储备会在内腔变空时慢慢放回游离态），
+        // 周天取不到游离态就停下并说明原因。
+        Host host = preparedBreakthrough();
+        host.input(CultivationInput.Operation.START_BREAKTHROUGH);
+        for (int index = 0; index < 240; index++) {
+            host.tick();
+        }
+        assertEquals(Realm.TRUE_QI, host.body().realm());
+        host.input(CultivationInput.Operation.STOP);
+        host.debug(false, 12, .01);
+        double total = host.body().totalQi() + host.store.environmentQi().totalQi();
+        double startingFree = ringQi(host.body(), Qi.QiPhase.FREE);
+        host.input(CultivationInput.Operation.START_AUTOMATIC);
+        final int fiveMinuteTicks = 5 * 60 * 4;
+        for (int index = 0; index < fiveMinuteTicks; index++) {
+            host.tick();
+        }
+        var refining = HumanCultivation.state(host.body());
+        double ringFree = ringQi(host.body(), Qi.QiPhase.FREE);
+        double ringGas = ringQi(host.body(), Qi.QiPhase.GAS);
+        String progress = refining.getReason() + "，第 " + refining.getLaps() + " 圈，八脉游离 " + ringFree
+                + " 气态 " + ringGas + "，起步游离 " + startingFree;
+        assertTrue(progress, refining.getLaps() >= 3);
+        assertTrue(progress, ringGas > 0);
+        assertTrue(progress, ringFree < startingFree);
+        assertEquals(total, host.body().totalQi() + host.store.environmentQi().totalQi(), 1e-7);
+
+        host.debug(false, 0, .01);
+        host.debug(true, 0, .01);
+        final int twoMinuteTicks = 2 * 60 * 4;
+        for (int index = 0; index < twoMinuteTicks && HumanCultivation.state(host.body()).getAutomatic(); index++) {
+            host.tick();
+        }
+        var stopped = HumanCultivation.state(host.body());
+        String afterClearing = stopped.getReason() + "，第 " + stopped.getLaps() + " 圈，在途 " + host.body().transits();
+        assertFalse(afterClearing, stopped.getRunning());
+        assertFalse(afterClearing, stopped.getAutomatic());
+        assertEquals("八脉里没有可炼的游离态，周天停下", stopped.getReason());
+    }
+
+    @Test
+    public void staminaPauseInTheStepThatLaunchesANewLapCancelsTheLaunch() {
+        // 自动周天在运转、还没有批次，下一步才发出新一圈（耐力续上或等已有运输抵达之后）。把脑疲劳改到差 0.05 J
+        // 就跌破 80%：这一步发出新一圈后马上按耐力暂停。刚发出的批次还没进身体，只能撤回这次发出、货物回到出发经脉，
+        // 不能向 Framework 撤除不存在的周天。
+        Host host = preparedBreakthrough();
+        host.input(CultivationInput.Operation.START_BREAKTHROUGH);
+        for (int index = 0; index < 240; index++) {
+            host.tick();
+        }
+        assertEquals(Realm.TRUE_QI, host.body().realm());
+        host.input(CultivationInput.Operation.STOP);
+        host.debug(false, 12, .01);
+        host.input(CultivationInput.Operation.START_AUTOMATIC);
+        final int tenMinuteTicks = 10 * 60 * 4;
+        for (int index = 0; index < tenMinuteTicks && !launchesInTheNextStep(host); index++) {
+            host.tick();
+        }
+        assertTrue("十分钟内没有等到下一步发出新一圈的时刻", launchesInTheNextStep(host));
+
+        Host tired = restored(host, withBrainFatigue(host.body(), BRAIN_FATIGUE_BELOW_PAUSE_LINE));
+        double total = tired.body().totalQi();
+        tired.tick();
+        var paused = HumanCultivation.state(tired.body());
+        assertTrue(paused.getReason(), paused.getAutomaticWaiting());
+        assertFalse(paused.getRunning());
+        assertFalse(hasCircuit(tired.body()));
+        assertEquals(total, tired.body().totalQi() + tired.store.environmentQi().totalQi(), 1e-7);
+    }
+
+    private static boolean launchesInTheNextStep(Host host) {
+        // 自动周天在运转、身上还没有批次，并且在同一时刻的副本上走一步就发出新一圈。
+        var state = HumanCultivation.state(host.body());
+        boolean running = state.getRunning() && state.getAutomatic();
+        if (!running || hasCircuit(host.body())) {
+            return false;
+        }
+        Host probe = restored(host, host.body());
+        probe.tick();
+        return hasCircuit(probe.body());
+    }
+
+    private static boolean hasCircuit(BodySnapshot body) {
+        // 身上有周天批次。
+        return body.transits().stream().anyMatch(transit -> transit.id().equals(HumanCultivation.CIRCUIT));
+    }
+
+    private static Host restored(Host source, BodySnapshot body) {
+        // 从同一时刻的快照另起一个宿主，时钟接着原宿主走。
+        Host host = new Host(body);
+        host.now = source.now;
+        return host;
+    }
+
+    private static BodySnapshot withBrainFatigue(BodySnapshot body, double belowPauseLine) {
+        // 把脑疲劳改到离自动暂停线只差 belowPauseLine 焦耳，其余原样。
+        var brain = body.structure().organs().stream().filter(item -> item.id().value().equals("brain"))
+                .findFirst().orElseThrow();
+        double endurance = brain.endurance().enduranceJoules();
+        double fatigue = (1 - HumanCultivationNumbers.AUTOMATIC_MIN_STAMINA_RATIO) * endurance - belowPauseLine;
+        var message = BodyProtobuf.toMessage(body).toBuilder();
+        for (int index = 0; index < message.getOrganStatesCount(); index++) {
+            if (message.getOrganStates(index).getId().equals(brain.id().value())) {
+                message.setOrganStates(index, message.getOrganStates(index).toBuilder().setFatigueJoules(fatigue));
+            }
+        }
+        return BodyProtobuf.fromMessage(message.build());
+    }
+
+    private static double ringQi(BodySnapshot body, Qi.QiPhase phase) {
+        // 八脉内腔里某一相态的无属性真元。
+        return body.meridianStates().stream()
+                .filter(meridian -> HumanCultivation.MERIDIANS.contains(meridian.id().value()))
+                .flatMap(meridian -> meridian.lumenQi().entries().stream())
+                .filter(qi -> qi.attribute().equals(Qi.QiAttribute.NONE) && qi.phase() == phase)
+                .mapToDouble(Qi::amount)
+                .sum();
     }
 
     private static Host preparedBreakthrough() {

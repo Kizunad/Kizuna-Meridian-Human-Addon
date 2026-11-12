@@ -16,6 +16,9 @@ import static dev.kizuna.meridian.human.server.HumanCultivationNumbers.*;
 /** 中焦周天的可信人体策略；只生成一次原子计划，真元仍由 Framework 保存。 */
 public final class HumanCultivation {
     private static final double REFINEMENT_REFERENCE_DENSITY = 0.01;
+    private static final String NO_QI = "内腔没有可运转真元";
+    private static final String NO_FREE_QI = "八脉里没有可炼的游离态，周天停下";
+    private static final double MIN_LAUNCH_QI = 1e-6; // 元；游炁开环的数值下限，更小的余额留在原经脉。
     public static final String PROGRESS = "human:cultivation";
     public static final String CIRCUIT = "human-middle-jiao";
     public static final String ACTION = "human.circuit";
@@ -25,6 +28,16 @@ public final class HumanCultivation {
 
     private HumanCultivation() {
         // 路线、功率和突破门槛都属于人体，Framework 不识别这些 ID。
+    }
+
+    /** 一圈提纯的增益系数与封顶密度：游炁封在相变线下，真炁以后炼到气态为止。 */
+    public record Purification(double densityGain, double maxDensity) {
+        public static final Purification WANDERING = new Purification(DENSITY_GAIN, MAX_DENSITY);
+
+        public static Purification trueQi(HumanCultivationRules rules) {
+            // 真炁以后的增益取服务端配置，终点是突破相变同一密度。
+            return new Purification(rules.trueQiDensityGain(), GAS_DENSITY);
+        }
     }
 
     public static CultivationState state(BodySnapshot body) {
@@ -363,15 +376,22 @@ public final class HumanCultivation {
         transit = withProgress(transit, work, cargo);
         if (state.getGateIndex() >= 4 && work >= transit.circuit().getDurationMillis()) {
             double efficiency = AUTOMATIC_EFFICIENCY + (1 - AUTOMATIC_EFFICIENCY) * Math.min(4, state.getGateHits()) / 4.0;
-            QiInventory purified = purify(cargo, efficiency);
+            QiInventory purified = purify(cargo, efficiency, purification(plan.body));
             plan.release(cargo.totalQi() - purified.totalQi());
             double oldDensity = cargo.totalQi() / cargo.volume();
             state.setDensityGain(purified.totalQi() / purified.volume() - oldDensity)
                     .setLaps(state.getLaps() + 1).setGateIndex(0).setGateHits(0).setGateRetryUntil(0);
-            // 同一独立批次持续循环，不在每圈临时回填而与低密度库存混合。
-            transit = withProgress(transit, 0, purified);
+            // 游炁时同一独立批次持续循环，不在每圈临时回填而与低密度库存混合；真炁以后卸下气态再补料。
+            QiInventory batch = trueQiOrAbove(plan.body) ? exchangeGas(plan, transit, purified) : purified;
+            if (batch.totalQi() == 0) {
+                // 炼成的气态已卸下，八脉里也凑不够一批游离态：撤掉空批次，周天停下。
+                stop(plan, state, null, NO_FREE_QI);
+                removeCircuit(plan);
+                return null;
+            }
+            transit = withProgress(transit, 0, batch);
             double duration = CircuitTransport.durationMillis(plan.body.structure(), transit.circuit().getConnectionIdsList(),
-                    transit.circuit().getInternalDistanceMeters(), purified.totalQi(), transit.throughputPerSecond());
+                    transit.circuit().getInternalDistanceMeters(), batch.totalQi(), transit.throughputPerSecond());
             transit = new QiTransit(transit.id(), transit.connectionId(), transit.cargo(), now + (long) duration,
                     transit.throughputPerSecond(), transit.status(), transit.circuit().toBuilder().setDurationMillis(duration).build());
         }
@@ -379,17 +399,18 @@ public final class HumanCultivation {
         return transit;
     }
 
-    public static QiInventory purify(QiInventory cargo, double efficiency) {
+    public static QiInventory purify(QiInventory cargo, double efficiency, Purification purification) {
         // 使用实际密度增量算损耗；抵达上限后继续运转不再扣提纯损耗。
         var refined = new ArrayList<Qi>();
         for (Qi qi : cargo.entries()) {
-            if (qi.density() >= MAX_DENSITY) {
+            if (qi.density() >= purification.maxDensity()) {
                 refined.add(qi);
                 continue;
             }
             double x = StrictMath.log10(qi.density() / REFINEMENT_REFERENCE_DENSITY);
-            double requestedGain = DENSITY_GAIN * (1 - DENSITY_SLOWDOWN * x) * Math.max(0, Math.min(1, efficiency));
-            double density = Math.min(MAX_DENSITY, qi.density() * StrictMath.pow(10, requestedGain));
+            double clampedEfficiency = Math.max(0, Math.min(1, efficiency));
+            double requestedGain = purification.densityGain() * (1 - DENSITY_SLOWDOWN * x) * clampedEfficiency;
+            double density = Math.min(purification.maxDensity(), qi.density() * StrictMath.pow(10, requestedGain));
             double actualGain = StrictMath.log10(density / qi.density());
             double amount = qi.amount() * StrictMath.pow(10, -LOSS_EXPONENT * actualGain);
             double loss = qi.amount() - amount;
@@ -409,15 +430,26 @@ public final class HumanCultivation {
             state.setReason("等待已有运输抵达");
             return null;
         }
-        String origin = MERIDIANS.stream().max(Comparator.comparingDouble(id -> plan.get("l:" + id).totalQi())).orElseThrow();
+        // 游炁取内腔里的全部真元；真炁以后只取无属性游离态，从游离态最多的那条起步。
+        boolean trueQi = trueQiOrAbove(plan.body);
+        String origin = MERIDIANS.stream()
+                .max(Comparator.comparingDouble(id -> batchSource(plan, id).totalQi()))
+                .orElseThrow();
+        String key = "l:" + origin;
         // 先检查可启动批次再扣源，停止启动不能遗失尚未进入在途的微量余额。
-        if (plan.available("l:" + origin, BATCH_QI, Double.MAX_VALUE).totalQi() < 1e-6) {
-            stop(plan, state, null, "内腔没有可运转真元");
+        QiInventory startable = trueQi
+                ? plan.availableFree(key, BATCH_QI, Double.MAX_VALUE)
+                : plan.available(key, BATCH_QI, Double.MAX_VALUE);
+        // 真炁以后凑不够起炼下限就不开环，免得为零头空转耗脑耐力。
+        double minimum = trueQi ? HumanCultivationRules.configured().trueQiMinimumBatch() : MIN_LAUNCH_QI;
+        if (startable.totalQi() < minimum) {
+            stop(plan, state, null, trueQi ? NO_FREE_QI : NO_QI);
             return null;
         }
-        QiInventory cargo = plan.take("l:" + origin, BATCH_QI, Double.MAX_VALUE);
+        QiInventory cargo = plan.take(key, startable);
         List<String> route = route(plan.body, origin);
-        double duration = CircuitTransport.durationMillis(plan.body.structure(), route, INTERNAL_METERS, cargo.totalQi(), THROUGHPUT);
+        double duration = CircuitTransport.durationMillis(plan.body.structure(), route, INTERNAL_METERS,
+                cargo.totalQi(), THROUGHPUT);
         var circuit = BodyMessages.ControlledCircuit.newBuilder().addAllConnectionIds(route)
                 .setInternalDistanceMeters(INTERNAL_METERS).setDurationMillis(duration).build();
         var transit = new QiTransit(CIRCUIT, new Anatomy.ConnectionId(route.get(7)), cargo,
@@ -425,6 +457,53 @@ public final class HumanCultivation {
         state.setReason("");
         replace(plan, transit);
         return transit;
+    }
+
+    private static QiInventory exchangeGas(HumanQiPlan plan, QiTransit transit, QiInventory purified) {
+        // 炼到气态的（连同带属性的）卸进这一圈的终点经脉，没炼到的游离态留在批里；卸过货才补料，
+        // 不然每圈补进的新游离态会把批里炼了一半的稀释回去。
+        QiInventory kept = HumanQiPlan.freeQi(purified);
+        QiInventory unloaded = QiAccounting.debit(purified, kept);
+        if (unloaded.totalQi() == 0) {
+            return purified;
+        }
+        String end = endMeridian(plan.body, transit);
+        String endKey = "l:" + end;
+        plan.add(endKey, unloaded);
+        String source = MERIDIANS.stream()
+                .max(Comparator.comparingDouble(id -> HumanQiPlan.freeQi(plan.get("l:" + id)).totalQi()))
+                .orElseThrow();
+        String sourceKey = "l:" + source;
+        double room = source.equals(end) ? Double.MAX_VALUE : refillRoom(plan, transit, kept, end);
+        QiInventory refill = plan.availableFree(sourceKey, BATCH_QI - kept.totalQi(), Math.max(0, room));
+        if (kept.totalQi() + refill.totalQi() < HumanCultivationRules.configured().trueQiMinimumBatch()) {
+            // 补上也凑不够起炼下限：没炼完的零头留在终点经脉，交给调用方停下周天。
+            plan.add(endKey, kept);
+            return QiInventory.empty();
+        }
+        return QiInventory.combine(List.of(kept, plan.take(sourceKey, refill)));
+    }
+
+    private static double refillRoom(HumanQiPlan plan, QiTransit transit, QiInventory kept, String end) {
+        // 批次预约在终点经脉上：补料后的批次、卸下的气态和终点原有余额合起来不能超过它的内腔容量。
+        // 快照里的预约是本圈起步时的货量，提纯缩掉的体积这时才腾出来。
+        return plan.lumenRoom(end) + transit.cargo().volume() - kept.volume();
+    }
+
+    private static QiInventory batchSource(HumanQiPlan plan, String meridianId) {
+        // 周天能从这条八脉取走的真元：游炁什么都取，真炁以后只取无属性游离态。
+        QiInventory lumen = plan.get("l:" + meridianId);
+        return trueQiOrAbove(plan.body) ? HumanQiPlan.freeQi(lumen) : lumen;
+    }
+
+    private static Purification purification(BodySnapshot body) {
+        // 游炁用固定的封顶规则；真炁以后用服务端配置的增益，炼到气态为止。
+        return trueQiOrAbove(body) ? Purification.trueQi(HumanCultivationRules.configured()) : Purification.WANDERING;
+    }
+
+    private static boolean trueQiOrAbove(BodySnapshot body) {
+        // 突破以后的境界都按真炁规则运转周天。
+        return body.realm() != Realm.WANDERING_QI;
     }
 
     private static void breakthrough(HumanQiPlan plan, CultivationState.Builder state, QiTransit transit, double seconds) {
@@ -459,8 +538,15 @@ public final class HumanCultivation {
 
     private static QiInventory phaseChange(QiInventory inventory) {
         // 同属性的相变候选归并到气态，原有低密度条目仍保留游离态。
-        return QiInventory.combine(inventory.entries().stream().map(qi -> new QiInventory(List.of(
-                qi.density() >= CANDIDATE_DENSITY && qi.density() < .1 ? new Qi(qi.attribute(), qi.amount(), .1) : qi))).toList());
+        return QiInventory.combine(inventory.entries().stream()
+                .map(qi -> new QiInventory(List.of(phaseChange(qi))))
+                .toList());
+    }
+
+    private static Qi phaseChange(Qi qi) {
+        // 0.09 到 0.1 之间的候选相变为气态，其余条目原样。
+        boolean candidate = qi.density() >= CANDIDATE_DENSITY && qi.density() < GAS_DENSITY;
+        return candidate ? new Qi(qi.attribute(), qi.amount(), GAS_DENSITY) : qi;
     }
 
     private static double candidateQi(HumanQiPlan plan, QiTransit transit) {
@@ -499,12 +585,28 @@ public final class HumanCultivation {
 
     private static void returnCircuit(HumanQiPlan plan, QiTransit transit) {
         // 在途货物回到原出发经脉，等待期间不占用闭环容量。
-        if (transit != null) {
-            String origin = CircuitTransport.meridian(plan.body.structure(),
-                    CircuitTransport.connection(plan.body.structure(), transit.connectionId().value()).to()).value();
-            plan.add("l:" + origin, transit.cargo());
-            plan.activity.clearCircuits().addCircuits(CircuitChange.newBuilder().setId(CIRCUIT));
+        if (transit == null) {
+            return;
         }
+        plan.add("l:" + endMeridian(plan.body, transit), transit.cargo());
+        // 同一步里刚发出的批次还没进身体，Framework 那边没有可撤的周天，只撤回这次发出。
+        boolean launchedThisStep = plan.body.transits().stream().noneMatch(item -> item.id().equals(CIRCUIT));
+        if (launchedThisStep) {
+            plan.activity.clearCircuits();
+        } else {
+            removeCircuit(plan);
+        }
+    }
+
+    private static void removeCircuit(HumanQiPlan plan) {
+        // 本次提交只留一项周天变更：撤掉唯一的周天批次。
+        plan.activity.clearCircuits().addCircuits(CircuitChange.newBuilder().setId(CIRCUIT));
+    }
+
+    private static String endMeridian(BodySnapshot body, QiTransit transit) {
+        // 闭环的最后一段连接通向出发经脉，一圈的终点就是起点。
+        var connection = CircuitTransport.connection(body.structure(), transit.connectionId().value());
+        return CircuitTransport.meridian(body.structure(), connection.to()).value();
     }
 
     private static void replace(HumanQiPlan plan, QiTransit transit) {

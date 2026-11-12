@@ -10,6 +10,7 @@ import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.Environment
 import dev.kizuna.meridian.human.server.HumanContent;
 import dev.kizuna.meridian.human.server.HumanDamage;
 import dev.kizuna.meridian.human.server.HumanBreathingRules;
+import dev.kizuna.meridian.human.server.HumanCultivationRules;
 import dev.kizuna.meridian.human.server.HumanDamageRules;
 import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.human.server.HumanRevival;
@@ -102,6 +103,9 @@ public final class HumanFabric implements ModInitializer {
         // 吐纳配方随人体内容包一次建成，份额要在任何身体宿主载入内容之前读好。
         HumanBreathingRules.configure(FabricLoader.getInstance().getConfigDir()
                 .resolve(HumanBreathingRules.FILE_NAME));
+        // 周天每圈按配置的增益提纯，要在任何身体宿主运转周天之前读好。
+        HumanCultivationRules.configure(FabricLoader.getInstance().getConfigDir()
+                .resolve(HumanCultivationRules.FILE_NAME));
         // 宿主生命周期独立于客户端窗口，关掉 UI 后玩家移动仍正常记入同一身体。
         HumanTechniqueEffects.initialize();
         HumanControl.initialize();

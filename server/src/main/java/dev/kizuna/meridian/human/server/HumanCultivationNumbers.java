@@ -4,6 +4,7 @@ package dev.kizuna.meridian.human.server;
 public final class HumanCultivationNumbers {
     public static final double MAX_DENSITY = .099;
     public static final double CANDIDATE_DENSITY = .09;
+    public static final double GAS_DENSITY = .1; // 突破相变与真炁以后周天提纯的终点，正好是气态下限。
     public static final double CANDIDATE_QI = 50;
     public static final double STARTING_WALL_QI = 60;
     public static final double BREAKTHROUGH_SECONDS = 60;

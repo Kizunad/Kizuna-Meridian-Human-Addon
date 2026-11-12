@@ -4,6 +4,7 @@ import dev.kizuna.meridian.protocol.pb.BreathingMessages.BreathAction;
 import dev.kizuna.meridian.protocol.pb.BreathingMessages.BreathControl;
 import dev.kizuna.meridian.protocol.pb.GatheringMessages.GatheringRequest;
 import dev.kizuna.meridian.protocol.pb.GatheringMessages.GatheringView;
+import dev.kizuna.meridian.protocol.pb.GatheringMessages.InspectGathering;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.CommandReceipt;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.protocol.pb.ActivityMessages.BodyActivity;
@@ -17,8 +18,6 @@ import java.util.List;
 /** 仅测试装配使用：操作已登录玩家的正式吐纳会话并读取已提交回执。 */
 public final class HumanGameTestAccess {
     private static final long MILLIS_PER_TICK = 50;
-    private static final int BEGIN_SEQUENCE = 1;
-    private static final int END_SEQUENCE = 2;
 
     private HumanGameTestAccess() {
         // 不替换身体、时钟或环境，服务器 tick 正常推进吐纳。
@@ -35,32 +34,55 @@ public final class HumanGameTestAccess {
         var control = BreathControl.newBuilder()
                 .setAction(BreathAction.BEGIN_BREATHING)
                 .setAutomatic(true /* automatic */)
-                .setSequence(BEGIN_SEQUENCE)
+                .setSequence(nextSequence(player))
                 .build();
-        return send(player, "human-test-breathe", control);
+        return send(player, control);
+    }
+
+    public static void readMiddleJiaoScroll(ServerPlayer player) {
+        // 和右键《炁脉札记》、中焦残卷相同：身体进度记下两卷已读，中焦窗口的按键才被接受。
+        HumanPlayerBody body = HumanTechniqueHost.state().find(player.getUUID());
+        var progress = body.progress().toBuilder()
+                .setQiNotesRead(true /* read */)
+                .setMiddleJiaoScrollRead(true /* read */)
+                .build();
+        body.writeProgress(progress);
     }
 
     public static GatheringView endBreathing(ServerPlayer player) {
         // 和玩家关掉修炼窗口相同：按公开吐纳请求结束 breathe 开始的这次吐纳。
         var control = BreathControl.newBuilder()
                 .setAction(BreathAction.END_BREATHING)
-                .setSequence(END_SEQUENCE)
+                .setSequence(nextSequence(player))
                 .build();
-        return send(player, "human-test-end-breathing", control);
+        return send(player, control);
     }
 
-    private static GatheringView send(ServerPlayer player, String requestId, BreathControl control) {
+    private static long nextSequence(ServerPlayer player) {
+        // 吐纳控制序号只能递增：先查看当前会话的序号再接着用，同一名玩家可以反复开始、结束吐纳。
+        var inspect = GatheringRequest.newBuilder()
+                .setInspect(InspectGathering.getDefaultInstance());
+        return exchange(player, inspect).getBreathing().getSequence() + 1;
+    }
+
+    private static GatheringView send(ServerPlayer player, BreathControl control) {
         // 正式吐纳入口按当前游戏时刻处理；拒绝说明测试准备有误。
         var request = GatheringRequest.newBuilder()
+                .setBreath(control);
+        return exchange(player, request);
+    }
+
+    private static GatheringView exchange(ServerPlayer player, GatheringRequest.Builder operation) {
+        // 每次请求用新的请求 ID，绑定这名玩家的身体，按当前游戏时刻提交。
+        var request = operation
                 .setProtocolVersion(1)
-                .setRequestId(requestId)
+                .setRequestId(UUID.randomUUID().toString())
                 .setBodyId(player.getStringUUID())
-                .setBreath(control)
                 .build();
         long now = player.level().getServer().overworld().getGameTime() * MILLIS_PER_TICK;
         var response = HumanTechniqueHost.state().find(player.getUUID()).gather(now, request);
         if (response.hasFailure()) {
-            throw new IllegalStateException("真实吐纳请求失败：" + control.getAction() + " " + response.getFailure());
+            throw new IllegalStateException("真实吐纳请求失败：" + request.getOperationCase() + " " + response.getFailure());
         }
         return response.getView();
     }
