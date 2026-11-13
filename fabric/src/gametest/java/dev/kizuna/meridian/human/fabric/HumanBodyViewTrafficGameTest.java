@@ -290,7 +290,7 @@ public final class HumanBodyViewTrafficGameTest {
                 "新构型发过之后又重带了构型");
     }
 
-    private static void travelToNether(GameTestHelper context, HumanTechniqueTestPlayer fixture) {
+    static void travelToNether(GameTestHelper context, HumanTechniqueTestPlayer fixture) {
         // 原版传送换维度，触发 Fabric 的换维度回调。
         var player = fixture.player;
         var nether = player.level().getServer().getLevel(Level.NETHER);
@@ -329,7 +329,7 @@ public final class HumanBodyViewTrafficGameTest {
         subscribe(fixture);
     }
 
-    private static void unlock(HumanTechniqueTestPlayer fixture) {
+    static void unlock(HumanTechniqueTestPlayer fixture) {
         // 走正式命令读完全部卷、开全脉。
         command(fixture, "meridian progression unlock");
         command(fixture, "meridian opening complete @s all");
@@ -520,7 +520,7 @@ public final class HumanBodyViewTrafficGameTest {
         }
     }
 
-    private static GatheringResponse decodeGathering(byte[] bytes) {
+    static GatheringResponse decodeGathering(byte[] bytes) {
         // 同上，吐纳回执通道。
         try {
             return GatheringResponse.parseFrom(bytes);

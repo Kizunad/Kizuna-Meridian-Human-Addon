@@ -12,6 +12,7 @@ import dev.kizuna.meridian.human.client.HumanPresentation;
 import dev.kizuna.meridian.protocol.pb.PresentationMessages.*;
 import dev.kizuna.meridian.human.server.HumanBirth;
 import dev.kizuna.meridian.human.server.HumanContent;
+import dev.kizuna.meridian.human.server.HumanDamage;
 import dev.kizuna.meridian.human.server.HumanOpening;
 import dev.kizuna.meridian.human.server.HumanOpeningPolicy;
 import dev.kizuna.meridian.human.server.HumanOpeningViews;
@@ -31,6 +32,8 @@ import dev.kizuna.meridian.server.GatheringSession;
 import dev.kizuna.meridian.protocol.pb.GatheringMessages.*;
 import dev.kizuna.meridian.protocol.pb.BreathingMessages.*;
 import dev.kizuna.meridian.protocol.pb.OpeningPolicyMessages.*;
+import dev.kizuna.meridian.protocol.pb.HealthMessages.DamageBody;
+import dev.kizuna.meridian.protocol.pb.HealthMessages.DamageKind;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -46,6 +49,9 @@ import static dev.kizuna.meridian.protocol.pb.OperationUiMessages.OperationMeter
 
 /** 整体回归：独立附属内容经过公开协议安装，并用真实权威处理器完成聚气。 */
 public class HumanGatheringTest {
+    /** 手动吐纳每步之间宿主推进的时间，和其他手动吐纳用例一样。 */
+    private static final long BREATH_STEP_MILLIS = 250;
+
     @Test
     public void eightWanderingQiMeridiansFormMiddleJiaoCycleAndRegularCycleCrossesBothSides() {
         // 只保留游炁八脉之间的连接，仍须完整成环；不能借心经或奇经绕路。
@@ -784,6 +790,86 @@ public class HumanGatheringTest {
         assertTrue(session.view().getBreathing().getStaminaRatio() > .9);
     }
 
+    @Test
+    public void deathWhileBreathingCargoIsInTransitDoesNotSettleDeadBody() throws IOException {
+        // 吐纳产物还在经脉途中时身体死亡；宿主照常每 tick 推进会话，死体不能被结算，也不能抛错让宿主暂停整具身体。
+        var host = new Host(source(100), null);
+        var session = host.session();
+        session.enableBreathing(HumanContent.breathing());
+        breatheUntilDispatched(host, session);
+        destroyHead(host);
+        BodySnapshot dead = host.body();
+        assertTrue(dead.vitality().dead());
+        assertTrue("死亡时在途没有散回环境：" + dead.transits(), dead.transits().isEmpty());
+        host.now += BREATH_STEP_MILLIS;
+        session.advance();
+        assertEquals(dead, host.body());
+        session.close();
+    }
+
+    private static void breatheUntilDispatched(Host host, GatheringSession<String> session) throws IOException {
+        // 照着最近的粒子吸气，直到肺里的产物派上经脉：吐纳器官出口连接上有了在途货物。
+        int maxInhaleSteps = 18;
+        Set<String> outlets = breathingOutlets(session.view());
+        long sequence = 1;
+        breath(session, sequence++, BreathAction.BEGIN_BREATHING, .5, .4);
+        boolean dispatched = false;
+        for (int step = 0; step < maxInhaleSteps && !dispatched; step++) {
+            BreathParticle particle = nearestParticle(session);
+            breath(session, sequence++, BreathAction.INHALE, particle.getX(), particle.getY(), particle.getZ());
+            host.now += BREATH_STEP_MILLIS;
+            session.advance();
+            dispatched = host.body().transits().stream()
+                    .anyMatch(transit -> outlets.contains(transit.connectionId().value()));
+        }
+        assertTrue("吸气后吐纳产物没有派上经脉", dispatched);
+    }
+
+    private static Set<String> breathingOutlets(GatheringView view) {
+        // 吐纳配送只走吐纳器官的出口连接；人体只给经脉之间的连接开被动扩散，出口上的在途都是吐纳派出去的。
+        List<String> organs = view.getBreathing().getOrganIdsList();
+        return view.getChoicesList().stream()
+                .filter(choice -> organs.contains(choice.getOrganId()))
+                .map(GatheringChoice::getConnectionId)
+                .collect(Collectors.toSet());
+    }
+
+    private static BreathParticle nearestParticle(GatheringSession<String> session) {
+        // 和其他手动吐纳用例一样瞄准离默认入口最近的粒子。
+        return session.view().getBreathing().getParticlesList().stream()
+                .min(java.util.Comparator.comparingDouble(value -> Math.pow(value.getX() - .5, 2)
+                        + Math.pow(value.getY() - .4, 2) + Math.pow(value.getZ() - .5, 2)))
+                .orElseThrow();
+    }
+
+    private static void destroyHead(Host host) {
+        // 头部归零独立致死；走宿主的可信伤害入口，和战斗伤害一样按当前版本提交。
+        double headHp = 20;
+        var head = BodyMessages.HealthTarget.newBuilder()
+                .setPartId("head")
+                .build();
+        var damage = DamageBody.newBuilder()
+                .setSourceId("test:attack")
+                .setDamageType("test:direct")
+                .setKind(DamageKind.CUSTOM)
+                .setHit(head)
+                .setDamageHp(headHp)
+                .build();
+        var command = BodyCommand.newBuilder()
+                .setBodyId("test-human")
+                .setExpectedRevision(host.body().revision())
+                .setDamageBody(damage)
+                .build();
+        var request = RequestEnvelope.newBuilder()
+                .setProtocolVersion(1)
+                .setRequestId("breathing-death")
+                .setBodyCommand(command)
+                .build();
+        byte[] reply = host.handler().handleHealthEffect("owner", MeridianProtocol.encodeRequest(request));
+        var response = MeridianProtocol.decodeResponse(reply);
+        assertTrue(response.toString(), response.hasCommandCommitted());
+    }
+
     private static void breath(GatheringSession<String> session, long sequence, BreathAction action, double x, double y)
             throws IOException {
         // 未指定深度时按公开默认入口平面处理，保留普通开始与结束操作的简明调用。
@@ -1289,7 +1375,7 @@ public class HumanGatheringTest {
         }
 
         private BodyCommandHandler<String> handler() {
-            // 同一真实处理器负责授权、去重、环境事务和时间事件；附属只提供配方目录。
+            // 同一真实处理器负责授权、去重、环境事务和时间事件；附属只提供配方目录，伤害按人体裁决，和正式宿主一样。
             return new BodyCommandHandler<>((context, command) -> {
                 if (context.equals("owner") && command.getBodyId().equals("test-human")) {
                     return Optional.of(context);
@@ -1299,7 +1385,8 @@ public class HumanGatheringTest {
                     (context, body) -> TimeAdvancePlan.newBuilder().setTarget(time(now))
                             .setBiologicalSecondsPerSimulationSecond(1).setMode(TimeAdvanceMode.ACTIVE).build(),
                     store, (context, receipt, before, after) -> receipts.add(receipt), registry.recipes(),
-                    (context, body, plan) -> Optional.of("test-region"), registry.actions(), registry.openings());
+                    (context, body, plan) -> Optional.of("test-region"), registry.actions(), registry.openings(),
+                    context -> false, new HumanDamage());
         }
 
         private BodySnapshot body() {

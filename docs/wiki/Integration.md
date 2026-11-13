@@ -223,7 +223,7 @@ Human 验证在线绑定与身体 ID，按请求原有 revision 向唯一命令�
 肺的器官摄入修正同时放大接触采样量与每秒上限，默认每肺每秒 1 元。
 Framework 按整秒窗口保存实际已摄入原料，重连不重置当秒额度；肺配方的 20% 炼化比例不变。
 
-Fabric 宿主现在接收 `meridian:gathering_request`，返回 `meridian:gathering_response`，载荷分别为框架原有 `GatheringRequest` / `GatheringResponse`。身份只取连接玩家 UUID，时间取服务端模拟 tick；客户端只能上传公开的吸呼方向、瞄准和序号。网络入口限制消息大小及每模拟秒请求数；同一身体的摄入、行走、恢复与保存共用权威 Store。Human 源码不引用 UI 类，运行时 UI 仍是必装接线。
+Fabric 宿主现在接收 `meridian:gathering_request`，返回 `meridian:gathering_response`，载荷分别为框架原有 `GatheringRequest` / `GatheringResponse`。身份只取连接玩家 UUID，时间取服务端模拟 tick；客户端只能上传公开的吸呼方向、瞄准和序号。网络入口限制消息大小及每模拟秒请求数；同一身体的摄入、行走、恢复与保存共用权威 Store。Human 源码不引用 UI 类，运行时 UI 仍是必装接线。登录、换维度和重生时宿主重建采集会话并主动推一次回执；新会话的吐纳序号从头算，回执带新的 `session_id`，UI 按会话比较序号，所以重生后吐纳窗照常更新。
 
 主世界按 `config/meridian-environment.toml` 的区域尺度与默认地形配置首次生成库存，读取区域中心群系元数据，不扫描方块。相同区域内玩家共享来源和供给预算；换区先结清旧区间，30 秒续窗保留剩余库存。其他维度暂不提供环境摄入。身体、区域、释放账户、待入账队列、释放 ID 和回执一起保存到 `meridian_human.dat`；玩家死亡、开脉中断和加工损耗按发生时位置排队，在区域续窗时从默认账户转回区域，非主世界留在默认账户。肺摄入回执的炼化损耗仍直接归还选定区域，不重复归位。当前接入未执行区域间扩散。
 
