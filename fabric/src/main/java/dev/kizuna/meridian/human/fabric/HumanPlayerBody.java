@@ -7,6 +7,7 @@ import dev.kizuna.meridian.core.BodyTimeAdvancement;
 import dev.kizuna.meridian.core.Qi;
 import dev.kizuna.meridian.core.QiInventory;
 import dev.kizuna.meridian.core.Realm;
+import dev.kizuna.meridian.core.TimeCursor;
 import dev.kizuna.meridian.core.TissueCapabilities;
 import dev.kizuna.meridian.human.pb.CultivationMessages.CultivationInput;
 import dev.kizuna.meridian.human.server.HumanBirth;
@@ -58,6 +59,7 @@ import dev.kizuna.meridian.server.InMemoryBodyStore;
 import dev.kizuna.meridian.server.OpeningSession;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostRequest;
+import dev.kizuna.meridian.technique.server.TechniqueBodyStamp;
 import dev.kizuna.meridian.technique.server.TechniqueErrors;
 import dev.kizuna.meridian.technique.server.TechniqueHost;
 
@@ -76,6 +78,8 @@ final class HumanPlayerBody {
     static final double WALK_ENDURANCE_SECONDS = 300;
     static final double SPRINT_ENDURANCE_SECONDS = 75;
     private static final double MILLIS_PER_SECOND = 1000;
+    /** 身体年龄与模拟时间同速；结清计划、事件边界和寿元终点都用这个倍率。 */
+    static final double AGING_RATE = 1;
     private static final int GATHERING_PROTOCOL_VERSION = 1;
     private static final AddonRegistry CONTENT = installContent();
 
@@ -112,6 +116,8 @@ final class HumanPlayerBody {
     private BreathingView lastBreathing = BreathingView.getDefaultInstance();
     private BodySnapshot cultivationChecked;
     private boolean cultivationNeeded;
+    private BodySnapshot lifespanChecked;
+    private long lifespanEndMillis;
 
     HumanPlayerBody(BodySnapshot saved, List<CommandReceipt> receipts, QiInventory releasedQi) {
         // 同时恢复身体、成功回执及释放账，不能在登录时重建疲劳或重发历史释放。
@@ -156,7 +162,7 @@ final class HumanPlayerBody {
                 .build();
         return TimeAdvancePlan.newBuilder()
                 .setTarget(target)
-                .setBiologicalSecondsPerSimulationSecond(1)
+                .setBiologicalSecondsPerSimulationSecond(AGING_RATE)
                 .setMode(timeMode)
                 .build();
     }
@@ -416,6 +422,37 @@ final class HumanPlayerBody {
         return store.find(id).orElseThrow();
     }
 
+    /**
+     * 不结清、不提交时报出的身体戳：已提交的版本，以及此刻 settle(millis) 以后身体时钟会停在哪一毫秒。
+     * 结清会失败或停在别处时为空：身体已死，millis 早于已记账的时间或身体时钟，寿元在 millis 或之前用完。
+     */
+    Optional<TechniqueBodyStamp> bodyStamp(long millis) {
+        BodySnapshot body = snapshot();
+        if (body.vitality().dead()) {
+            return Optional.empty();
+        }
+        if (millis < accountedMillis || millis < body.settledAt().elapsedMillis()) {
+            // settle 会拒绝倒退的时间，inspect 答不出身体。
+            return Optional.empty();
+        }
+        if (lifespanEndMillis(body) <= millis) {
+            // 结清会停在寿元终点并提交死亡，时钟不是 millis；判定与 Framework 结清一致，终点等于目标也算死亡。
+            return Optional.empty();
+        }
+        return Optional.of(new TechniqueBodyStamp(body.revision(), millis));
+    }
+
+    private long lifespanEndMillis(BodySnapshot body) {
+        // 快照不可变：同一份快照只算一次寿元终点，每 tick 的读数不重复解寿元。
+        if (body != lifespanChecked) {
+            lifespanEndMillis = BodyTimeAdvancement.nextLifespanBoundary(body, AGING_RATE)
+                    .map(TimeCursor::elapsedMillis)
+                    .orElse(Long.MAX_VALUE);
+            lifespanChecked = body;
+        }
+        return lifespanEndMillis;
+    }
+
     List<CommandReceipt> receipts() {
         // 去重事实与身体放进同一份世界持久化记录；Store 按身体分开存，直接取这一具的，不用遍历全体玩家再过滤。
         return store.receipts(id);
@@ -437,7 +474,7 @@ final class HumanPlayerBody {
                 (caller, requested) -> caller.equals(id.value()) && requested.equals(id),
                 (caller, body) -> TimeAdvancePlan.newBuilder()
                         .setTarget(BodyProtobuf.toTime(body.settledAt()).toBuilder().setElapsedMillis(targetMillis))
-                        .setBiologicalSecondsPerSimulationSecond(1).setMode(timeMode).build(),
+                        .setBiologicalSecondsPerSimulationSecond(AGING_RATE).setMode(timeMode).build(),
                 body -> sourceId == null ? Optional.empty() : store.environmentSource(sourceId), CONTENT.recipes());
         gathering.enableBreathing(HumanContent.breathing());
         gatheringOutput = output;
@@ -903,7 +940,7 @@ final class HumanPlayerBody {
         if (timeMode == TimeAdvanceMode.LIFESPAN_ONLY) {
             mode = BodyTimeAdvancement.Mode.LIFESPAN_ONLY;
         }
-        boolean eventDue = BodyTimeAdvancement.nextEventBoundary(body, 1, mode)
+        boolean eventDue = BodyTimeAdvancement.nextEventBoundary(body, AGING_RATE, mode)
                 .map(boundary -> boundary.elapsedMillis() <= targetMillis).orElse(false);
         if (targetMillis != body.settledAt().elapsedMillis() || eventDue) {
             execute(BodyCommand.newBuilder().setAdvanceTime(AdvanceTime.getDefaultInstance()));
@@ -940,7 +977,7 @@ final class HumanPlayerBody {
             nextBoundaryMillis = Long.MAX_VALUE;
             return;
         }
-        long existingEvent = BodyTimeAdvancement.nextEventBoundary(body, 1, BodyTimeAdvancement.Mode.ACTIVE)
+        long existingEvent = BodyTimeAdvancement.nextEventBoundary(body, AGING_RATE, BodyTimeAdvancement.Mode.ACTIVE)
                 .map(boundary -> boundary.elapsedMillis()).orElse(Long.MAX_VALUE);
         boolean hasFatigue = body.tissueStates().stream().anyMatch(tissue -> tissue.fatigue() > 0)
                 || body.organStates().stream().anyMatch(organ -> organ.fatigueJoules() > 0);

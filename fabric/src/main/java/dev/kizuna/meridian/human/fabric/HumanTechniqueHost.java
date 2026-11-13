@@ -9,6 +9,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueActi
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostFacts;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostRequest;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostResponse;
+import dev.kizuna.meridian.technique.server.TechniqueBodyStamp;
 import dev.kizuna.meridian.technique.server.TechniqueHostEntrypoint;
 import dev.kizuna.meridian.technique.server.TechniqueHost;
 import dev.kizuna.meridian.technique.server.TechniqueErrors;
@@ -22,6 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -180,6 +182,24 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
             return encode(response.setUnbound(true /* unbound */));
         }
         return execute(current, player, body, request);
+    }
+
+    @Override
+    public Optional<TechniqueBodyStamp> bodyStamp(UUID entityUuid) {
+        // 只在 inspect 会原样答出身体时给读数：认领条件与 exchange 相同，暂停的身体不给。
+        Binding current = binding;
+        if (current == null || !current.server().isSameThread() || current.state() == null) {
+            return Optional.empty();
+        }
+        if (current.server().getPlayerList().getPlayer(entityUuid) == null || current.failed().test(entityUuid)
+                || !ready.contains(entityUuid)) {
+            return Optional.empty();
+        }
+        HumanPlayerBody body = current.state().find(entityUuid);
+        if (body == null) {
+            return Optional.empty();
+        }
+        return body.bodyStamp(nowMillis(current));
     }
 
     private byte[] execute(Binding current, ServerPlayer player, HumanPlayerBody body,

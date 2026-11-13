@@ -15,6 +15,14 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 所有操作在服务器主线程执行，其他线程返回 `ACCESS_DENIED`。`inspect` 先结算身体到主世界累计 tick
 乘以 50 毫秒，与 Human 其他入口使用相同时钟；返回的 `BodySnapshot.settled_at` 含身体时刻。
 
+功法库的可选读数 `bodyStamp` 不结清、不提交，只回两个数：玩家身体已提交的 revision，以及此刻 `inspect`
+结清后 `settled_at` 会停的毫秒（同一个主世界时钟）。认领条件与 `exchange` 相同，非主线程、离线、未就绪或已暂停时不给；
+身体已死、时刻早于已记账时间，或寿元会在这一毫秒或之前用完（结清会停在寿元终点并判死）时也不给，功法库退回 `inspect`。
+寿元终点按已提交快照缓存，老化倍率与结清计划共用 `HumanPlayerBody.AGING_RATE`。
+身体有在途真元时，Human 每 tick 到了到达边界就结清并提交，revision 跟着变，读数帮功法库跳过安静 tick、
+帮战斗 HUD 跳过重算的机会就少：开过脉、真元充足的玩家十二正经成环，被动扩散一直在环上转，revision 几乎每 tick 都变；
+在途真元走完以后 revision 才停下来。
+
 身体回执同时采集服务端实体的 `held_items`：主副手物品 ID、排序后的注册表标签、显式
 `damageable/contains_items` 与主手侧。空手仍提供无字段的 `HeldItem` 消息。
 `damageable` 表达物品是否具有耐久结构（最大耐久大于 0），带 `Unbreakable` 的工具仍属于有耐久物品。
@@ -197,6 +205,9 @@ Framework 尚无复活规则，原版重生不会创建新身体或恢复 HP；�
 `startCallbackCancelsAfterDeliveryWithoutRecursion` 覆盖 START 回调取消后的唯一 STOP 和限速清理；
 `synchronousResubmissionDistinguishesExecutingFromSucceeded` 覆盖同步重提交、两种身份内容冲突及失败后的重试；
 `disappearedTargetCancelsAndUnlocksRealPlayer` 覆盖目标销毁后取消与实体约束清理。
+`HumanPlayerBodyStampTest` 校验身体戳与随后结清的版本、时钟一致，寿元终点前一毫秒照常报数、终点当毫秒和死后答不出，
+早于已记账时间也答不出；`HumanTechniqueStampGameTest` 用真实登录的玩家核对读数时钟与 `inspect` 回执的
+`settled_at` 相同，非主线程、身体暂停（撤销身体视图通道）和断线后都不给读数。
 `castingBlocksUseInputUnlessTechniqueAllowsIt` 让两名玩家分别施放只差放行声明的两式，各自用盾、开活板门、剪羊：
 未声明的三样都被拦，声明放行的三样都生效。
 旧身体回归在服务器启动读档前，将专用玩家的无标签身体写入真实 `meridian_human.dat`，
