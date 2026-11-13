@@ -106,7 +106,15 @@ public final class HumanRevivalGameTest {
     }
 
     static ServerPlayer killAndRespawn(GameTestHelper context, HumanTechniqueTestPlayer fixture) {
-        // 可信躯干大伤害通过人体蔓延耗尽所有部位，再走原版死亡和客户端重生指令。
+        // 夹具登录时的那个实体第一次死。
+        return killAndRespawn(context, fixture, fixture.player);
+    }
+
+    static ServerPlayer killAndRespawn(GameTestHelper context, HumanTechniqueTestPlayer fixture,
+                                       ServerPlayer player) {
+        // 可信躯干大伤害通过人体蔓延耗尽所有部位，再走原版死亡和客户端重生指令。重生过的玩家传当前实体。
+        // 重生后的身体每 tick 都在恢复，先结算到现在再读版本，伤害命令才不会撞版本。
+        fixture.body().settle(now(player));
         var hit = HealthTarget.newBuilder().setPartId("chest").build();
         var damage = DamageBody.newBuilder()
                 .setSourceId("human_test:revival")
@@ -125,12 +133,11 @@ public final class HumanRevivalGameTest {
                 .setRequestId(UUID.randomUUID().toString())
                 .setBodyCommand(command)
                 .build();
-        var result = fixture.body().applyHealth(now(fixture.player), request);
+        var result = fixture.body().applyHealth(now(player), request);
         context.assertTrue(result.hasCommandCommitted(), "致死伤害未提交：" + result);
-        var player = fixture.player;
         player.hurtServer(player.level(), player.damageSources().genericKill(), LETHAL_DAMAGE);
         context.assertTrue(fixture.body().snapshot().vitality().dead(), "玩家死亡没有记录到身体");
-        context.assertTrue(!fixture.player.isAlive(), "原版玩家未死亡");
+        context.assertTrue(!player.isAlive(), "原版玩家未死亡");
         // 26.2 死亡后要等客户端重生流程才重新计加载期，直接调玩家管理器会让新玩家一直无敌。
         player.connection.handleClientCommand(
                 new ServerboundClientCommandPacket(ServerboundClientCommandPacket.Action.PERFORM_RESPAWN));

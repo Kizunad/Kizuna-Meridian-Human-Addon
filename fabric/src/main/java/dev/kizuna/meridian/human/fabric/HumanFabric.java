@@ -406,7 +406,7 @@ public final class HumanFabric implements ModInitializer {
             refreshBodyView(player.getUUID());
             failed.remove(player.getUUID());
             ProgressionFabric.publishProgress(player);
-            player.sendSystemMessage(Component.translatable(HumanLang.BODY_BOUND));
+            HumanHints.welcome(player);
         } catch (RuntimeException failure) {
             fail(player, failure);
         }
@@ -710,6 +710,7 @@ public final class HumanFabric implements ModInitializer {
             body.revive(millis(player.level().getServer()));
             state.setDirty();
             player.sendOverlayMessage(Component.literal(HumanRevival.message()));
+            HumanHints.revived(player);
         } catch (RuntimeException failure) {
             fail(player, failure);
         }

@@ -72,6 +72,7 @@ public final class HumanTechnique6aGameTest {
     private static final double SPEED_PER_TICK = 0.5;
     private static final double TARGET_HEIGHT_DIFFERENCE = 4;
     private static final double TARGET_HORIZONTAL_DISTANCE = 3;
+    private static final Vec3 TEST_AREA_STAND = new Vec3(1.5, 1, 1.5);
     private static final String CAST_ID = "locked_cast";
     private static final int BLOCKED_LANE = 1;
     private static final int ALLOWED_LANE = 3;
@@ -250,7 +251,10 @@ public final class HumanTechnique6aGameTest {
         try (var fixture = new HumanTechniqueTestPlayer(context)) {
             var target = context.spawn(EntityTypes.COW, 1, 1, 1);
             try {
-                Vec3 position = fixture.player.position();
+                // 玩家刚登录的那个 tick，出生点一带的区块不一定已经加载，放过去的靶子按 UUID 查不到；
+                // 先把玩家挪进测试区，靶子跟着放在测试区里。
+                Vec3 position = context.absoluteVec(TEST_AREA_STAND);
+                fixture.player.snapTo(position.x, position.y, position.z, 0, 0);
                 target.setPos(position.add(0, TARGET_HEIGHT_DIFFERENCE, TARGET_HORIZONTAL_DISTANCE));
                 fixture.player.setDeltaMovement(0, SPEED_PER_TICK, 0);
                 var toward = impulse(ImpulseDirection.TOWARD_TARGET).toBuilder()

@@ -1,5 +1,7 @@
 {
-  "message.meridian_human_host.body_bound": "人体已绑定：/meridian body status 查看动作，/meridian watch body on 实时观察下肢余力。",
+  "message.meridian_human_host.welcome.notes": "修炼从一卷《炁脉札记》开始：地牢、废弃矿井、沙漠神殿、丛林神庙的箱子里有，骷髅手里偶尔也拿着。拿到后右键，再按 %s 打开修炼页。",
+  "message.meridian_human_host.welcome.techniques": "村民、商人、掠夺者、卫道士、唤魔者、女巫都会功法；亲手打倒他们，有机会掉下他们会的功法卷轴。",
+  "message.meridian_human_host.revival.explained": "重生之后：各处的伤只回到一成，其余要慢慢养；真元在死时散尽，要重新吐纳；筋肉乏力，歇一阵自己恢复。经脉、境界和学会的功法都还在。",
   "commands.meridian_human_host.target_not_player": "%s 不是玩家，没有人体",
   "commands.meridian_human_host.status.no_body": "%s 没有可查看的身体",
   "commands.meridian_human_host.watch.body.on": "已开启下肢余力实时观察",
