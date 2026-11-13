@@ -29,8 +29,8 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 装物标志识别原版潜影盒的 `BlockEntityTag.Items` 与收纳袋的根 `Items` 非空库存列表，
 空列表返回 false；不展开嵌套容器，也不推断第三方自定义库存格式。
 
-腿法 `inspect` 还回传服务端实体的 `grounded/in_water/climbing/riding/gliding`，以及脚部装备的
-护甲值和剩余耐久。无靴时这些可选事实保持缺省，宿主不会把腿甲或实体总护甲计入腿击。
+腿法和拳掌的起手条件读 `inspect` 回传的服务端实体 `grounded/in_water/climbing/riding/gliding`；
+腿法另读脚部装备的护甲值和剩余耐久。无靴时这些可选事实保持缺省，宿主不会把腿甲或实体总护甲计入腿击。
 
 `activity` 使用库的固定调用身份 `meridian_technique:caster`，只授权当前玩家身体的 `ExecuteActivity`。
 原始请求 ID、活动与 `expected_revision` 交给 Framework `handleActivity`，版本冲突等失败码原样返回。
@@ -42,19 +42,36 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 非主世界没有来源时保留在默认账户。此流程与死亡、开脉和加工损耗共用
 [区域环境服务](Environment-Host.md)及其存档规则。
 
-## 腿击
+## 拳脚打击
 
-`EffectIntent.leg_strike` 由 `HumanLegStrikeEffects` 在服务器主线程执行。宿主先按生物资格、视线、
-距离、前后腿朝向和扇形筛选目标，再交给功法库的 `TechniqueStrikeTargets` 处理单击上限、整式目标
-上限和 `dedup_group` 去重。单体射线没有命中时使用声明角度的后备锥，不会凭空命中实体。
+`EffectIntent.leg_strike` 和 `EffectIntent.limb_strike` 都由 `HumanLimbStrikes` 在服务器主线程执行。
+腿击先经功法库 `TechniqueLimbStrikes.fromLeg` 换成同形的肢击意图，此后拳与腿走同一段代码。
+执行器的施放者是 `LivingEntity`，玩家和生物的差别由 `HumanLimbStrikes.Host` 给出：敌我谓词、
+单体打击的声明目标、靴子护甲与磨损、重击声的声音类别。玩家宿主 `HumanPlayerLimbHost` 与持物打击
+共用 `HumanControl.allowsTarget`，单体按准星取目标、不认请求带的目标，靴子取脚部装备栏，声音归玩家类别。
+其他附属给生物出拳脚时各建一个执行器、传入自己的 `Host`。
 
-伤害剂量按起手保存的书级规则计算为 `base_damage + armor_damage × boot_armor`，再乘本击倍率。
-`damage_type_id` 是目录提供的完整命名空间 ID，Human 直接解析该 ID 查 Damage 注册表，不附加固定
-命名空间。击退支持推开、横推、绊倒和踩落；正面盾挡在 `knockback_when_blocked` 开启时仍执行
-击退，Damage 类型自身的 `#minecraft:bypasses_shield` 标签决定是否绕过盾。最后一击只磨脚部装备一次，
-创造模式不磨损；每次实际出手播放一次原版重击声，并在收势时重置原版攻击冷却。
+宿主先按生物资格、视线、距离、前后朝向和扇形筛选目标，再交给功法库的 `TechniqueStrikeTargets`
+处理单击上限、整式目标上限和 `dedup_group` 去重。单体射线没有命中时使用后备锥，不会凭空命中实体。
 
+腿的剂量是 `(base_damage + armor_damage × boot_armor) × 本击倍率`；拳的剂量是书级
+`arm_rules.base_damage × 本击倍率`，`BOTH_ARMS` 再乘 1.2。手里的东西不参与出拳伤害，也不扣耐久。
+`damage_type_id` 是目录提供的完整命名空间 ID，Human 直接解析该 ID 查 Damage 注册表，不附加固定命名空间。
+整次打击包在 `VanillaStrikeContext.attack` 里，Damage 按声明的类型结算出力侧系数和疲劳。
+出力侧由伤害类型标签决定，执行器不另选手臂：前手拳的类型进 `#meridian:off_hand`，双手拳进
+`#meridian:two_handed`，后手拳两者都不进；左撇子由 Damage 按主手侧整体镜像。
+前手拳挥副手，后手拳、双手拳和腿挥主手。
+
+击退支持推开、横推、绊倒、踩落和掀起；正面盾挡在 `knockback_when_blocked` 开启时仍执行击退，
+Damage 类型自身的 `#minecraft:bypasses_shield` 标签决定是否绕过盾。
 绊倒清空目标水平速度，并将竖直速度设为向上 2 米/秒（原版每 tick 0.1 格），覆盖此前的下落或跳跃速度。
+掀起先按 `knockback` 推开（可为 0），再把竖直速度设为 `lift_speed ÷ 20 × (1 − 击退抗性)`，保留推开后的水平速度。
+腿法最后一击只磨脚部装备一次，创造模式不磨损；出拳不磨任何物品。每次实际出手播放一次原版重击声，
+收势时释放本次施放的去重记录，并重置原版攻击冷却。
+
+每个选中的目标结算完，执行器向功法服务 `reportStrike` 回报一次：真正受伤报 `HIT`，没受伤但被正面盾挡下报
+`BLOCKED`，其余（无敌、挥空）不报。回报的施放身份和精确式取自意图的 `cast_id` 与 `technique`；
+旧存档承接来的意图可能没有 `technique`，这时照常结算、不回报。玩家和生物施放者走同一处回报。
 
 ## 冲量与表现
 
@@ -227,6 +244,9 @@ Framework 尚无复活规则，原版重生不会创建新身体或恢复 HP；�
 `HumanCombatTestCatalog` 从运行时破门斩资源派生测试目录，只降低出生身体的境界、经脉数量和费用门槛；
 效果时刻、曲线、物品规则、倍率、承接与冷却保持正式定义，费用与做功仍由唯一权威身体结算。
 测试玩家仍经过真实登录和网络处理，观察子类仅记录原版速度入口与目标伤害入口。
+`HumanFistGameTest` 用只在 GameTest 源集注册的「测试拳」目录（`human_fist_test/technique_catalog.txtpb`，
+一书一卷三式：前手、后手、双手）走正式学习、施放与宿主协议；入水和攀爬由测试玩家子类直接给出，
+因为原版这两项只在实体 tick 里刷新，骑乘、滑翔和离地走原版入口。
 
 | 玩家契约 | GameTest |
 | --- | --- |
@@ -239,6 +259,13 @@ Framework 尚无复活规则，原版重生不会创建新身体或恢复 HP；�
 | 未施放时重击减半移动，身体时钟到期恢复原速 | `staggerSlowsMovementUntilExpiry` |
 | 一次性末击挥空、最后一个物品及重试幂等 | `disposableLastStrikeConsumesOnceEvenOnMissAndRetry` |
 | 双手剂量与两臂做功、副手只用对应手臂 | `twoHandDoseAndOffhandDamageChargeCorrectArms` |
+| 腿击读声明伤害类型、只在生存模式磨靴；绊倒速度 | `legStrikeReadsDeclaredDamageAndWearsBootOnlyInSurvival` / `legTripClearsHorizontalMotionAndLiftsFallingOrJumpingTargets` |
+| 空手、剑、盾、火把都能出拳，物品不动 | `fistsCastWithAnyHeldItemAndLeaveItUntouched` |
+| 出拳剂量 1.5 × 倍率、双手 × 1.2，前手副手侧、后手主手侧、左撇子镜像 | `fistDoseAndMuscleSideFollowArmAndMainHand` |
+| 掀起竖直速度乘 (1 − 击退抗性) | `liftVerticalSpeedScalesWithKnockbackResistance` |
+| 水中、空中、攀爬、骑乘、滑翔出拳回 NOT_GROUNDED，身体不变 | `offGroundFistIsRefusedBeforePayment` |
+| 真实施放打中，回报一次 HIT，施放身份与精确式对得上 | `realFistCastReportsHitWithCastAndTechnique` |
+| 正面举盾挡下回报 BLOCKED；不带所属式的意图不回报 | `shieldBlockedFistReportsBlockedButUnnamedIntentStaysSilent` |
 | 起手后换物、选定手为空落空且不退费 | `switchingSelectedHandItemChangesHitAndEmptyHandMissStillPays` |
 | 斧先破盾、剑先格挡再冷却、方块不破盾 | `axeBreaksShieldBeforeDamage` / `swordBlocksThenCoolsShield` / `blockItemDoesNotDisableShield` |
 | 同队玩家不受功法伤害，移出队伍后同一式命中 | `sameTeamPlayerIsNotStruckUntilTeamsSplit` |

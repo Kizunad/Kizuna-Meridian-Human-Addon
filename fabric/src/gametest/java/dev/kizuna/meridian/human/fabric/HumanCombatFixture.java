@@ -57,11 +57,16 @@ final class HumanCombatFixture implements AutoCloseable {
     final List<Target> targets = new ArrayList<>();
 
     HumanCombatFixture(GameTestHelper context) {
+        // 默认玩家只记录速度变化，其余行为都是原版。
+        this(context, ObservedPlayer::new);
+    }
+
+    HumanCombatFixture(GameTestHelper context, HumanTechniqueTestPlayer.PlayerFactory factory) {
         // 每次测试隔离玩家与空间，使用生存模式覆盖实际磨损与做功。
         // 26.2 的 GameTest 会用屏障把结构四周围起来（1.20.1 自动运行时不围），
         // 玩家站在结构中心，身后两格的目标才不会落进屏障墙里挡住视线。
         this.context = context;
-        human = new HumanTechniqueTestPlayer(context, UUID.randomUUID(), ObservedPlayer::new);
+        human = new HumanTechniqueTestPlayer(context, UUID.randomUUID(), factory);
         var relative = new BlockPos(STRUCTURE_CENTER, PLAYER_HEIGHT, STRUCTURE_CENTER);
         Vec3 position = Vec3.atBottomCenterOf(context.absolutePos(relative));
         human.player.snapTo(position.x, position.y, position.z, 0, 0);

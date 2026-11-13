@@ -1,6 +1,9 @@
 {
   "replace": false,
   "values": [
-    "meridian_human_test:leg_strike"
+    "meridian_human_test:leg_strike",
+    "meridian_human_test:fist_front",
+    "meridian_human_test:fist_rear",
+    "meridian_human_test:fist_both"
   ]
 }

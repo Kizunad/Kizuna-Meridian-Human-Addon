@@ -1,0 +1,212 @@
+# 测试拳：只供 Human 游戏测试的一书一卷三式，前手、后手、双手各打一记单体拳。
+# 放在 data/ 之外，只由 HumanFistTestCatalog 读入；费用沿用测试功法的小额气与呼吸做功。
+schema_version: 1
+namespace: "human_fist_test"
+binding_templates { id: "human:adult" version: 1 }
+books {
+  id: "human_fist_test:fist"
+  display_name: "测试拳"
+  arm_rules {
+    ignore_held_items: true
+    require_grounded: true
+    base_damage { value: 1.5 unit: DAMAGE_POINT }
+  }
+}
+volumes {
+  id: "human_fist_test:fists"
+  book_id: "human_fist_test:fist"
+  display_name: "测试拳"
+  techniques { id: "human_fist_test:front" version: 1 }
+  techniques { id: "human_fist_test:rear" version: 1 }
+  techniques { id: "human_fist_test:both" version: 1 }
+  scroll_item: false
+}
+
+definitions {
+  id: "human_fist_test:front"
+  version: 1
+  category: ATTACK
+  minimum_realm: WANDERING_QI
+  slots {
+    id: "source"
+    module: MERIDIAN
+    tags: "human:hand_meridian"
+    minimum_count: 1
+    maximum_count: 1
+    require_opened: true
+  }
+  slots {
+    id: "breath"
+    module: TISSUE
+    tags: "human:breathing"
+    minimum_count: 1
+    maximum_count: 1
+  }
+  cost {
+    qi {
+      slot_id: "source"
+      attribute: "meridian:none"
+      phase: FREE
+      amount { value: 0.001 unit: QI }
+      distribution: EACH
+    }
+    work {
+      slot_id: "breath"
+      force { value: 1 unit: NEWTON }
+      power { value: 1 unit: WATT }
+      duration { value: 0.01 unit: SECOND }
+    }
+  }
+  phases {
+    warmup_millis: 100
+    active_millis: 0
+    recovery_millis: 100
+    interruptible_by_damage: false
+  }
+  cooldown_millis: 1000
+  effects {
+    at_millis: 100
+    limb_strike {
+      shape: SINGLE_TARGET
+      facing: STRIKE_FORWARD
+      distance { value: 3 unit: METER }
+      angle { value: 60 unit: DEGREE }
+      multiplier { value: 1.2 unit: RATIO }
+      maximum_targets: 1
+      cast_target_limit: 1
+      arm: FRONT_ARM
+      damage_type_id: "meridian_human_test:fist_front"
+      knockback_kind: PUSH
+      knockback { value: 0.2 unit: RATIO }
+      knockback_when_blocked: true
+      last_strike: true
+      dedup_group: "front"
+    }
+  }
+}
+
+definitions {
+  id: "human_fist_test:rear"
+  version: 1
+  category: ATTACK
+  minimum_realm: WANDERING_QI
+  slots {
+    id: "source"
+    module: MERIDIAN
+    tags: "human:hand_meridian"
+    minimum_count: 1
+    maximum_count: 1
+    require_opened: true
+  }
+  slots {
+    id: "breath"
+    module: TISSUE
+    tags: "human:breathing"
+    minimum_count: 1
+    maximum_count: 1
+  }
+  cost {
+    qi {
+      slot_id: "source"
+      attribute: "meridian:none"
+      phase: FREE
+      amount { value: 0.001 unit: QI }
+      distribution: EACH
+    }
+    work {
+      slot_id: "breath"
+      force { value: 1 unit: NEWTON }
+      power { value: 1 unit: WATT }
+      duration { value: 0.01 unit: SECOND }
+    }
+  }
+  phases {
+    warmup_millis: 100
+    active_millis: 0
+    recovery_millis: 100
+    interruptible_by_damage: false
+  }
+  cooldown_millis: 1000
+  effects {
+    at_millis: 100
+    limb_strike {
+      shape: SINGLE_TARGET
+      facing: STRIKE_FORWARD
+      distance { value: 3 unit: METER }
+      angle { value: 60 unit: DEGREE }
+      multiplier { value: 1.2 unit: RATIO }
+      maximum_targets: 1
+      cast_target_limit: 1
+      arm: REAR_ARM
+      damage_type_id: "meridian_human_test:fist_rear"
+      knockback_kind: PUSH
+      knockback { value: 0.2 unit: RATIO }
+      knockback_when_blocked: true
+      last_strike: true
+      dedup_group: "rear"
+    }
+  }
+}
+
+definitions {
+  id: "human_fist_test:both"
+  version: 1
+  category: ATTACK
+  minimum_realm: WANDERING_QI
+  slots {
+    id: "source"
+    module: MERIDIAN
+    tags: "human:hand_meridian"
+    minimum_count: 1
+    maximum_count: 1
+    require_opened: true
+  }
+  slots {
+    id: "breath"
+    module: TISSUE
+    tags: "human:breathing"
+    minimum_count: 1
+    maximum_count: 1
+  }
+  cost {
+    qi {
+      slot_id: "source"
+      attribute: "meridian:none"
+      phase: FREE
+      amount { value: 0.001 unit: QI }
+      distribution: EACH
+    }
+    work {
+      slot_id: "breath"
+      force { value: 1 unit: NEWTON }
+      power { value: 1 unit: WATT }
+      duration { value: 0.01 unit: SECOND }
+    }
+  }
+  phases {
+    warmup_millis: 100
+    active_millis: 0
+    recovery_millis: 100
+    interruptible_by_damage: false
+  }
+  cooldown_millis: 1000
+  effects {
+    at_millis: 100
+    limb_strike {
+      shape: SINGLE_TARGET
+      facing: STRIKE_FORWARD
+      distance { value: 3 unit: METER }
+      angle { value: 60 unit: DEGREE }
+      multiplier { value: 1.2 unit: RATIO }
+      maximum_targets: 1
+      cast_target_limit: 1
+      arm: BOTH_ARMS
+      damage_type_id: "meridian_human_test:fist_both"
+      knockback_kind: PUSH
+      knockback { value: 0.2 unit: RATIO }
+      knockback_when_blocked: true
+      last_strike: true
+      dedup_group: "both"
+    }
+  }
+}

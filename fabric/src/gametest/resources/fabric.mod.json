@@ -11,7 +11,8 @@
     ],
     "meridian_technique_catalog": [
       "dev.kizuna.meridian.human.fabric.HumanTechniqueTestCatalog",
-      "dev.kizuna.meridian.human.fabric.HumanCombatTestCatalog"
+      "dev.kizuna.meridian.human.fabric.HumanCombatTestCatalog",
+      "dev.kizuna.meridian.human.fabric.HumanFistTestCatalog"
     ],
     "fabric-gametest": [
       "dev.kizuna.meridian.human.fabric.HumanInnerVisionGameTest",
@@ -30,7 +31,8 @@
       "dev.kizuna.meridian.human.fabric.HumanProjectileConvergenceGameTest",
       "dev.kizuna.meridian.human.fabric.HumanRealmCommandGameTest",
       "dev.kizuna.meridian.human.fabric.HumanBodyViewTrafficGameTest",
-      "dev.kizuna.meridian.human.fabric.HumanTechniqueStampGameTest"
+      "dev.kizuna.meridian.human.fabric.HumanTechniqueStampGameTest",
+      "dev.kizuna.meridian.human.fabric.HumanFistGameTest"
     ]
   }
 }
