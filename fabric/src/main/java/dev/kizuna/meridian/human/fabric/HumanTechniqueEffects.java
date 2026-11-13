@@ -42,9 +42,7 @@ final class HumanTechniqueEffects {
     private static final GameRule<Boolean> PLAYER_BREAK_BLOCKS = GameRuleBuilder.forBoolean(true /* defaultValue */)
             .category(GameRuleCategory.PLAYER)
             .buildAndRegister(Identifier.fromNamespaceAndPath("meridian_human", "technique_player_break_blocks"));
-    private final Map<UUID, TechniqueWorldEffects> worldEffects = new HashMap<>();
-    private final Map<UUID, HumanLimbStrikes> limbEffects = new HashMap<>();
-    private final Map<UUID, HumanProjectileEffects> projectileEffects = new HashMap<>();
+    private final Map<UUID, Executors> executors = new HashMap<>();
     // 每个玩家正在施放的 cast ID 及该式是否放行右键。
     private final Map<UUID, Map<String, MovementIntent>> castingIds = new HashMap<>();
     private final Map<UUID, Map<String, EffectIntent>> requests = new HashMap<>();
@@ -129,15 +127,15 @@ final class HumanTechniqueEffects {
             HumanTechniquePresentation.apply(player, effect);
             HumanTechniquePresentation.EVENT.invoker().apply(player, submission.requestId(), effect);
         } else if (effect.hasLegStrike() || effect.hasLimbStrike()) {
-            limbs(player).strike(effect);
+            executors(player).limbs().strike(effect);
         } else if (effect.hasTargetLock()) {
-            projectiles(player).lockTarget(effect);
+            executors(player).projectiles().lockTarget(effect);
         } else if (effect.hasLaunchProjectile()) {
-            projectiles(player).launch(effect);
+            executors(player).projectiles().launch(effect);
         } else if (effect.hasWeaponStrike()) {
-            world(player).strike(effect);
+            executors(player).world().strike(effect);
         } else if (effect.hasBreakBlocks()) {
-            world(player).breakBlocks(effect);
+            executors(player).world().breakBlocks(effect);
         } else {
             throw new TechniqueErrors.HostRejected(FailureCode.MODULE_UNAVAILABLE);
         }
@@ -203,10 +201,24 @@ final class HumanTechniqueEffects {
         }
     }
 
-    private TechniqueWorldEffects world(ServerPlayer player) {
+    private Executors executors(ServerPlayer player) {
+        // 执行器和里面的敌我判断都绑定玩家实体；复活或看完终末之诗回主世界时服务端换了新实体，
+        // 这里整组重建，不让旧实体出手。
+        Executors current = executors.get(player.getUUID());
+        if (current == null || current.player() != player) {
+            // 拳脚、射箭的敌我规则与兵器一致。
+            current = new Executors(player, world(player),
+                    new HumanLimbStrikes(player, new HumanPlayerLimbHost(player)),
+                    new HumanProjectileEffects(player, target -> HumanControl.allowsTarget(player, target)));
+            executors.put(player.getUUID(), current);
+        }
+        return current;
+    }
+
+    private static TechniqueWorldEffects world(ServerPlayer player) {
         // 世界工具调用 Damage 的一次出手上下文，横扫多目标共享做功前系数。
         // 框架不预筛敌我；玩家不打原版同伴（同队、自己驯服的动物），/team 分开后照常可打。
-        return worldEffects.computeIfAbsent(player.getUUID(), id -> new TechniqueWorldEffects(player,
+        return new TechniqueWorldEffects(player,
                 () -> player.level().getGameRules().get(PLAYER_BREAK_BLOCKS)
                         ? TechniqueWorldEffects.Policy.PLAYER : TechniqueWorldEffects.Policy.PLAYER_NO_BREAK,
                 target -> HumanControl.allowsTarget(player, target),
@@ -214,7 +226,7 @@ final class HumanTechniqueEffects {
                     try (var ignored = VanillaStrikeContext.attack(actor, source)) {
                         strike.run();
                     }
-                }, "meridian_door_breaker"));
+                }, "meridian_door_breaker");
     }
 
     private static void movement(ServerPlayer player, EffectIntent effect) {
@@ -264,9 +276,7 @@ final class HumanTechniqueEffects {
         effects.remove(playerId);
         executingRequests.remove(playerId);
         executingEffects.remove(playerId);
-        worldEffects.remove(playerId);
-        limbEffects.remove(playerId);
-        projectileEffects.remove(playerId);
+        executors.remove(playerId);
         castingIds.remove(playerId);
         HumanTechniquePresentation.forget(playerId);
     }
@@ -277,9 +287,7 @@ final class HumanTechniqueEffects {
         effects.clear();
         executingRequests.clear();
         executingEffects.clear();
-        worldEffects.clear();
-        limbEffects.clear();
-        projectileEffects.clear();
+        executors.clear();
         castingIds.clear();
         HumanTechniquePresentation.clear();
     }
@@ -331,33 +339,15 @@ final class HumanTechniqueEffects {
 
     private record EffectKey(String castId, String effectId) { }
 
-    private HumanLimbStrikes limbs(ServerPlayer player) {
-        // 拳脚执行器绑定玩家实体；复活或从末地返回换了新实体时重建，不让旧实体出手。
-        HumanLimbStrikes limbs = limbEffects.get(player.getUUID());
-        if (limbs == null || !limbs.actsFor(player)) {
-            limbs = new HumanLimbStrikes(player, new HumanPlayerLimbHost(player));
-            limbEffects.put(player.getUUID(), limbs);
-        }
-        return limbs;
-    }
-
-    private HumanProjectileEffects projectiles(ServerPlayer player) {
-        // 每个玩家独立维护施放锁点，敌我规则与玩家近战保持一致。
-        return projectileEffects.computeIfAbsent(player.getUUID(),
-                ignored -> new HumanProjectileEffects(player, target -> HumanControl.allowsTarget(player, target)));
-    }
+    /** 一名玩家的兵器、拳脚、射箭执行器，都是为 player 这个实体建的。 */
+    private record Executors(ServerPlayer player, TechniqueWorldEffects world, HumanLimbStrikes limbs,
+                             HumanProjectileEffects projectiles) { }
 
     private void finish(ServerPlayer player, String castId) {
-        // 收势同时释放两类打击的去重游标，并重置原版攻击冷却。
-        world(player).finish(castId);
-        UUID playerId = player.getUUID();
-        HumanLimbStrikes limbs = limbEffects.get(playerId);
-        if (limbs != null) {
-            limbs.finish(castId);
-        }
-        HumanProjectileEffects projectiles = projectileEffects.get(playerId);
-        if (projectiles != null) {
-            projectiles.finish(castId);
-        }
+        // 收势释放这次施放的打击去重游标和瞄准锁点，并重置原版攻击冷却。
+        Executors current = executors(player);
+        current.world().finish(castId);
+        current.limbs().finish(castId);
+        current.projectiles().finish(castId);
     }
 }

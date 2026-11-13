@@ -105,7 +105,7 @@ public final class HumanRevivalGameTest {
         }
     }
 
-    private static ServerPlayer killAndRespawn(GameTestHelper context, HumanTechniqueTestPlayer fixture) {
+    static ServerPlayer killAndRespawn(GameTestHelper context, HumanTechniqueTestPlayer fixture) {
         // 可信躯干大伤害通过人体蔓延耗尽所有部位，再走原版死亡和客户端重生指令。
         var hit = HealthTarget.newBuilder().setPartId("chest").build();
         var damage = DamageBody.newBuilder()

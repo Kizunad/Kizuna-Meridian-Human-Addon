@@ -32,7 +32,8 @@
       "dev.kizuna.meridian.human.fabric.HumanRealmCommandGameTest",
       "dev.kizuna.meridian.human.fabric.HumanBodyViewTrafficGameTest",
       "dev.kizuna.meridian.human.fabric.HumanTechniqueStampGameTest",
-      "dev.kizuna.meridian.human.fabric.HumanFistGameTest"
+      "dev.kizuna.meridian.human.fabric.HumanFistGameTest",
+      "dev.kizuna.meridian.human.fabric.HumanReplacedPlayerGameTest"
     ]
   }
 }

@@ -84,11 +84,6 @@ public final class HumanLimbStrikes {
         }
     }
 
-    public boolean actsFor(LivingEntity entity) {
-        // 宿主按实体缓存执行器时，用它判断缓存的是不是同一个实体。
-        return actor == entity;
-    }
-
     public void finish(String castId) {
         // 收势或取消后释放本次施放的去重预算，下一次施放从空集合开始。
         casts.remove(castId);
