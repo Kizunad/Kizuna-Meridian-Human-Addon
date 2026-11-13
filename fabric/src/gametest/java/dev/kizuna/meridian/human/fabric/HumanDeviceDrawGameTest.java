@@ -1,6 +1,7 @@
 package dev.kizuna.meridian.human.fabric;
 
 import dev.kizuna.meridian.core.Qi;
+import dev.kizuna.meridian.core.QiAccounting;
 import dev.kizuna.meridian.core.QiInventory;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.DrawResult;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionDraw;
@@ -32,6 +33,13 @@ public final class HumanDeviceDrawGameTest {
     private static final long WINDOW_TAIL_MILLIS = 200;
     private static final double RELATIVE_TOLERANCE = 1e-6;
     private static final double ABSOLUTE_TOLERANCE = 1e-9;
+    private static final int SECOND_REGION_BLOCK = 8_000;
+    private static final double FURNACE_DRAW_QI = 0.02;
+    private static final double TRICKLE_DRAW_QI = 3.2e-5;
+    private static final int REPEATED_WINDOWS = 20;
+    private static final int DRAWS_PER_WINDOW = 58;
+    private static final long DRAW_OFFSET_MILLIS = 250;
+    private static final long DRAW_STEP_MILLIS = 500;
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void deviceDrawTakesFromRegionAndReturnsNextWindow(GameTestHelper context) {
@@ -71,6 +79,37 @@ public final class HumanDeviceDrawGameTest {
         context.assertTrue(afterReturn.getListOrEmpty("pending_credits").isEmpty(), "放回后队列没清");
         context.assertTrue(close(BodyProtobuf.fromInventory(returned.getInventory()).totalQi(), originalStock.totalQi()),
                 "放回原区域后总量不等于取用前");
+        context.succeed();
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void repeatedDrawsInTwoRegionsAllReturnAtEveryWindowEnd(GameTestHelper context) {
+        // 试玩反例：两处装置各自不停地取小笔。共享账户每加一笔舍入一次，排队的却是取用量本身，
+        // 笔数一多两边差出几个 ULP；容差按区域数算时，到窗尾整种真元都放不回去。
+        // 哪一窗会差出去取决于区域库存的数值，所以连跑多窗，每个窗尾都要放干净。
+        ServerLevel world = context.getLevel();
+        var state = new HumanWorldState();
+        double before = stockQi(state, world, REGION_BLOCK, 0) + stockQi(state, world, SECOND_REGION_BLOCK, 0);
+        for (int window = 0; window < REPEATED_WINDOWS; window++) {
+            long start = window * WINDOW_MILLIS;
+            for (int step = 0; step < DRAWS_PER_WINDOW; step++) {
+                long millis = start + DRAW_OFFSET_MILLIS + step * DRAW_STEP_MILLIS;
+                String id = window + "-" + step;
+                state.draw(draw("gametest:furnace-" + id, world, FURNACE_DRAW_QI), world, millis);
+                state.draw(draw("gametest:trickle-" + id, world, TRICKLE_DRAW_QI, SECOND_REGION_BLOCK, REGION_BLOCK),
+                        world, millis);
+            }
+            long end = start + WINDOW_MILLIS;
+            state.renewEnvironment(end);
+            CompoundTag saved = state.save(new CompoundTag());
+            context.assertTrue(saved.getListOrEmpty("pending_credits").isEmpty(),
+                    "第 " + window + " 窗到窗尾还有取用量没放回");
+            double dust = defaultReleased(saved).totalQi();
+            context.assertTrue(dust < QiAccounting.MIN_TRANSFER_QI, "第 " + window + " 窗放回后默认账户还剩：" + dust);
+        }
+        long finished = REPEATED_WINDOWS * WINDOW_MILLIS;
+        double after = stockQi(state, world, REGION_BLOCK, finished) + stockQi(state, world, SECOND_REGION_BLOCK, finished);
+        context.assertTrue(close(after, before), "放回后两个区域的总量不等于取用前：" + before + " → " + after);
         context.succeed();
     }
 
@@ -243,6 +282,11 @@ public final class HumanDeviceDrawGameTest {
         var position = RegionQuery.newBuilder().setDimensionId(world.dimension().identifier().toString())
                 .setBlockX(blockX).setBlockZ(blockZ).build();
         return RegionDraw.newBuilder().setDrawId(id).setPosition(position).setAmount(amountQi).build();
+    }
+
+    private static double stockQi(HumanWorldState state, ServerLevel world, int blockX, long millis) {
+        // 区域当前库存的总元数。
+        return BodyProtobuf.fromInventory(state.query(world, blockX, REGION_BLOCK, millis).getInventory()).totalQi();
     }
 
     private static double drawnQi(DrawResult result) {

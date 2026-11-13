@@ -49,6 +49,18 @@ public final class ReleasedQiAllocationTest {
     private static final double[][] RELEASE_RANGES = {{0.001, 0.01}, {0.001, 2}};
     // 每 tick 释放一笔的概率：每 tick 都放，或平均五 tick 一笔。
     private static final double[] RELEASE_CHANCES = {1, 0.2};
+    // 11-13 试玩日志连报的几组数值，每行是 {共享账户, 各区域意图…}；意图合计比账户多 3.45–6.43 ULP。
+    private static final double[][] DRAW_PLAYTEST = {
+            {0.1805443694446811, 0.17999999999999994, 5.443694446812655E-4},
+            {0.2005443694446811, 0.19999999999999993, 5.443694446812655E-4},
+            {0.20057639117672116, 0.19999999999999993, 5.763911767213399E-4},
+            {0.2206084129087612, 0.19999999999999993, 6.084129087614144E-4, 0.01999999999999999},
+            {0.24067245637284132, 0.19999999999999993, 6.724563728415633E-4, 0.03999999999999998},
+            {0.24073649983692144, 0.19999999999999993, 7.364998369217122E-4, 0.03999999999999998},
+    };
+
+    /** 区域意图记的是哪个数：身体释放记共享账户实际涨了多少，从环境取用记取用量本身。 */
+    private enum Queued { ACCOUNT_GAIN, REQUESTED_AMOUNT }
 
     @Test
     public void lastShareUsesActualRemainderAndStrictLedgerDrainsExactly() {
@@ -77,6 +89,22 @@ public final class ReleasedQiAllocationTest {
         // 末笔按 ULP 下调到合并后不超过账户，小额照原数转，剩下不超过 1 ULP 的尘埃留在账户。
         assertDrainsWithinUlp(PLAYTEST_ACCOUNT, PLAYTEST_SMALL, PLAYTEST_LARGE);
         assertDrainsWithinUlp(PROBE_ACCOUNT, PROBE_SMALL, PROBE_LARGE);
+    }
+
+    @Test
+    public void recordedDrawSharesFromPlaytestPlanAndDrain() {
+        // 从环境取用时账户每加一笔舍入一次，区域意图记的是取用量本身，两边差出几个 ULP；
+        // 旧容差按区域数算，取用笔数一多就超出，整种真元的归位都被拒绝。
+        for (double[] row : DRAW_PLAYTEST) {
+            var account = inventory(row[0]);
+            var claims = new ArrayList<ReleasedQiAllocation.Claim>();
+            for (int index = 1; index < row.length; index++) {
+                claims.add(claim("region-" + index, row[index]));
+            }
+            var plan = ReleasedQiAllocation.plan(account, claims);
+            assertEquals(claims.size(), plan.size());
+            assertTrue(remaining(execute(account, plan)) <= Math.ulp(row[0]));
+        }
     }
 
     @Test
@@ -112,12 +140,32 @@ public final class ReleasedQiAllocationTest {
             for (double[] range : RELEASE_RANGES) {
                 for (double chance : RELEASE_CHANCES) {
                     for (int run = 0; run < STAGGERED_RUNS; run++) {
-                        rejections.addAll(staggeredWindows(regions, range, chance, seeds.nextLong()));
+                        rejections.addAll(staggeredWindows(regions, range, chance, seeds.nextLong(),
+                                Queued.ACCOUNT_GAIN));
                     }
                 }
             }
         }
         assertTrue("错开窗口下被拒绝 " + rejections.size() + " 次，前几次：" + rejections.stream().limit(5).toList(),
+                rejections.isEmpty());
+    }
+
+    @Test
+    public void staggeredRegionWindowsNeverRejectQueuedDraws() {
+        // 熬药从环境取用：取用量进共享账户，同一个数排进原区域的意图。条件和上一条相同。
+        var seeds = new Random(SIMULATION_SEED);
+        var rejections = new ArrayList<String>();
+        for (int regions = MIN_REGIONS; regions <= MAX_REGIONS; regions++) {
+            for (double[] range : RELEASE_RANGES) {
+                for (double chance : RELEASE_CHANCES) {
+                    for (int run = 0; run < STAGGERED_RUNS; run++) {
+                        rejections.addAll(staggeredWindows(regions, range, chance, seeds.nextLong(),
+                                Queued.REQUESTED_AMOUNT));
+                    }
+                }
+            }
+        }
+        assertTrue("取用归位被拒绝 " + rejections.size() + " 次，前几次：" + rejections.stream().limit(5).toList(),
                 rejections.isEmpty());
     }
 
@@ -159,7 +207,8 @@ public final class ReleasedQiAllocationTest {
         assertFalse(failure.getMessage().contains("暂停"));
     }
 
-    private static List<String> staggeredWindows(int regions, double[] range, double chance, long seed) {
+    private static List<String> staggeredWindows(int regions, double[] range, double chance, long seed,
+                                                 Queued queued) {
         // 每个区域 600 tick 一窗、相位随机；账户与区域意图按宿主的逐笔 double 加法累计。
         // 宿主每 tick 按全部意图重算计划，只把到期区域的明细整批扣转；被拒绝时保留意图，与宿主保留队列一致。
         var random = new Random(seed);
@@ -175,8 +224,10 @@ public final class ReleasedQiAllocationTest {
         for (int tick = 0; tick < STAGGERED_TICKS; tick++) {
             if (random.nextDouble() < chance) {
                 double before = account;
-                account += Math.exp(logMin + random.nextDouble() * logSpan);
-                intents.merge("region-" + random.nextInt(regions), account - before, Double::sum);
+                double amount = Math.exp(logMin + random.nextDouble() * logSpan);
+                account += amount;
+                intents.merge("region-" + random.nextInt(regions),
+                        queued == Queued.ACCOUNT_GAIN ? account - before : amount, Double::sum);
             }
             if (intents.isEmpty()) {
                 continue;

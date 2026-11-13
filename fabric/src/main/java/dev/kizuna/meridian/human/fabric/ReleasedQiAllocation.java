@@ -22,6 +22,9 @@ final class ReleasedQiAllocation {
 
     record Claim(String sourceId, Qi qi) { }
 
+    /** 意图合计与共享账户相差不超过账户的这个比例时，按舍入处理。 */
+    private static final BigDecimal ROUNDING_SHARE = new BigDecimal("1e-9");
+
     private ReleasedQiAllocation() {
         // 分配器只算候选，验证和执行必须使用同一份候选数量。
     }
@@ -40,9 +43,10 @@ final class ReleasedQiAllocation {
             allTransferable &= claim.qi().amount() >= QiAccounting.MIN_TRANSFER_QI;
         }
         BigDecimal difference = new BigDecimal(available.amount()).subtract(requested).abs();
-        // 每笔浮点合并和扣转允许一个 ULP 的表示误差；数量级之外的缺账仍然拒绝。
-        BigDecimal roundingBound = new BigDecimal(Math.ulp(available.amount()))
-                .multiply(BigDecimal.valueOf(sorted.size() + 1L));
+        // 账户和意图各自逐笔相加，每笔释放或取用都可能差半个 ULP，差多少看笔数，从区域数推不出来。
+        // 十亿分之一以内算舍入：末笔承接这点差额，总数仍以共享账户为准；差得更多才是真的缺账。
+        BigDecimal roundingBound = new BigDecimal(available.amount()).multiply(ROUNDING_SHARE)
+                .max(new BigDecimal(Math.ulp(available.amount())).multiply(BigDecimal.valueOf(sorted.size() + 1L)));
         boolean exhaustsAccount = allTransferable && difference.compareTo(roundingBound) <= 0;
         return split(available, sorted, exhaustsAccount ? Allocation.EXHAUST : Allocation.PRESERVE_REMAINDER);
     }
