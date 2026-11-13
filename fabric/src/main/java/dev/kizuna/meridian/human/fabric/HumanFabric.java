@@ -53,6 +53,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.SharedConstants;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.registries.Registries;
@@ -117,6 +118,7 @@ public final class HumanFabric implements ModInitializer {
         // 宿主生命周期独立于客户端窗口，关掉 UI 后玩家移动仍正常记入同一身体。
         HumanTechniqueEffects.initialize();
         HumanControl.initialize();
+        CultivationStateTrigger.register();
         HumanStaggerLock.initialize();
         HumanTempo.initialize();
         HumanOrganRefineHost.initialize();
@@ -784,6 +786,10 @@ public final class HumanFabric implements ModInitializer {
                         && bodyViewDue(id, server.getTickCount())) {
                     var projection = dev.kizuna.meridian.human.server.HumanCultivation.bodyView(body.snapshot());
                     publishBodyView(player, projection);
+                }
+                // 修炼进度每秒按身体现状判断一次。
+                if (server.getTickCount() % SharedConstants.TICKS_PER_SECOND == 0) {
+                    CultivationStateTrigger.TRIGGER.trigger(player, body.snapshot());
                 }
                 receipts.due(id, server.getTickCount()).ifPresent(receipt -> sendReceipt(player, receipt));
                 if (watching.contains(id) && (changed || server.getTickCount() % 20 == 0)) {
