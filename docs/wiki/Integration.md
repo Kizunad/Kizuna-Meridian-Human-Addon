@@ -129,7 +129,7 @@ Java 宿主将 `HumanDamage` 装配为框架 `BodyDamageHandler`；必装 Fabric
 
 宿主确认效果来源、身份和时间后，通过 `BodyCommandHandler.handleHealthEffect` 提交 `DamageBody`、`HealBody`、`RestoreFatigue`、`ConfirmBodyDeath` 或 `SetPartHealthLimits`。普通网络命令入口拒绝这些效果，客户端不能自行报告伤害、治疗或恢复成功。治疗和恢复剂量由实际物品或能力附属提供，Human 不新增第二套算子。经脉结构伤势修复与扣物品联合事务仍待实现。
 
-Fabric 宿主通过 `meridian_health_host` entrypoint 提供 Framework `BodyHealthHost`：交换 `HealthHostRequest` / `HealthHostResponse` Protobuf 字节，只允许服务端主线程操作在线且实际绑定的玩家。查询先结算可信模拟时间，效果保留调用方请求 ID 和预期 revision；成功效果附带由同一请求回执读取的 `HealthResult`，供效果附属核验保命事实，查询不附带。幂等重试返回当前身体与原始固定事实；宿主暂停或拒绝时返回原失败码，不能转由另一套账本处理。身体、回执与释放账户仍保存于同一个世界状态。
+Fabric 宿主通过 `meridian_health_host` entrypoint 提供 Framework `BodyHealthHost`：交换 `HealthHostRequest` / `HealthHostResponse` Protobuf 字节，只允许服务端主线程操作在线且实际绑定的玩家。查询先结算可信模拟时间，效果保留调用方请求 ID 和预期 revision；成功效果附带由同一请求回执读取的 `HealthResult`，供效果附属核验保命事实，查询不附带。幂等重试返回当前身体与原始固定事实；宿主暂停或拒绝时返回原失败码，不能转由另一套账本处理。身体、回执与释放账户仍保存于同一个世界状态。 同一毫秒里重复查询不再改 revision：一次结算会把这一刻到期的事件都结清，包括修炼推进（储备回补内腔等）挪了真元以后当场能发运的被动扩散。伤害附属先查询记下 revision、中间 Healing 再查询几次、最后按记下的 revision 提交效果，靠的就是这一条；`HumanSameMillisSettleGameTest` 用「只有一条经脉外壁有储备」的身体保护它，并在两 tick 之间走一次原版 kill。
 
 同一入口接受 `exertion`：先核对实际绑定玩家与命令身体 ID，再由 `HumanPlayerBody.applyExertion` 结算可信时间，保留原请求 ID 和预期 revision，交 Framework 普通 `BodyCommandHandler.handle` 执行 `ExertTissues`。成功返回当前身体，不附带健康效果专用 `HealthResult`；成功请求重放不重复扣疲劳。能力不足等业务拒绝返回原始失败码，不记宿主故障、不暂停玩家身体；跨身体请求返回 `ACCESS_DENIED`。伤害附属据此使用攻击者肌肉做功，Human 不计算武器伤害或肌肉伤害系数。
 

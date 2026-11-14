@@ -382,6 +382,9 @@ final class HumanPlayerBody {
         // 同tick的健康读取与提交必须看到同一版本；没有新的活动时间就不能空提交进度。
         if (!snapshot().vitality().dead() && cultivationDue && needsCultivationAdvance(snapshot())) {
             applyActivity(HumanCultivation.update(snapshot(), null));
+            // 这一步挪了真元（储备回补内腔等），经脉之间可能当场有了落差，被动扩散此刻就能发运。
+            // 当场发掉：留给下一次结算的话，同一毫秒里先读版本、后提交的伤害会撞上这一笔，报 REVISION_CONFLICT。
+            advanceTime();
         }
         scheduleNextBoundary();
     }
