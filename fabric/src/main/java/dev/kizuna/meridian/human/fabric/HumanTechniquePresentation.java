@@ -42,9 +42,11 @@ public final class HumanTechniquePresentation {
         }
         long nowMillis = player.level().getServer().overworld().getGameTime() * MILLIS_PER_TICK;
         long lateness = Math.max(0, nowMillis - effect.getScheduledMillis());
-        long offsetTicks = (presentation.getStartMillis() + lateness) / MILLIS_PER_TICK;
-        long startTick = Math.max(0, player.level().getGameTime() - offsetTicks);
-        ServerPlayerAnimations.playFrom(player, animationId, startTick);
+        // 没带倍率的旧意图按原速播。
+        double speed = presentation.hasPlaybackSpeedMultiplier() ? presentation.getPlaybackSpeedMultiplier() : 1;
+        var playback = HumanTechniqueAnimations.playback(player.level().getGameTime(), presentation.getStartMillis(),
+                lateness, speed);
+        ServerPlayerAnimations.playFrom(player, animationId, playback.startTick(), playback.rate());
         clips.put(key, animationId);
     }
 

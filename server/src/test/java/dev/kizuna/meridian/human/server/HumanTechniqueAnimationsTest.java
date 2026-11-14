@@ -22,20 +22,28 @@ public class HumanTechniqueAnimationsTest {
     }
 
     @Test
-    public void deliveredDoorClipsUseTheSelectedHandAndKeepRemainingSwings() {
-        // 片段选择只跟随主副手，不能把物理左右手提前镜像一次。
+    public void everyDoorBreakerMoveUsesItsOwnClipForTheSelectedHand() {
+        // 八式各有主手、副手两套剪辑；片段选择只跟随主副手，不能把物理左右手提前镜像一次。
         var direction = new HumanTechniqueAnimations.Direction(0, 0, 0);
-        for (String move : new String[]{"knock", "cleave", "ram"}) {
+        for (String move : new String[]{"knock", "cleave", "ram", "hook", "sweep", "close", "chain", "finale"}) {
             String clip = "door_breaker_" + move;
             String presentation = "meridian_door_breaker:" + clip;
             assertEquals(clip, HumanTechniqueAnimations.resolve(presentation, direction, CastHand.MAIN));
             assertEquals(clip + "_off", HumanTechniqueAnimations.resolve(presentation, direction, CastHand.OFF));
         }
-        for (String move : new String[]{"hook", "sweep", "close", "chain", "finale"}) {
-            String presentation = "meridian_door_breaker:door_breaker_" + move;
-            assertEquals("attack_main", HumanTechniqueAnimations.resolve(presentation, direction, CastHand.MAIN));
-            assertEquals("attack_off", HumanTechniqueAnimations.resolve(presentation, direction, CastHand.OFF));
-        }
+    }
+
+    @Test
+    public void playbackFollowsTheCastTempoAndFoldsLatenessIntoTheStartTick() {
+        // 原速：从剪辑 500 毫秒处开播、迟到 100 毫秒，起点往回 12 tick。
+        assertEquals(new HumanTechniqueAnimations.Playback(988, 1), HumanTechniqueAnimations.playback(1000, 500, 100, 1));
+        // 半速：剪辑的 500 毫秒要 1000 毫秒真实时间才走到，再加迟到的 100 毫秒，往回 22 tick。
+        assertEquals(new HumanTechniqueAnimations.Playback(978, 0.5f), HumanTechniqueAnimations.playback(1000, 500, 100, 0.5));
+        // PA 只能放慢：节奏比原速快、或者倍率不合法，都按原速播。
+        assertEquals(new HumanTechniqueAnimations.Playback(990, 1), HumanTechniqueAnimations.playback(1000, 500, 0, 1.5));
+        assertEquals(new HumanTechniqueAnimations.Playback(990, 1), HumanTechniqueAnimations.playback(1000, 500, 0, 0));
+        // 世界刚开始时起点不为负。
+        assertEquals(new HumanTechniqueAnimations.Playback(0, 1), HumanTechniqueAnimations.playback(3, 500, 0, 1));
     }
 
     private static void assertDash(String suffix, HumanTechniqueAnimations.Direction direction) {

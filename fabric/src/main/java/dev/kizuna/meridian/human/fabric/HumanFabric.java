@@ -120,6 +120,7 @@ public final class HumanFabric implements ModInitializer {
         HumanControl.initialize();
         CultivationStateTrigger.register();
         HumanStaggerLock.initialize();
+        HumanStaggerAnimation.initialize();
         HumanTempo.initialize();
         HumanOrganRefineHost.initialize();
         AttackEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
