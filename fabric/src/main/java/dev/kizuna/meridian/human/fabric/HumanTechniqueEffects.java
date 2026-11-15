@@ -319,11 +319,18 @@ final class HumanTechniqueEffects {
     }
 
     private static Vec3 targetDirection(ServerPlayer player, String targetId) {
-        // 朝目标推进只归一化水平位移；目标无效不记录回执，允许服务用原身份重试。
+        // 朝目标推进只取水平位移。起手时面前没有实体（对着门、对着空地放闯门和万门一斩），这一式本来就没有目标：
+        // 按面朝的方向推进，不能因此让整式放到一半失败。起手时有目标、中途目标没了，照旧不记回执、由服务取消并解锁；
+        // 目标还在、只是水平上重合，照旧拒绝零向量。
+        Vec3 forward = Vec3.directionFromRotation(0, player.getYRot());
+        if (targetId.isEmpty()) {
+            return forward;
+        }
         UUID targetUuid;
         try {
             targetUuid = UUID.fromString(targetId);
         } catch (IllegalArgumentException invalid) {
+            // 带了目标却不是合法编号，是上游的错，照旧拒绝。
             throw new TechniqueErrors.HostRejected(FailureCode.INVALID_REQUEST);
         }
         Entity target = player.level().getEntity(targetUuid);
