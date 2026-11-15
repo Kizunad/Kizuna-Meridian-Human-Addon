@@ -16,6 +16,7 @@ import dev.kizuna.meridian.protocol.pb.HealthMessages.DamageResolution;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
@@ -151,14 +152,17 @@ public final class HumanDamageSpilloverTest {
     }
 
     @Test
-    public void spilloverUsesExistingHeadDeathRule() {
-        // 只有蔓延耗尽头部也必须判死；胸部归零本身仍不新增死亡条件。
-        BodySnapshot vulnerable = withHp(body(), Map.of(ARM, 0.0, "head", 1.0));
-        DamageResolution head = resolve(vulnerable, ARM, CHEST_MAX);
-        assertEquals(1, partLoss(head, "head"), 0);
-        assertTrue(head.getLethal());
-        DamageResolution chest = resolve(body(), "chest", CHEST_MAX);
-        assertFalse(chest.getLethal());
+    public void spilloverUsesTheVitalPartDeathRule() {
+        // 蔓延把头或颈耗尽也必须判死；直接把胸打到零同样判死。腹部不是要害，打到零不死。
+        // 蔓延按部位上限分摊，颈的上限小、分到的少，所以打两倍胸上限的量，让只剩 1 点的头和颈都分得到 1 点以上。
+        for (String vital : List.of("head", "neck")) {
+            BodySnapshot vulnerable = withHp(body(), Map.of(ARM, 0.0, vital, 1.0));
+            DamageResolution spilled = resolve(vulnerable, ARM, 2 * CHEST_MAX);
+            assertEquals(vital, 1, partLoss(spilled, vital), 0);
+            assertTrue(vital, spilled.getLethal());
+        }
+        assertTrue(resolve(body(), "chest", CHEST_MAX).getLethal());
+        assertFalse(resolve(body(), "abdomen", ABDOMEN_MAX).getLethal());
     }
 
     @Test

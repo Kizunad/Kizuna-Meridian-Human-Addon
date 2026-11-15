@@ -23,6 +23,11 @@ import static org.junit.Assert.*;
 
 /** 整体回归：人体内容通过公开健康接口执行，框架只提交附属裁定。 */
 public class HumanHealthTest {
+    private static final double NECK_MAX_HP = 10;
+    private static final double CHEST_MAX_HP = 40;
+    private static final double ABDOMEN_MAX_HP = 30;
+    private static final double ALMOST = 0.5;
+
     @Test
     public void skinBoneMuscleOrganAndPartHaveIndependentHealth() {
         // 使用实际导出的模板出生，保证骨组声明、状态和内容协议一致。
@@ -93,6 +98,25 @@ public class HumanHealthTest {
         commit(handler(headStore), headStore, "head-destroyed",
                 damage(HealthTarget.newBuilder().setPartId("head").build(), 20));
         assertTrue(current(headStore).vitality().dead());
+    }
+
+    @Test
+    public void neckOrChestAtZeroKillsWhileOtherPartsAtZeroDoNot() {
+        // 颈（上限 10）、胸（上限 40）和头一样是要害：归零就死，这时全身其余部位都是满的，离 20% 的线还远。
+        // 差一点没归零不死；腹部、骨盆这些不是要害的部位归零也不死。
+        assertTrue(deadAfter("neck", NECK_MAX_HP));
+        assertTrue(deadAfter("chest", CHEST_MAX_HP));
+        assertFalse(deadAfter("neck", NECK_MAX_HP - ALMOST));
+        assertFalse(deadAfter("chest", CHEST_MAX_HP - ALMOST));
+        assertFalse(deadAfter("abdomen", ABDOMEN_MAX_HP));
+        assertFalse(deadAfter("pelvis", ABDOMEN_MAX_HP));
+    }
+
+    private static boolean deadAfter(String partId, double hp) {
+        // 新身体的这个部位挨这么多伤害以后死没死。
+        var store = new InMemoryBodyStore(List.of(body()), List.of());
+        commit(handler(store), store, "hit-" + partId, damage(HealthTarget.newBuilder().setPartId(partId).build(), hp));
+        return current(store).vitality().dead();
     }
 
     @Test

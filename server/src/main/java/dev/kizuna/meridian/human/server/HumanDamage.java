@@ -15,10 +15,13 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** 人体伤害：按致伤机制分配局部损伤，并根据部位总量与头部状态裁定死亡。 */
 public final class HumanDamage implements BodyDamageHandler {
     private static final double DEATH_HP_RATIO = 0.2;
+    /** 要害部位：任何一个 HP 归零就死，不看全身还剩多少。 */
+    private static final Set<String> VITAL_PARTS = Set.of("head", "neck", "chest");
     private static HumanDamageRules configuredRules = HumanDamageRules.defaults();
     private final HumanDamageRules rules;
     private final String entityType;
@@ -102,13 +105,13 @@ public final class HumanDamage implements BodyDamageHandler {
             }
         }
         var projectedPartHp = new ArrayList<Double>();
-        boolean headDestroyed = false;
+        boolean vitalDestroyed = false;
         for (var part : body.getPartStatesList()) {
             double loss = partLosses.getOrDefault(part.getId(), 0.0);
             double remainingHp = Math.max(0, part.getHp() - loss);
             projectedPartHp.add(remainingHp);
-            if (part.getId().equals("head") && remainingHp == 0) {
-                headDestroyed = true;
+            if (VITAL_PARTS.contains(part.getId()) && remainingHp == 0) {
+                vitalDestroyed = true;
             }
         }
 
@@ -117,8 +120,8 @@ public final class HumanDamage implements BodyDamageHandler {
         double maximumPartHp = body.getStructure().getPartsList().stream()
                 .mapToDouble(part -> part.getMaxHp()).sum();
 
-        // 总部位 HP 严格低于 20% 或头部归零才死亡，器官归零先表达为该器官失能。
-        return headDestroyed || totalPartHp < maximumPartHp * DEATH_HP_RATIO;
+        // 总部位 HP 严格低于 20%，或头、颈、胸任一个归零才死亡；器官归零先表达为该器官失能。
+        return vitalDestroyed || totalPartHp < maximumPartHp * DEATH_HP_RATIO;
     }
 
     private static void distributeLocalDamage(BodySnapshot body, String partId, DamageKind kind,
