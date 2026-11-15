@@ -264,9 +264,12 @@ public final class HumanTechnique6aGameTest {
                         "错层目标冲量被拒绝");
                 assertVelocity(context, fixture, new Vec3(0, SPEED_PER_TICK, SPEED_PER_TICK));
                 target.setPos(position.add(0, TARGET_HEIGHT_DIFFERENCE, 0));
+                // 目标挪到正上方：水平上没有方向可朝，按玩家面朝的方向（朝南，+Z）推进，不拒绝。
+                fixture.player.setDeltaMovement(0, SPEED_PER_TICK, 0);
                 var overhead = toward.toBuilder().setEffectId("overhead").build();
-                context.assertTrue(exchange(fixture, "overhead", overhead).getFailure().getCode()
-                        == FailureCode.INVALID_REQUEST, "纯竖直目标没有拒绝零水平向量");
+                context.assertTrue(exchange(fixture, "overhead", overhead).getEffectAccepted(),
+                        "正上方的目标让冲量被拒绝了");
+                assertVelocity(context, fixture, new Vec3(0, SPEED_PER_TICK, SPEED_PER_TICK));
             } finally {
                 target.discard();
             }
