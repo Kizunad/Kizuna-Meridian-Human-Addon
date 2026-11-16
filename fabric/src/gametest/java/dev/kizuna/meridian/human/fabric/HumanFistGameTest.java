@@ -272,7 +272,7 @@ public final class HumanFistGameTest {
         }
     }
 
-    private static EffectIntent punch(String name) {
+    static EffectIntent punch(String name) {
         // 把目录里的那一记出拳连同书级拳掌规则交给宿主，和调度到时下发的意图同形。
         TechniqueDefinition definition = TechniqueFabric.service().registry()
                 .findLatest(HumanFistTestCatalog.NAMESPACE + ":" + name)

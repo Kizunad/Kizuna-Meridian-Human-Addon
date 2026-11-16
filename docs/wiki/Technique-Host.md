@@ -58,6 +58,27 @@ Human 实现功法库的 `meridian_technique_host` entrypoint（`HumanTechniqueH
 `arm_rules.base_damage × 本击倍率`，`BOTH_ARMS` 再乘 1.2。手里的东西不参与出拳伤害，也不扣耐久。
 `damage_type_id` 是目录提供的完整命名空间 ID，Human 直接解析该 ID 查 Damage 注册表，不附加固定命名空间。
 整次打击包在 `VanillaStrikeContext.attack` 里，Damage 按声明的类型结算出力侧系数和疲劳。
+
+每个选中的目标走两条路之一：
+
+- **普通路**：调用原版 `hurtServer`，盾、无敌帧、局部护甲都由 Damage 现有路径处理。目标没绑身体时一律走这条，
+  声明了透劲、麻的在这条路上有退路（`HumanDirectStrikes.hurtBodiless`）：
+  - 透劲只剩护甲打折：这一下里目标的原版护甲值和护甲韧性各乘 `armor_multiplier`
+    （打之前挂一条临时属性修正 `meridian_human:strike_armor_discount`，打完不论成没成都摘掉）。
+  - 麻退成原版状态：打中以后给缓慢和虚弱，不管目录里麻写的是几秒、哪条手臂。多久、各几级读
+    `meridian-human-damage.toml` 的 `[bodiless_numb]`（随包初值 60 tick、各一级；等级写 0 是那一样不给）。
+    这一节是后加的，老配置文件里没有时按随包初值算。
+- **直接路**：目标绑了身体，而且这一下指定了部位、带透劲或带命中附带（`TechniqueLimbStrikes.direct`）。
+  由 `HumanDirectStrikes` 走 Damage 的 `damageDirect`，不吃无敌帧。它不经原版受伤入口，所以盾由执行器先查：
+  正面被挡住时整下不算（回报 `BLOCKED`），伤害类型带 `#minecraft:bypasses_shield` 的照打。
+  打中以后执行器调 `VanillaDamageFabric.presentHurt` 补原版的受伤表现（红闪、受伤动作、受伤声），不给无敌帧。
+  - 部位：`fixed_part_id` 点名的部位；`armed_forearm` 取对方拿着东西那一侧的前臂（主手有东西或两手都空取主手侧，
+    只有副手有东西取另一侧）；都没写、或点名的部位这具身体上没有时，用 `VanillaDamageFabric.aimedPart` 照伤害类型的部位组选。
+  - 透劲：`organ_share` 交给伤害分层，`armor_multiplier` 只对这一下的局部护甲生效。
+  - 麻：打中部位上的每块肌肉加一条能力修正（力量、功率乘倍数，ID 为 `meridian_human:numb_<肌肉>`，同一块再麻一次是续期）；
+    `whole_arm` 时换成这一侧带 `human:arm_muscle` 标签的全部肌肉。修正和伤害同一笔提交。
+- 两条路打中以后击退、命中声音、回报都一样。`disarm` 在打中以后生效：玩家是攻击冷却清零、正在用的物品被打断、东西不掉；
+  别的活物是主手的东西掉在脚下。
 出力侧由伤害类型标签决定，执行器不另选手臂：前手拳的类型进 `#meridian:off_hand`，双手拳进
 `#meridian:two_handed`，后手拳两者都不进；左撇子由 Damage 按主手侧整体镜像。
 前手拳挥副手，后手拳、双手拳和腿挥主手。

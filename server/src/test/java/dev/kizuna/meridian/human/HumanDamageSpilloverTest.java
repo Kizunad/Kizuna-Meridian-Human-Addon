@@ -166,6 +166,25 @@ public final class HumanDamageSpilloverTest {
     }
 
     @Test
+    public void bodilessNumbComesFromTheFileAndOldFilesRunOnDefault() throws Exception {
+        // 没绑身体的目标挨「麻」的退路读配置：随包初值 3 秒、缓慢虚弱各一级；改了就按改的；
+        // 老文件没有这一节照初值算；等级 0 是合法的「不给」；小数、负数、零时长都拒绝。
+        String config = configuration();
+        assertEquals(new HumanDamageRules.BodilessNumb(60, 1, 1), HumanDamageRules.defaults().bodilessNumb());
+        String changed = config.replace("ticks = 60", "ticks = 100")
+                .replace("weakness_level = 1", "weakness_level = 0");
+        assertEquals(new HumanDamageRules.BodilessNumb(100, 1, 0), HumanDamageRules.parse(changed).bodilessNumb());
+        String old = config.substring(0, config.indexOf("[bodiless_numb]"));
+        assertEquals(new HumanDamageRules.BodilessNumb(60, 1, 1), HumanDamageRules.parse(old).bodilessNumb());
+        for (String bad : List.of("ticks = 0", "ticks = 1.5", "ticks = -20")) {
+            assertThrows(bad, IllegalArgumentException.class,
+                    () -> HumanDamageRules.parse(config.replace("ticks = 60", bad)));
+        }
+        assertThrows(IllegalArgumentException.class,
+                () -> HumanDamageRules.parse(config.replace("slowness_level = 1", "slowness_level = 257")));
+    }
+
+    @Test
     public void invalidCoefficientsAndTamperedReceiptsAreRejected() throws Exception {
         // 负数、NaN 和不守恒回执必须在进入身体账本前拒绝。
         String config = configuration();

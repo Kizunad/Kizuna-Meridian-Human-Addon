@@ -3,6 +3,7 @@ package dev.kizuna.meridian.human.server;
 import dev.kizuna.meridian.protocol.HealthProtobuf;
 import dev.kizuna.meridian.protocol.pb.BodyMessages.BodySnapshot;
 import dev.kizuna.meridian.protocol.pb.BodyMessages.HealthTarget;
+import dev.kizuna.meridian.protocol.pb.HealthMessages.DamageBody;
 import dev.kizuna.meridian.protocol.pb.HealthMessages.DamageKind;
 import dev.kizuna.meridian.protocol.pb.HealthMessages.DamageResolution;
 import dev.kizuna.meridian.protocol.pb.HealthMessages.DamageSpillover;
@@ -47,6 +48,11 @@ public final class HumanDamage implements BodyDamageHandler {
         configuredRules = HumanDamageRules.load(file);
     }
 
+    public static HumanDamageRules configuredRules() {
+        // 给不经身体结算的宿主逻辑读同一份配置（没绑身体的目标挨「麻」的退路）。
+        return configuredRules;
+    }
+
     @Override
     public byte[] resolve(byte[] payload) {
         // 读取固定快照与可信伤害；未指定命中时复用框架选点，输出仍由框架逐目标校验。
@@ -59,7 +65,7 @@ public final class HumanDamage implements BodyDamageHandler {
         var losses = new ArrayList<HpLoss>();
         DamageSpillover spillover = partLosses(body, hit, damage.getDamageHp(), losses);
         if (hit.hasPartId() && damage.getKind() != DamageKind.CUSTOM) {
-            distributeLocalDamage(body, hit.getPartId(), damage.getKind(), damage.getDamageHp(), losses);
+            distributeLocalDamage(body, hit.getPartId(), damage, losses);
         }
 
         boolean lethal = lethal(body, losses);
@@ -124,10 +130,11 @@ public final class HumanDamage implements BodyDamageHandler {
         return vitalDestroyed || totalPartHp < maximumPartHp * DEATH_HP_RATIO;
     }
 
-    private static void distributeLocalDamage(BodySnapshot body, String partId, DamageKind kind,
-                                              double damageHp, List<HpLoss> losses) {
+    private static void distributeLocalDamage(BodySnapshot body, String partId, DamageBody damage,
+                                              List<HpLoss> losses) {
         // 先从实际构型取得同一部位的组织；替换或移除器官后不再按旧模板 ID 分配。
-        DamageProfile profile = profile(kind);
+        double damageHp = damage.getDamageHp();
+        DamageProfile profile = profile(damage.getKind());
         List<HealthTarget> skin = tissueTargets(body, partId, "human:skin");
         List<HealthTarget> muscle = tissueTargets(body, partId, "human:muscle");
         List<HealthTarget> bone = tissueTargets(body, partId, "human:bone");
@@ -135,6 +142,10 @@ public final class HumanDamage implements BodyDamageHandler {
                 .filter(organ -> organ.getPartId().equals(partId))
                 .map(organ -> HealthTarget.newBuilder().setOrganId(organ.getId()).build())
                 .toList();
+        if (damage.hasOrganShare() && !organs.isEmpty()) {
+            // 透劲只在这个部位真有器官时起作用；没有器官的部位照原来的比例分给当地组织。
+            profile = profile.through(damage.getOrganShare());
+        }
         List<DamageGroup> groups = List.of(new DamageGroup(skin, profile.skin()),
                 new DamageGroup(muscle, profile.muscle()), new DamageGroup(bone, profile.bone()),
                 new DamageGroup(organs, profile.organ()));
@@ -188,7 +199,17 @@ public final class HumanDamage implements BodyDamageHandler {
         };
     }
 
-    private record DamageProfile(double skin, double muscle, double bone, double organ) { }
+    private record DamageProfile(double skin, double muscle, double bone, double organ) {
+        DamageProfile through(double organShare) {
+            // 透劲：器官那一份抬到给定份额，剩下的按原比例分给皮、肌肉、骨；原来这三层都没有份时全归器官。
+            double rest = skin + muscle + bone;
+            if (rest == 0) {
+                return new DamageProfile(0, 0, 0, 1);
+            }
+            double scale = (1 - organShare) / rest;
+            return new DamageProfile(skin * scale, muscle * scale, bone * scale, organShare);
+        }
+    }
 
     private record DamageGroup(List<HealthTarget> targets, double weight) { }
 }

@@ -11,16 +11,22 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** 人体模板的蔓延系数与宿主实体开关；不保存身体运行状态。 */
+/** 人体模板的蔓延系数、宿主实体开关，和没绑身体的目标挨「麻」时的原版退路；不保存身体运行状态。 */
 public final class HumanDamageRules {
     public static final String FILE_NAME = "meridian-human-damage.toml";
+    private static final String BODILESS_NUMB = "bodiless_numb";
+    /** 原版状态等级的上限（等级 = 放大值 + 1，放大值存一个字节）。 */
+    private static final int MAX_EFFECT_LEVEL = 256;
     private final Map<String, Boolean> entities;
     private final Map<String, Template> templates;
+    private final BodilessNumb bodilessNumb;
 
-    private HumanDamageRules(Map<String, Boolean> entities, Map<String, Template> templates) {
+    private HumanDamageRules(Map<String, Boolean> entities, Map<String, Template> templates,
+                             BodilessNumb bodilessNumb) {
         // 配置在服务端启动时固定，不让一次事务中途读到修改后的映射。
         this.entities = Map.copyOf(entities);
         this.templates = Map.copyOf(templates);
+        this.bodilessNumb = bodilessNumb;
     }
 
     public static HumanDamageRules defaults() {
@@ -63,7 +69,29 @@ public final class HumanDamageRules {
         }
         Map<String, Boolean> switches = entitySwitches(entities);
         Map<String, Template> rules = templateRules(templates);
-        return new HumanDamageRules(switches, rules);
+        return new HumanDamageRules(switches, rules, bodilessNumb(parsed.getTable(BODILESS_NUMB)));
+    }
+
+    private static BodilessNumb bodilessNumb(TomlTable table) {
+        // 这一节是后加的：老配置文件里没有，就按随包初值算，不逼着服主重新生成文件。
+        TomlTable numb = table;
+        if (numb == null) {
+            numb = Toml.parse(defaultText()).getTable(BODILESS_NUMB);
+        }
+        if (numb == null) {
+            throw HumanErrors.invalid(HumanErrors.INVALID_SPILLOVER);
+        }
+        return new BodilessNumb(whole(numb.get("ticks"), 1, Integer.MAX_VALUE),
+                whole(numb.get("slowness_level"), 0, MAX_EFFECT_LEVEL),
+                whole(numb.get("weakness_level"), 0, MAX_EFFECT_LEVEL));
+    }
+
+    private static int whole(Object value, int least, int most) {
+        // 只收范围内的整数；小数、字符串、越界都拒绝，不悄悄取整。
+        if (!(value instanceof Long number) || number < least || number > most) {
+            throw HumanErrors.invalid(HumanErrors.INVALID_SPILLOVER);
+        }
+        return number.intValue();
     }
 
     private static Map<String, Boolean> entitySwitches(TomlTable entities) {
@@ -129,6 +157,14 @@ public final class HumanDamageRules {
         }
         return template.parts().getOrDefault(partId, template.defaultMultiplier());
     }
+
+    public BodilessNumb bodilessNumb() {
+        // 没绑身体的目标挨了带「麻」的一下，拿什么原版状态顶替。
+        return bodilessNumb;
+    }
+
+    /** 没绑身体的目标挨「麻」时给的原版缓慢、虚弱：持续多少 tick、各几级；等级 0 表示那一样不给。 */
+    public record BodilessNumb(int ticks, int slownessLevel, int weaknessLevel) { }
 
     private record Template(double defaultMultiplier, Map<String, Double> parts) { }
 }

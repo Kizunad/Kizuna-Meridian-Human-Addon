@@ -32,3 +32,10 @@ left_lower_leg = 1.0
 right_lower_leg = 1.0
 left_foot = 1.0
 right_foot = 1.0
+
+# 没绑身体的目标（原版生物）没有肌肉可麻：挨了带「麻」的一下，改给原版的缓慢和虚弱。
+# ticks 是持续多久（20 tick 一秒）；两个等级从 1 起算，写 0 表示那一样不给。
+[bodiless_numb]
+ticks = 60
+slowness_level = 1
+weakness_level = 1

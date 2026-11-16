@@ -23,6 +23,9 @@ import static org.junit.Assert.*;
 
 /** 整体回归：人体内容通过公开健康接口执行，框架只提交附属裁定。 */
 public class HumanHealthTest {
+    private static final double LAYERED_HP = 9;
+    private static final List<String> LAYER_KINDS = List.of("human:skin", "human:muscle", "human:bone");
+
     private static final double NECK_MAX_HP = 10;
     private static final double CHEST_MAX_HP = 40;
     private static final double ABDOMEN_MAX_HP = 30;
@@ -173,6 +176,43 @@ public class HumanHealthTest {
         assertTrue(randomStore.receipts().get(0).getHealth().getDamageResolution().getLosses(0).getTarget().hasPartId());
         assertEquals(1, initial.partStates().stream().mapToDouble(part -> part.hp()).sum()
                 - current(randomStore).partStates().stream().mapToDouble(part -> part.hp()).sum(), 1e-9);
+    }
+
+    @Test
+    public void organShareLiftsTheOrganLayerAndKeepsTheOtherLayersInProportion() {
+        // 透劲把器官那一份抬到给定份额，皮、肌肉、骨按原来钝击的 .10 / .35 / .45 分剩下的；不写份额照旧。
+        assertLayers(layers("chest", Optional.empty()), 0.9, 3.15, 4.05, 0.9);
+        assertLayers(layers("chest", Optional.of(0.6)), 0.4, 1.4, 1.8, 5.4);
+        assertLayers(layers("chest", Optional.of(0.9)), 0.1, 0.35, 0.45, 8.1);
+        // 上臂没有器官：份额不起作用，照钝击原比例在当地的皮、肌肉、骨之间分完，不凭空少掉。
+        assertLayers(layers("left_upper_arm", Optional.of(0.6)), 1.0, 3.5, 4.5, 0);
+    }
+
+    private static double[] layers(String partId, Optional<Double> organShare) {
+        // 打这个部位一下钝击，从回执里按层合计：皮、肌肉、骨、器官。
+        BodySnapshot initial = body();
+        var store = new InMemoryBodyStore(List.of(initial), List.of());
+        var command = damage(HealthTarget.newBuilder().setPartId(partId).build(), LAYERED_HP);
+        var blunt = command.getDamageBody().toBuilder().setKind(DamageKind.BLUNT);
+        organShare.ifPresent(blunt::setOrganShare);
+        commit(handler(store), store, "layers", command.setDamageBody(blunt));
+        var kinds = new java.util.HashMap<String, String>();
+        BodyProtobuf.toMessage(initial).getStructure().getTissuesList()
+                .forEach(tissue -> kinds.put(tissue.getId(), tissue.getKind()));
+        double[] totals = new double[LAYER_KINDS.size() + 1];
+        for (HpLoss loss : store.receipts().get(0).getHealth().getDamageResolution().getLossesList()) {
+            if (loss.getTarget().hasOrganId()) {
+                totals[LAYER_KINDS.size()] += loss.getHp();
+            } else if (loss.getTarget().hasTissueId()) {
+                totals[LAYER_KINDS.indexOf(kinds.get(loss.getTarget().getTissueId()))] += loss.getHp();
+            }
+        }
+        return totals;
+    }
+
+    private static void assertLayers(double[] actual, double skin, double muscle, double bone, double organ) {
+        // 四层各自的合计都要对上。
+        assertArrayEquals(new double[] {skin, muscle, bone, organ}, actual, 1e-9);
     }
 
     private static double tissueHp(BodySnapshot body, String id) {

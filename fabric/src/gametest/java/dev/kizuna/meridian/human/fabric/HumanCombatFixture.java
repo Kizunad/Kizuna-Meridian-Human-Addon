@@ -209,6 +209,8 @@ final class HumanCombatFixture implements AutoCloseable {
     static final class Target extends Cow {
         final List<DamageSource> sources = new ArrayList<>();
         final List<Float> doses = new ArrayList<>();
+        /** 每次进伤害入口那一刻的全身护甲值：只对这一下生效的护甲打折只有这时看得见。 */
+        final List<Double> armors = new ArrayList<>();
         final List<Long> hitMillis = new ArrayList<>();
 
         Target(ServerLevel world) {
@@ -221,6 +223,7 @@ final class HumanCombatFixture implements AutoCloseable {
             // 原始剂量与实际扣血分别断言，不能把调用伤害当作已经命中；26.2 服务端伤害统一走这里。
             sources.add(source);
             doses.add(amount);
+            armors.add(getAttributeValue(Attributes.ARMOR));
             hitMillis.add(level.getGameTime() * MILLIS_PER_TICK);
             return super.hurtServer(level, source, amount);
         }

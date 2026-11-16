@@ -18,9 +18,9 @@ import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.damagesource.DamageType;
@@ -136,7 +136,7 @@ public final class HumanLimbStrikes {
     private void hitTarget(Hit hit, LivingEntity target) {
         // 盾挡只影响伤害是否成功，不吞掉声明的被挡击退；只有真正受伤才播命中声音；打中和被挡回报给功法服务。
         boolean blocked = target.isBlocking() && facesAttacker(target);
-        boolean damaged = target.hurtServer((ServerLevel) actor.level(), hit.source(), hit.dose());
+        boolean damaged = damage(hit, target, blocked);
         if (damaged || (blocked && hit.strike().getKnockbackWhenBlocked())) {
             HumanLimbKnockback.apply(new HumanLimbKnockback.Push(actor, target, hit.strike(), hit.source(),
                     hit.dose(), facing(hit.strike())));
@@ -144,9 +144,24 @@ public final class HumanLimbStrikes {
         if (damaged) {
             TechniqueSounds.playAll(actor, target, hit.hitSounds());
             report(hit.effect(), target, StrikeOutcome.HIT);
+            if (hit.strike().getDisarm()) {
+                HumanDirectStrikes.disarm(target);
+            }
         } else if (blocked) {
             report(hit.effect(), target, StrikeOutcome.BLOCKED);
         }
+    }
+
+    private boolean damage(Hit hit, LivingEntity target, boolean blocked) {
+        // 普通路交给原版受伤入口，盾、无敌帧都由它处理；声明了透劲、麻而目标没身体的，退路也在那条路上补。
+        // 直接路不经那里，盾在这里先查：正面被挡住整下不算，伤害类型声明越盾的照打。
+        if (!HumanDirectStrikes.applies(hit.strike(), target)) {
+            return HumanDirectStrikes.hurtBodiless(target, hit.source(), hit.strike(), hit.dose());
+        }
+        if (blocked && !hit.source().is(DamageTypeTags.BYPASSES_SHIELD)) {
+            return false;
+        }
+        return HumanDirectStrikes.hit(target, hit.source(), hit.strike(), hit.dose());
     }
 
     private void report(EffectIntent effect, LivingEntity target, StrikeOutcome outcome) {
