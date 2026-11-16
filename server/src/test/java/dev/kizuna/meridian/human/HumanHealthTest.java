@@ -30,6 +30,9 @@ public class HumanHealthTest {
     private static final double CHEST_MAX_HP = 40;
     private static final double ABDOMEN_MAX_HP = 30;
     private static final double ALMOST = 0.5;
+    private static final double HEART_MAX_HP = 20;
+    private static final double OVERKILL = 1000;
+    private static final double BLOW_HP = 6;
 
     @Test
     public void skinBoneMuscleOrganAndPartHaveIndependentHealth() {
@@ -113,6 +116,50 @@ public class HumanHealthTest {
         assertFalse(deadAfter("chest", CHEST_MAX_HP - ALMOST));
         assertFalse(deadAfter("abdomen", ABDOMEN_MAX_HP));
         assertFalse(deadAfter("pelvis", ABDOMEN_MAX_HP));
+    }
+
+    @Test
+    public void heartAtZeroKillsWhileOtherOrgansAtZeroDoNot() {
+        // 心（上限 20）是要害器官：归零就死，这时胸和别的部位都是满的。差一点没归零不死；肺、脑归零不死。
+        assertTrue(deadAfterOrgan("heart", HEART_MAX_HP));
+        assertFalse(deadAfterOrgan("heart", HEART_MAX_HP - ALMOST));
+        assertFalse(deadAfterOrgan("left_lung", OVERKILL));
+        assertFalse(deadAfterOrgan("brain", OVERKILL));
+    }
+
+    @Test
+    public void chestBlowThatFinishesAWoundedHeartKillsWithTheChestStillWhole() {
+        // 心先被直接打到只剩 0.5（人还活着），再往胸上来一下穿刺：穿刺有六成落在胸里的脏器上，心这一下归零，
+        // 人当场死，这时胸还剩大半。同样的一下打在心完好的人胸上不死。
+        var store = new InMemoryBodyStore(List.of(body()), List.of());
+        var handler = handler(store);
+        commit(handler, store, "wound", damage(HealthTarget.newBuilder().setOrganId("heart").build(),
+                HEART_MAX_HP - ALMOST));
+        assertFalse(current(store).vitality().dead());
+        commit(handler, store, "blow", piercedChest());
+        BodySnapshot dead = current(store);
+        assertTrue(dead.vitality().dead());
+        assertEquals(0, organHp(dead, "heart"), 0);
+        double chest = dead.partStates().stream().filter(part -> part.id().value().equals("chest"))
+                .findFirst().orElseThrow().hp();
+        assertEquals(CHEST_MAX_HP - BLOW_HP, chest, 0);
+        var wholeStore = new InMemoryBodyStore(List.of(body()), List.of());
+        commit(handler(wholeStore), wholeStore, "blow", piercedChest());
+        assertFalse(current(wholeStore).vitality().dead());
+    }
+
+    private static BodyCommand.Builder piercedChest() {
+        // 胸上挨一下穿刺。
+        var blow = damage(HealthTarget.newBuilder().setPartId("chest").build(), BLOW_HP);
+        return blow.setDamageBody(blow.getDamageBody().toBuilder().setKind(DamageKind.PIERCING));
+    }
+
+    private static boolean deadAfterOrgan(String organId, double hp) {
+        // 新身体的这个器官直接挨这么多伤害以后死没死。
+        var store = new InMemoryBodyStore(List.of(body()), List.of());
+        commit(handler(store), store, "hit-" + organId,
+                damage(HealthTarget.newBuilder().setOrganId(organId).build(), hp));
+        return current(store).vitality().dead();
     }
 
     private static boolean deadAfter(String partId, double hp) {

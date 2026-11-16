@@ -18,11 +18,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** 人体伤害：按致伤机制分配局部损伤，并根据部位总量与头部状态裁定死亡。 */
+/** 人体伤害：按致伤机制分配局部损伤，并根据部位总量、要害部位（头、颈、胸）和心的状态裁定死亡。 */
 public final class HumanDamage implements BodyDamageHandler {
     private static final double DEATH_HP_RATIO = 0.2;
     /** 要害部位：任何一个 HP 归零就死，不看全身还剩多少。 */
     private static final Set<String> VITAL_PARTS = Set.of("head", "neck", "chest");
+    /** 要害器官的种类：身上这一种的器官全都归零就死（人只有一颗心）。按种类认，换过的心也算。 */
+    private static final Set<String> VITAL_ORGAN_KINDS = Set.of("human:heart");
     private static HumanDamageRules configuredRules = HumanDamageRules.defaults();
     private final HumanDamageRules rules;
     private final String entityType;
@@ -126,8 +128,30 @@ public final class HumanDamage implements BodyDamageHandler {
         double maximumPartHp = body.getStructure().getPartsList().stream()
                 .mapToDouble(part -> part.getMaxHp()).sum();
 
-        // 总部位 HP 严格低于 20%，或头、颈、胸任一个归零才死亡；器官归零先表达为该器官失能。
-        return vitalDestroyed || totalPartHp < maximumPartHp * DEATH_HP_RATIO;
+        // 总部位 HP 严格低于 20%，或头、颈、胸任一个归零，或心归零才死亡；别的器官归零只是该器官失能。
+        return vitalDestroyed || vitalOrganDestroyed(body, losses) || totalPartHp < maximumPartHp * DEATH_HP_RATIO;
+    }
+
+    private static boolean vitalOrganDestroyed(BodySnapshot body, List<HpLoss> losses) {
+        // 把这一下落在各器官上的剂量加起来投影；身上有要害种类的器官、而且这一种全都归零才算。摘掉了的不算。
+        Map<String, Double> organLosses = new HashMap<>();
+        for (HpLoss loss : losses) {
+            if (loss.getTarget().hasOrganId()) {
+                organLosses.merge(loss.getTarget().getOrganId(), loss.getHp(), Double::sum);
+            }
+        }
+        Map<String, Double> remaining = new HashMap<>();
+        for (var organ : body.getOrganStatesList()) {
+            remaining.put(organ.getId(), Math.max(0, organ.getHp() - organLosses.getOrDefault(organ.getId(), 0.0)));
+        }
+        for (String kind : VITAL_ORGAN_KINDS) {
+            List<String> ids = body.getStructure().getOrgansList().stream()
+                    .filter(organ -> organ.getKind().equals(kind)).map(organ -> organ.getId()).toList();
+            if (!ids.isEmpty() && ids.stream().allMatch(id -> remaining.get(id) == 0)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void distributeLocalDamage(BodySnapshot body, String partId, DamageBody damage,
