@@ -142,11 +142,11 @@ public final class HumanDeviceDrawGameTest {
         DrawResult renewed = state.draw(draw("gametest:renewed", world, SMALL_DRAW_QI, -REGION_BLOCK), world, WINDOW_MILLIS);
         context.assertTrue(close(drawnQi(renewed), SMALL_DRAW_QI), "到期窗口没先续上就取用");
 
-        // 非主世界没有区域：返回不带来源的零结果，不算失败。
-        ServerLevel nether = world.getServer().getLevel(net.minecraft.world.level.Level.NETHER);
-        context.assertTrue(nether != null, "测试服务器未加载下界");
-        DrawResult none = state.draw(draw("gametest:nether", nether, SMALL_DRAW_QI, 0), nether, 1_000);
-        context.assertTrue(!none.hasSourceId() && none.getDrawnQi().getEntriesCount() == 0, "下界取到了真元");
+        // 没有灵气的维度（末地）没有区域：返回不带来源的零结果，不算失败。
+        ServerLevel end = world.getServer().getLevel(net.minecraft.world.level.Level.END);
+        context.assertTrue(end != null, "测试服务器未加载末地");
+        DrawResult none = state.draw(draw("gametest:end", end, SMALL_DRAW_QI, 0), end, 1_000);
+        context.assertTrue(!none.hasSourceId() && none.getDrawnQi().getEntriesCount() == 0, "末地取到了真元");
         context.succeed();
     }
 

@@ -80,23 +80,12 @@ public final class HumanContent {
                     .setOutput(inventory("meridian:none", REFINED_QI_PER_BATCH))
                     .setDurationMillis(REFINING_MILLIS).setMinimumRealm(Realm.WANDERING_QI));
             // 手动接触摄入读取此配方的转换比例，实际剂量由环境浓度和粒子采样体积决定。
-            bundle.addOrganRecipes(OrganRecipe.newBuilder()
-                    .setId(breathRecipeId(attribute))
-                    .setVersion(CONTENT_VERSION)
-                    .setOrganKind("human:lung")
-                    .setInput(inventory(attribute, BREATH_INPUT_QI))
-                    .setOutput(inventory(NONE, BREATH_OUTPUT_QI))
-                    .setDurationMillis(BREATH_MILLIS)
-                    .setMinimumRealm(Realm.WANDERING_QI));
+            // 产物里留一份本属性，当场送进本行的经；其余是无属性。
+            bundle.addOrganRecipes(breathRecipe(breathRecipeId(attribute), attribute, Realm.WANDERING_QI,
+                    breathOutput(attribute, 0 /* gasShare */, breathingRules.nativeShare())));
             // 真炁以后同一口气的产物一部分直接是气态；框架吐纳先用境界要求高的这一条。
-            bundle.addOrganRecipes(OrganRecipe.newBuilder()
-                    .setId(trueQiBreathRecipeId(attribute))
-                    .setVersion(CONTENT_VERSION)
-                    .setOrganKind("human:lung")
-                    .setInput(inventory(attribute, BREATH_INPUT_QI))
-                    .setOutput(trueQiBreathOutput(breathingRules.trueQiGasShare()))
-                    .setDurationMillis(BREATH_MILLIS)
-                    .setMinimumRealm(Realm.TRUE_QI));
+            bundle.addOrganRecipes(breathRecipe(trueQiBreathRecipeId(attribute), attribute, Realm.TRUE_QI,
+                    breathOutput(attribute, breathingRules.trueQiGasShare(), breathingRules.nativeShare())));
         }
         AddonBundle result = bundle.build();
         AddonProtobuf.validateBundle(result);
@@ -149,18 +138,42 @@ public final class HumanContent {
         return breathRecipeId(attribute) + TRUE_QI_BREATH_SUFFIX;
     }
 
-    private static QiInventory trueQiBreathOutput(double gasShare) {
-        // 产物总量与基础配方相同，按份额分成气态与游离态两行；份额为 0 或 1 时只留一行。
+    private static OrganRecipe.Builder breathRecipe(String id, String attribute, Realm realm, QiInventory output) {
+        // 一条吐纳配方；产物里有本属性的话写明去处：带「本行经脉」标签、开着的经。
+        var recipe = OrganRecipe.newBuilder()
+                .setId(id)
+                .setVersion(CONTENT_VERSION)
+                .setOrganKind("human:lung")
+                .setInput(inventory(attribute, BREATH_INPUT_QI))
+                .setOutput(output)
+                .setDurationMillis(BREATH_MILLIS)
+                .setMinimumRealm(realm);
+        if (output.getEntriesList().stream().anyMatch(entry -> entry.getAttribute().equals(attribute))) {
+            recipe.addOutputRoutes(OutputRoute.newBuilder().setAttribute(attribute)
+                    .setMeridianTag("human:meridian_" + attribute.substring(attribute.indexOf(':') + 1)));
+        }
+        return recipe;
+    }
+
+    private static QiInventory breathOutput(String attribute, double gasShare, double nativeShare) {
+        // 产物总量固定，先按份额分成游离态与气态，每种相态再按份额分成无属性与本属性；量是 0 的那一行不写。
         double gasQi = BREATH_OUTPUT_QI * gasShare;
-        double freeQi = BREATH_OUTPUT_QI - gasQi;
         var output = QiInventory.newBuilder();
-        if (freeQi > 0) {
-            output.addEntries(qi(NONE, freeQi, QiDensity.FREE));
-        }
-        if (gasQi > 0) {
-            output.addEntries(qi(NONE, gasQi, QiDensity.baseline(QiPhase.GAS)));
-        }
+        split(output, attribute, BREATH_OUTPUT_QI - gasQi, QiDensity.FREE, nativeShare);
+        split(output, attribute, gasQi, QiDensity.baseline(QiPhase.GAS), nativeShare);
         return output.build();
+    }
+
+    private static void split(QiInventory.Builder output, String attribute, double amount, double density,
+                              double nativeShare) {
+        // 同一相态的一份产物分成无属性和本属性两行。
+        double nativeQi = amount * nativeShare;
+        if (amount - nativeQi > 0) {
+            output.addEntries(qi(NONE, amount - nativeQi, density));
+        }
+        if (nativeQi > 0) {
+            output.addEntries(qi(attribute, nativeQi, density));
+        }
     }
 
     private static Qi qi(String attribute, double amount, double density) {

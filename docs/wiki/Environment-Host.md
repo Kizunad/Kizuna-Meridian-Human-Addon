@@ -22,7 +22,7 @@ Human 为可信服务端宿主提供位置查询、真元释放、交接回收�
 
 ## 查询、受理与入账
 
-查询按方块坐标换算区域，负坐标向下整除。主世界区域按固定中心群系初始化一次，后续读取已保存库存。来源 ID 为 `human:world_<epoch>/minecraft/overworld/<区域X>/<区域Z>`。`RegionView` 包含来源 ID、体积、逐属性/相态库存、浓度、revision 和 `spare_absorption_per_second`，不限制属性命名空间。`spare_absorption_per_second` 是从查询时刻起一秒内还剩的共享速率（元/秒），扣掉了吐纳的身体和装置取用已占的部分，也扣掉了取用规则里防舍入的那点余量，所以等于这一秒装置取用最多能拿到的速率；低于最小可流转量（`QiAccounting.MIN_TRANSFER_QI`）的余数一份也取不出，按 0 报；窗口已到期、还没续上时按当前上限算。Brewing 起熬前用它估环境能给这一锅多少。
+查询按方块坐标换算区域，负坐标向下整除。有灵气的维度（地形配置里列出的：随包是主世界和下界，见 Framework 的 `generation.dimension_id`、`extra_dimension_ids`）的区域按固定中心群系初始化一次，后续读取已保存库存。来源 ID 为 `human:world_<epoch>/<维度的命名空间>/<维度名>/<区域X>/<区域Z>`，如 `…/minecraft/overworld/…`、`…/minecraft/the_nether/…`。`RegionView` 包含来源 ID、体积、逐属性/相态库存、浓度、revision 和 `spare_absorption_per_second`，不限制属性命名空间。`spare_absorption_per_second` 是从查询时刻起一秒内还剩的共享速率（元/秒），扣掉了吐纳的身体和装置取用已占的部分，也扣掉了取用规则里防舍入的那点余量，所以等于这一秒装置取用最多能拿到的速率；低于最小可流转量（`QiAccounting.MIN_TRANSFER_QI`）的余数一份也取不出，按 0 报；窗口已到期、还没续上时按当前上限算。Brewing 起熬前用它估环境能给这一锅多少。
 
 释放库存必须非空，数量、密度、相态及重复明细由 Framework 校验。同 ID 同完整内容返回 `duplicate=true`，不重新排队；同 ID 改变位置或库存返回 `REQUEST_ID_CONFLICT`。重试始终携带原内容，释放 ID 不得复用。
 
@@ -30,14 +30,14 @@ Human 为可信服务端宿主提供位置查询、真元释放、交接回收�
 
 只有该 ID 已包含在一次完整成功的保存中，重发 `release` 才返回 `persisted=true`；加载正式文件时也恢复该确认集合。不能用 `duplicate` 代替持久化确认。正常磁盘、每 tick 重试时，受理到取得确认最多两个服务器 tick，20 TPS 时约 100 毫秒；这包含模组回调顺序及当 tick 已保存的情况。主线程只花截快照的时间（实测约 0.1 毫秒）；两 tick 之间的空闲够写完就不再占主线程，不够时（服务器已经跑不满 20 TPS，或 GameTest 服务端这种 tick 之间不睡眠的情况）下一 tick 开头等剩下的部分，最多等满一次写盘，和同步写盘一样。故障、暂停或低 TPS 下没有有限墙钟保证。
 
-主世界外部释放到对应来源的下一个 30 秒供给窗才入账，非主世界到受理后的下一个 30 秒边界进入默认账户。入账失败保留队列，下次续窗重试；本窗内不改变玩家使用的来源 revision。身体、区域、默认账户、`release_ids` 与 `pending_credits` 同存 `data/meridian_human.dat`。
+有灵气的维度里，外部释放到对应来源的下一个 30 秒供给窗才入账；别的维度（如末地）到受理后的下一个 30 秒边界进入默认账户。入账失败保留队列，下次续窗重试；本窗内不改变玩家使用的来源 revision。身体、区域、默认账户、`release_ids` 与 `pending_credits` 同存 `data/meridian_human.dat`。
 
 ## 装置取用
 
 `draw` 给炼药釜这类装置从所在区域取真元，接 Framework 的[装置取用](https://github.com/Kizunad/Kizuna-Meridian-Mod-Framework/wiki/Environment-Qi#装置取用)：
 
 1. 同 ID 同完整内容返回首次结果和 `duplicate=true`，不再取；同 ID 改了位置或数量返回 `REQUEST_ID_CONFLICT`。`amount` 必须是正有限数，否则 `INVALID_REQUEST`。
-2. 主世界外没有区域，返回不设 `source_id` 的空结果。
+2. 没有灵气的维度（地形配置里没列的，如末地）没有区域，返回不设 `source_id` 的空结果。
 3. 受理时先结清已到期的供给窗口，再从受理时刻起记一秒区间 `[now, now+1s)`，窗口剩下不到一秒就截到窗尾。
 4. 能取的量 = 想取的、`(spareRate − 窗口上限 × 1e-9) × 区间秒数`（速率低于最小可流转量时记 0）、区域实际库存三者取最小（留的一点余量防止按比例分摊的舍入越过上限），按库存里各属性的比例分摊；低于最小可流转量的那份不取。取到多少回多少，可以比想要的少，也可以是零，零不算失败。
 5. 取出的真元进 Framework 默认释放账户，同时按区域登记一笔待放回，和玩家释放共用同一队列，到这个区域的下个窗口整批放回原区域。总账守恒，区域不会被熬干，抢的是速率。

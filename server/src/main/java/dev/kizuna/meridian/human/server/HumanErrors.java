@@ -25,7 +25,8 @@ public final class HumanErrors {
     public static final String INVALID_DAMAGE_KIND = "人体伤害需要已知的致伤机制";
     public static final String INVALID_SPILLOVER = "人体伤害蔓延配置或剂量无效";
     public static final String SPILLOVER_LOAD_FAILED = "人体伤害蔓延配置读取失败";
-    public static final String INVALID_BREATHING = "人体吐纳配置无效：true_qi_gas_share 要是 0 到 1 之间的小数";
+    public static final String INVALID_BREATHING =
+            "人体吐纳配置无效：true_qi_gas_share、native_share 要是 0 到 1 之间的小数";
     public static final String BREATHING_LOAD_FAILED = "人体吐纳配置读取失败";
     public static final String INVALID_CULTIVATION_RULES = "中焦周天配置无效：true_qi_density_gain 要是大于 0 的小数，"
             + "true_qi_min_batch 要是大于 0、不超过 10 的小数";

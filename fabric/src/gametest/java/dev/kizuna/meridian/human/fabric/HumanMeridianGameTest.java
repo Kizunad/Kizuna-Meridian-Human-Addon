@@ -23,6 +23,7 @@ import static dev.kizuna.meridian.human.fabric.HumanGameTestTicks.DEFAULT_TIMEOU
 /** 整体回归：游戏服务端加载真实人体内容，并由玩家宿主执行新拓扑扩散和存档恢复。 */
 public final class HumanMeridianGameTest {
     private static final int RELEASE_COORDINATE = -1;
+    private static final int FIVE_ELEMENTS = 5;
     private static final long RELEASE_WINDOW_MILLIS = 30_000;
     private static final double GAS_RELEASE_AMOUNT = 4;
     private static final double LIQUID_RELEASE_AMOUNT = 2;
@@ -155,22 +156,28 @@ public final class HumanMeridianGameTest {
     }
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)
-    public void nonOverworldReleaseStaysInDefaultAccountAndInvalidInventoryIsRejected(GameTestHelper context) {
-        // 存在的非主世界不生成区域，外部释放仍须排队并随同一存档恢复。
+    public void releaseWhereNoQiExistsStaysInDefaultAccountAndInvalidInventoryIsRejected(GameTestHelper context) {
+        // 没有灵气的维度（地形配置里没列的，末地）不生成区域，外部释放仍须排队并随同一存档恢复。
+        // 下界在随包配置的额外维度里，有区域：来源 ID 带着维度名，库存是五行俱全的。
+        var end = context.getLevel().getServer().getLevel(net.minecraft.world.level.Level.END);
         var nether = context.getLevel().getServer().getLevel(net.minecraft.world.level.Level.NETHER);
-        context.assertTrue(nether != null, "测试服务器未加载下界");
+        context.assertTrue(end != null && nether != null, "测试服务器未加载末地或下界");
         var state = new HumanWorldState();
-        var position = RegionQuery.newBuilder().setDimensionId("minecraft:the_nether").build();
-        context.assertTrue(state.query(nether, 0, 0, 0) == null, "下界意外生成区域");
+        var position = RegionQuery.newBuilder().setDimensionId("minecraft:the_end").build();
+        context.assertTrue(state.query(end, 0, 0, 0) == null, "末地意外生成区域");
+        var netherRegion = state.query(nether, 0, 0, 0);
+        context.assertTrue(netherRegion != null && netherRegion.getSourceId().contains("/minecraft/the_nether/")
+                && netherRegion.getInventory().getEntriesCount() == FIVE_ELEMENTS,
+                "下界没有生成五行俱全的区域：" + netherRegion);
         var qi = new QiInventory(List.of(new Qi(Qi.QiAttribute.of("qi_variants:wither"), 7, .01)));
-        var release = RegionRelease.newBuilder().setReleaseId("gametest:nether-release")
+        var release = RegionRelease.newBuilder().setReleaseId("gametest:end-release")
                 .setPosition(position).setReleasedQi(BodyProtobuf.toInventory(qi)).build();
-        context.assertTrue(!state.release(release, nether, 1).hasSourceId(), "无区域释放返回了来源 ID");
-        context.assertTrue(defaultReleased(state.save(new CompoundTag())) == 0, "非主世界释放跳过队列");
+        context.assertTrue(!state.release(release, end, 1).hasSourceId(), "无区域释放返回了来源 ID");
+        context.assertTrue(defaultReleased(state.save(new CompoundTag())) == 0, "没有灵气的维度里的释放跳过队列");
         state = HumanWorldState.read(state.save(new CompoundTag()));
         state.renewEnvironment(30_000);
-        context.assertTrue(defaultReleased(state.save(new CompoundTag())) == 7, "非主世界释放未进入默认账户");
-        context.assertTrue(state.release(release, nether, 30_001).getDuplicate(), "无区域释放重试未去重");
+        context.assertTrue(defaultReleased(state.save(new CompoundTag())) == 7, "没有灵气的维度里的释放未进入默认账户");
+        context.assertTrue(state.release(release, end, 30_001).getDuplicate(), "无区域释放重试未去重");
 
         // 非法明细不得占用释放 ID；修正同一请求后仍能首次受理。
         for (double amount : new double[] {0, -1, Double.NaN, Double.POSITIVE_INFINITY}) {
@@ -179,16 +186,16 @@ public final class HumanMeridianGameTest {
                             release.getReleasedQi().getEntries(0).toBuilder().setAmount(amount))).build();
             boolean rejected = false;
             try {
-                state.release(invalid, nether, 30_001);
+                state.release(invalid, end, 30_001);
             } catch (IllegalArgumentException expected) {
                 rejected = true;
             }
             context.assertTrue(rejected, "非法释放明细未拒绝");
             context.assertTrue(!state.release(invalid.toBuilder().setReleasedQi(release.getReleasedQi()).build(),
-                    nether, 30_001).getDuplicate(), "非法请求占用了释放 ID");
+                    end, 30_001).getDuplicate(), "非法请求占用了释放 ID");
         }
-        // 玩家在下界死亡没有区域归位项，既有余额继续留在默认账户。
-        var player = new net.minecraft.server.level.ServerPlayer(nether.getServer(), nether,
+        // 玩家在末地死亡没有区域归位项，既有余额继续留在默认账户。
+        var player = new net.minecraft.server.level.ServerPlayer(end.getServer(), end,
                 new com.mojang.authlib.GameProfile(java.util.UUID.randomUUID(), "EnvironmentTest"),
                 net.minecraft.server.level.ClientInformation.createDefault());
         long deathMillis = 30_001;
@@ -197,16 +204,16 @@ public final class HumanMeridianGameTest {
         body.settle(deathMillis);
         double bodyQi = body.snapshot().totalQi();
         var death = dev.kizuna.meridian.protocol.pb.MeridianMessages.RequestEnvelope.newBuilder()
-                .setProtocolVersion(1).setRequestId("gametest:nether-death")
+                .setProtocolVersion(1).setRequestId("gametest:end-death")
                 .setBodyCommand(dev.kizuna.meridian.protocol.pb.MeridianMessages.BodyCommand.newBuilder()
                         .setBodyId(body.snapshot().id().value()).setExpectedRevision(body.snapshot().revision())
                         .setConfirmBodyDeath(dev.kizuna.meridian.protocol.pb.HealthMessages.ConfirmBodyDeath.newBuilder()
                                 .setSourceId("gametest:death"))).build();
-        context.assertTrue(body.applyHealth(deathMillis, death).hasCommandCommitted(), "下界玩家死亡未提交");
+        context.assertTrue(body.applyHealth(deathMillis, death).hasCommandCommitted(), "末地玩家死亡未提交");
         state.renewEnvironment(60_000);
         var saved = state.save(new CompoundTag());
-        context.assertTrue(Math.abs(defaultReleased(saved) - 35 - bodyQi) < 1e-7, "下界玩家释放丢失或被转出");
-        context.assertTrue(saved.getListOrEmpty("pending_credits").isEmpty(), "下界玩家生成了默认归位队列");
+        context.assertTrue(Math.abs(defaultReleased(saved) - 35 - bodyQi) < 1e-7, "末地玩家释放丢失或被转出");
+        context.assertTrue(saved.getListOrEmpty("pending_credits").isEmpty(), "末地玩家生成了默认归位队列");
         context.succeed();
     }
 
@@ -231,10 +238,11 @@ public final class HumanMeridianGameTest {
         var now = EnvironmentHostResponse.parseFrom(new HumanEnvironmentHost().exchange(request));
         context.assertTrue(now.hasNow() && now.getNow().getDomain().equals("human:minecraft")
                 && !now.getNow().getEpoch().isBlank(), "主线程未返回 Human 世界时钟");
-        var query = EnvironmentHostRequest.newBuilder().setProtocolVersion(1).setRequestId("gametest:nether-query")
-                .setQuery(RegionQuery.newBuilder().setDimensionId("minecraft:the_nether")).build();
+        var query = EnvironmentHostRequest.newBuilder().setProtocolVersion(1).setRequestId("gametest:end-query")
+                .setQuery(RegionQuery.newBuilder().setDimensionId("minecraft:the_end")).build();
         context.assertTrue(EnvironmentHostResponse.parseFrom(new HumanEnvironmentHost().exchange(query.toByteArray()))
-                .getResultCase() == EnvironmentHostResponse.ResultCase.RESULT_NOT_SET, "非主世界查询未返回空结果");
+                .getResultCase() == EnvironmentHostResponse.ResultCase.RESULT_NOT_SET,
+                "没有灵气的维度（末地）查询未返回空结果");
         var invalidClock = EnvironmentHostRequest.parseFrom(request).toBuilder().setClock(false).build();
         context.assertTrue(EnvironmentHostResponse.parseFrom(new HumanEnvironmentHost().exchange(invalidClock.toByteArray()))
                 .getFailure().getCode() == FailureCode.INVALID_REQUEST, "clock=false 未拒绝");

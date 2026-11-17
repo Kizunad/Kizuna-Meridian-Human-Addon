@@ -445,7 +445,7 @@ final class HumanWorldState {
         // 这里只校验受理时间，负值会抛出 INVALID_REQUEST。
         time(millis);
         String dimension = world.dimension().identifier().toString();
-        if (!dimension.equals("minecraft:overworld")) {
+        if (!generation.supports(dimension)) {
             return null;
         }
         int regionX = rules.regionCoordinate(chunk.x());
@@ -786,7 +786,7 @@ final class HumanWorldState {
     private String drawSourceId(RegionDraw request) {
         // 存档校验用：取用结果的来源必须就是原位置所在区域。
         String dimension = request.getPosition().getDimensionId();
-        if (!dimension.equals("minecraft:overworld")) {
+        if (!generation.supports(dimension)) {
             return "";
         }
         int x = rules.regionCoordinate(Math.floorDiv(request.getPosition().getBlockX(), CHUNK_WIDTH_BLOCKS));
@@ -797,7 +797,7 @@ final class HumanWorldState {
     private String releaseSourceId(RegionRelease request) {
         // 存档校验根据原位置推导目的地，不创建任何隐藏区域。
         String dimension = request.getPosition().getDimensionId();
-        if (!dimension.equals("minecraft:overworld")) {
+        if (!generation.supports(dimension)) {
             return "";
         }
         int x = rules.regionCoordinate(Math.floorDiv(request.getPosition().getBlockX(), 16));

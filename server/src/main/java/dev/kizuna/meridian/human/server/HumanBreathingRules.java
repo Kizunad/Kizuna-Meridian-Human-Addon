@@ -7,16 +7,19 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** 人体吐纳的服务端可调项：真炁以后吐纳产物里直接成为气态的份额。 */
+/** 人体吐纳的服务端可调项：真炁以后吐纳产物里直接成为气态的份额，和产物里留成本属性的份额。 */
 public final class HumanBreathingRules {
     public static final String FILE_NAME = "meridian-human-breathing.toml";
     private static final String GAS_SHARE_KEY = "true_qi_gas_share";
+    private static final String NATIVE_SHARE_KEY = "native_share";
     private static HumanBreathingRules configuredRules = defaults();
     private final double trueQiGasShare;
+    private final double nativeShare;
 
-    private HumanBreathingRules(double trueQiGasShare) {
+    private HumanBreathingRules(double trueQiGasShare, double nativeShare) {
         // 份额在服务端启动时固定，吐纳配方随内容包一次建成。
         this.trueQiGasShare = trueQiGasShare;
+        this.nativeShare = nativeShare;
     }
 
     public static HumanBreathingRules defaults() {
@@ -48,17 +51,23 @@ public final class HumanBreathingRules {
     }
 
     public static HumanBreathingRules parse(String text) {
-        // 份额必须显式写成 0 到 1 的小数；整数、越界或缺项都按配置错误拒绝。
+        // 份额必须显式写成 0 到 1 的小数；整数、越界都按配置错误拒绝。气态份额缺项也拒绝；
+        // 本属性份额是后加的，旧配置文件里没有这一项就按随包的走。
         var parsed = Toml.parse(text);
-        if (parsed.hasErrors() || !(parsed.get(GAS_SHARE_KEY) instanceof Double share)) {
+        if (parsed.hasErrors()) {
             throw HumanErrors.invalid(HumanErrors.INVALID_BREATHING);
         }
+        double nativeShare = parsed.contains(NATIVE_SHARE_KEY) ? share(parsed.get(NATIVE_SHARE_KEY))
+                : share(Toml.parse(defaultText()).get(NATIVE_SHARE_KEY));
+        return new HumanBreathingRules(share(parsed.get(GAS_SHARE_KEY)), nativeShare);
+    }
+
+    private static double share(Object value) {
         // 写成「在区间内」再取反，nan 也按越界拒绝。
-        boolean inRange = share >= 0 && share <= 1;
-        if (!inRange) {
+        if (!(value instanceof Double share) || !(share >= 0 && share <= 1)) {
             throw HumanErrors.invalid(HumanErrors.INVALID_BREATHING);
         }
-        return new HumanBreathingRules(share);
+        return share;
     }
 
     private static String defaultText() {
@@ -76,5 +85,10 @@ public final class HumanBreathingRules {
     public double trueQiGasShare() {
         // 真炁吐纳配方产物里气态所占的份额。
         return trueQiGasShare;
+    }
+
+    public double nativeShare() {
+        // 吐纳配方产物里留成本属性（吸的是火就是火行）的份额，其余是无属性。
+        return nativeShare;
     }
 }
