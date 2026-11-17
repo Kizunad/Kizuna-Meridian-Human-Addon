@@ -11,6 +11,18 @@
 - 新通信语义确有需要时先设计 Protobuf 契约；通用算子归框架，人体数值、构型和固有配方归本仓库，功法学习与 3D 内景不混入人体附属。
 - 运行时异常和文案集中在 `server/src/main/java/dev/kizuna/meridian/human/server/HumanErrors.java`；框架拒绝保持其原始 Protobuf 失败码。指令反馈与登录提示用 `fabric/src/main/resources/assets/meridian_human_host/lang`，键名集中在 `HumanLang`。
 - 只保留必要整体回归，覆盖独立内容注册、真实请求链、守恒、失败与重试、恢复和产物；临时验证通过后清理。
-- 文档编辑源为 `docs/wiki/`，README 仅作为入口。行为或内容契约变化同步更新文档，交付前运行 `./gradlew build`、`./gradlew demo` 与文档检查。
+- 文档编辑源为 `docs/wiki/`，README 仅作为入口。行为或内容契约变化同步更新文档，交付前运行文档检查。
 - 用 patch/Edit 修改文件，命令路径使用双引号。保留用户修改，不强推、不改历史；提交、推送与远端建仓分别按用户授权执行。
 - PolyForm Noncommercial 1.0.0；保留第三方许可。没有真实游戏宿主验证前，不称作已可直接放入 mods 的 Fabric 模组。
+
+## 构建和测试
+
+构建、测试一律走工作区的 `kz`（`~/Code/Kizuna-remote-session/scripts/kz`），不直接运行 `./gradlew`。细则以 `~/Code/Kizuna-remote-session/handoff/codex-worker-rules.md` 为准，动手前先读。
+
+- 单测、构建和服务端 GameTest：`kz test ~/Code/<本仓的 worktree>`
+- 要带上别的仓的 worktree 一起测：每个加一次 `--with ~/Code/<那个仓的 worktree>`
+- 客户端测试：`kz client ~/Code/<本仓的 worktree>` 列出有哪些项，`kz client ~/Code/<本仓的 worktree> <项>` 跑其中一项
+- 要自己写 Gradle 参数时：`kz gradle ~/Code/<本仓的 worktree> -- <参数>`
+- 不提交、不推送；在自己的 worktree（`~/Code/wt-*`）里改，不改主目录。
+
+本仓额外要跑：`kz gradle ~/Code/<本仓的 worktree> -- demo`。
