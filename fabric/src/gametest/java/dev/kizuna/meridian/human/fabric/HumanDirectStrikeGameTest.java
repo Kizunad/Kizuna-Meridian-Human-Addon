@@ -143,6 +143,7 @@ public final class HumanDirectStrikeGameTest {
                 context.assertTrue(instance != null && instance.getAmplifier() == 0
                         && instance.getDuration() == DEFAULT_BODILESS_NUMB_TICKS,
                         "带麻的一拳没有给没身体的目标配置里写的 3 秒一级原版状态：" + instance);
+                context.assertTrue(!instance.isVisible() && instance.showIcon(), "挨麻给的状态要不出粒子、有图标：" + instance);
             }
         }
         context.succeed();

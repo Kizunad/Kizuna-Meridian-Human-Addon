@@ -101,7 +101,9 @@ final class HumanDirectStrikes {
                              int ticks) {
         // 配置里的等级从 1 起算，原版的放大值从 0 起算；等级 0 是「这一样不给」。
         if (level > 0) {
-            target.addEffect(new MobEffectInstance(effect, ticks, level - 1), source.getEntity());
+            // 我们给的状态效果不出粒子，图标照常显示。
+            target.addEffect(new MobEffectInstance(effect, ticks, level - 1, false /* ambient */,
+                    false /* showParticles */, true /* showIcon */), source.getEntity());
         }
     }
 
