@@ -25,9 +25,9 @@ import static org.apache.commons.lang3.Validate.isTrue;
 
 /** 真客户端同时验证疾跑预测与 PA 实际播放，截图只作为审片辅助。 */
 public final class HumanGuardClientTest implements FabricClientGameTest {
-    private static final String HOLD = "block_two_hand";
-    private static final String HIT = "block_two_hand_hit";
-    private static final String LOWER = "stance_exit";
+    private static final String HOLD = "guard_arms";
+    private static final String HIT = "guard_arms_hit";
+    private static final String LOWER = "guard_arms_lower";
     private static final int SETTLE_TICKS = 3;
     private static final int LONG_GUARD_TICKS = 45;
     private static final int AFTER_RECOVERY_TICKS = 12;

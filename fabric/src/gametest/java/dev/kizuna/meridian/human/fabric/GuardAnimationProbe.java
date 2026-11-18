@@ -19,9 +19,9 @@ import java.util.Set;
 
 /** 解析实际 PA 输出，避免只测映射字符串而漏掉宿主接线。 */
 final class GuardAnimationProbe {
-    static final String HOLD = "block_two_hand";
-    static final String HIT = "block_two_hand_hit";
-    static final String LOWER = "stance_exit";
+    static final String HOLD = "guard_arms";
+    static final String HIT = "guard_arms_hit";
+    static final String LOWER = "guard_arms_lower";
     private static final double ORGAN_SHARE = 0.6;
 
     private GuardAnimationProbe() {

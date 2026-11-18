@@ -24,9 +24,9 @@ Damage 的 `DamageInput.guarded` 提供本击冻结的 body/cast 身份，匹配
 最后前臂毁掉的顺序是命中反馈、停止保持与反馈、收势，硬控取消直接停止而不播放收势。
 实际片段按施放身份跟踪，重复收势和旧施放通知不会重播或停止后一次守。
 
-临时动作映射集中在 `HumanTechniqueAnimations`：`guard_arms` → `block_two_hand`，
-收势 → `stance_exit`，受击 → `block_two_hand_hit`。这些是借用资源，未宣称正式 200/300 ms 动作已交付；
-宿主在玩法收势结束时主动停止借用的落手片段。死亡沿原取消/恢复清理；断线、跨维度与实体替换在旧实体
+动作映射集中在 `HumanTechniqueAnimations`：保持 → `guard_arms`，收势 → `guard_arms_lower`，
+受击 → `guard_arms_hit`，三段都是 Players-Animation 里为空手抱架做的片段。
+宿主在玩法收势结束时主动停止落手片段。死亡沿原取消/恢复清理；断线、跨维度与实体替换在旧实体
 仍可访问时先取消，再通过恢复入口完成遗留清理。停服清理排在功法服务关闭之前，不能遗留身体进度、属性和实际动作。
 
 ## 身体与活动

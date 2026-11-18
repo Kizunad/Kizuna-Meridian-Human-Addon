@@ -67,9 +67,9 @@ public final class HumanTechniqueAnimations {
     public static String guard(GuardMotion motion) {
         // 三段守式动作集中映射到 PA 剪辑，玩法时间仍由功法数据控制。
         return switch (motion) {
-            case HOLD -> "block_two_hand";
-            case LOWER -> "stance_exit";
-            case HIT -> "block_two_hand_hit";
+            case HOLD -> "guard_arms";
+            case LOWER -> "guard_arms_lower";
+            case HIT -> "guard_arms_hit";
         };
     }
 }
