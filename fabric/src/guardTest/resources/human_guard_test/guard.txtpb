@@ -1,5 +1,6 @@
 schema_version: 1
 namespace: "human_guard_test"
+binding_templates { id: "human:adult" version: 1 }
 definitions {
   id: "human_guard_test:guard"
   version: 1

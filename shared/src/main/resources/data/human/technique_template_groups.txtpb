@@ -1,0 +1,6 @@
+schema_version: 1
+groups {
+  id: "human:humanoid"
+  base { id: "human:adult" version: 1 }
+  members { id: "human:adult" version: 1 }
+}
