@@ -9,6 +9,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueCost
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueVolume;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Unit;
+import dev.kizuna.meridian.technique.server.TechniqueAddonResources;
 import dev.kizuna.meridian.technique.server.TechniqueRegistry;
 import dev.kizuna.meridian.technique.server.TechniqueRegistryEntrypoint;
 
@@ -41,7 +42,10 @@ public final class HumanCombatTestCatalog implements TechniqueRegistryEntrypoint
         for (var definition : original.getDefinitionsList()) {
             catalog.addDefinitions(definition(definition));
         }
-        return TechniqueRegistry.load(HumanTechniqueTestCatalog.addons(), List.of(catalog.build()));
+        // 正式目录绑定整个类人模板组，按装配中的内容包校验组内每个成员。
+        var combatCatalog = catalog.build();
+        var resources = new TechniqueAddonResources(HumanCombatTestCatalog.class.getClassLoader());
+        return TechniqueRegistry.load(resources.registry(combatCatalog), List.of(combatCatalog));
     }
 
     private static TechniqueCatalog load() {

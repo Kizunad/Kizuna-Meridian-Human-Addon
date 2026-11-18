@@ -67,6 +67,7 @@ public final class HumanErrors {
     public static final String STATUS_VIEW_REQUIRED = "身体状态视图不能为空";
     public static final String STATUS_DETAIL_DUPLICATE = "/meridian body status full 已由其他附属登记";
     public static final String HOST_FAILED = "人体宿主结算失败，已暂停该身体";
+    public static final String STOP_CLEANUP_FAILED = "停服时清理玩家人体失败";
     public static final String HOST_REJECTED = "人体宿主拒绝请求";
     public static final String HOST_RECOVERY = HOST_FAILED + "。请退出世界后重新加入以重新认领；身体数据不会重置。"
             + "若仍失败，请保留日志联系服主。";

@@ -192,6 +192,8 @@ python3 "scripts/check_docs.py"
 
 `data/meridian_human.dat` 同时保存 Protobuf 身体、成功回执和释放账户。重连只推进离线世界模拟时间对应的寿命，疲劳冻结；停止残留移动实例，但保留其他附属动作。存档加载失败暂停人体功能并保留文件，不自动新建覆盖。当前复用框架内存参考 Store：回执不按时间过期，每具身体只留最近 256 条，窗口外的旧请求重发由预期 revision 拒绝，见 Framework《身体数据、寿命与持久化》的保存职责。旧存档读入时裁短并标记待保存，下次保存文件就变小。
 
+服务器带玩家停服时，人体宿主先取消在线玩家的施放并恢复遗留的动作锁。功法库卸下组织效果后，人体宿主撤销玩家认领并结清移动和吐纳。原版保存世界时，人体宿主同步写完 `data/meridian_human.dat`，下次进入世界读取这份身体状态。
+
 ### 行走负荷提供者
 
 2026-10-30 源码新增服务端接入点，JUnit 已覆盖倍率与爆发截断。可信附属在模组初始化阶段调用一次 `HumanMovementLoads.register(HumanMovementLoad)`；第二次注册抛出 `IllegalStateException`，避免两个附属争用同一规则。`HumanMovementLoad.multiplier(ServerPlayer)` 返回当前负荷倍率，`status(ServerPlayer)` 返回 `/meridian body status` 总览末尾追加的一行，返回空则不追加。

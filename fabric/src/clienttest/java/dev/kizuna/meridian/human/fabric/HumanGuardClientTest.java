@@ -11,15 +11,21 @@ import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.screenshot.TestScreenshotOptions;
+import net.fabricmc.fabric.api.client.gametest.v1.world.TestWorldSave;
 import net.minecraft.client.CameraType;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Blocks;
 import org.lwjgl.glfw.GLFW;
+
+import java.io.IOException;
+import java.util.UUID;
 
 import static org.apache.commons.lang3.Validate.isTrue;
 
@@ -35,12 +41,17 @@ public final class HumanGuardClientTest implements FabricClientGameTest {
     private static final double HIT_HP = 0.1;
     private static final double STAND_Y = 65;
     private static final int FULL_FOOD = 20;
+    private static final int SAVED_XP_LEVEL = 37;
+    private static final BlockPos SAVED_BLOCK = new BlockPos(1, 64, 1);
 
     @Override
     public void runTest(ClientGameTestContext context) {
-        // 一次新建集成服里连续两次守，复用正式状态同步和动画网络入口。
+        // 在收势中停服，并在同一存档重进核对玩家、区块和身体。
         Departing departing;
-        try (TestSingleplayerContext world = context.worldBuilder().create()) {
+        var world = context.worldBuilder().create();
+        var save = world.getWorldSave();
+        var serverThread = world.getServer().computeOnServer(MinecraftServer::getRunningThread);
+        try {
             prepare(context, world);
             sprintBeforeGuard(context);
             String cast = start(context, world);
@@ -52,13 +63,61 @@ public final class HumanGuardClientTest implements FabricClientGameTest {
             release(context, world, cast);
             shortTap(context, world);
             departing = departure(context, world);
+            world.getServer().runOnServer(HumanGuardClientTest::markForSave);
+        } finally {
+            // 直接请求整合服停机，让本地玩家留在在线列表里进入 SERVER_STOPPING。
+            context.runOnClient(Minecraft::disconnectWithSavingScreen);
         }
-        context.runOnClient(client -> isTrue(!HumanGuardClient.blocksSprint(), "离开世界残留疾跑预测锁"));
+        context.waitFor(client -> !serverThread.isAlive());
         ServerPlayer departed = departing.player();
         isTrue(!HumanTechniqueHost.isCasting(departed.getUUID()), "断线停服后仍占用输入");
         isTrue(departed.getAttributeValue(Attributes.MOVEMENT_SPEED) == departing.speed(),
                 "断线停服后旧实体残留减速");
         isTrue(!TechniqueState.read(departing.body().snapshot()).hasActiveCast(), "断线停服后身体残留施放");
+        assertSaved(save, departed.getUUID());
+        context.waitFor(client -> !HumanGuardClient.blocksSprint());
+        try (var reloaded = save.open()) {
+            reloaded.getServer().runOnServer(HumanGuardClientTest::assertReloaded);
+        }
+    }
+
+    private static void markForSave(MinecraftServer server) {
+        // 在最后一次服务器操作才改三个互相独立的持久化标记。
+        var player = player(server);
+        var playerId = player.getUUID();
+        var state = HumanTechniqueHost.state();
+        var body = state.find(playerId);
+        isTrue(HumanTechniqueHost.isCasting(playerId), "停服前玩家应仍在施放");
+        isTrue(!body.progress().getQiNotesRead(), "测试身体已有已读标记");
+        var progress = body.progress().toBuilder()
+                .setQiNotesRead(true /* read */)
+                .build();
+        body.writeProgress(progress);
+        state.setDirty();
+        player.setExperienceLevels(SAVED_XP_LEVEL);
+        isTrue(server.overworld().setBlockAndUpdate(SAVED_BLOCK, Blocks.EMERALD_BLOCK.defaultBlockState()),
+                "写入停服测试方块失败");
+    }
+
+    private static void assertSaved(TestWorldSave save, UUID playerId) {
+        // 重新登录本身也会清残留，须在开服前直接解码磁盘上的身体。
+        var file = save.getSaveDirectory().resolve("data/meridian_human.dat");
+        try {
+            var body = HumanWorldState.load(file).find(playerId);
+            isTrue(body != null && body.progress().getQiNotesRead(), "停服未写入已读进度");
+            isTrue(!TechniqueState.read(body.snapshot()).hasActiveCast(), "停服存档残留施放");
+        } catch (IOException failure) {
+            throw new AssertionError("无法读取停服后的人体存档 " + file, failure);
+        }
+    }
+
+    private static void assertReloaded(MinecraftServer server) {
+        // 从同一目录新启动的服务器读取三个标记。
+        var player = player(server);
+        isTrue(player.experienceLevel == SAVED_XP_LEVEL, "重进后玩家经验等级丢失");
+        isTrue(server.overworld().getBlockState(SAVED_BLOCK).is(Blocks.EMERALD_BLOCK), "重进后世界方块丢失");
+        var body = HumanTechniqueHost.state().find(player.getUUID());
+        isTrue(body != null && body.progress().getQiNotesRead(), "重进后人体进度丢失");
     }
 
     private static Departing departure(ClientGameTestContext context, TestSingleplayerContext world) {

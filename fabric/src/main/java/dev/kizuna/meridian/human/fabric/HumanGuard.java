@@ -7,8 +7,6 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueEffe
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
 import dev.kizuna.meridian.vanilla.fabric.VanillaDamageFabric;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
-import net.fabricmc.fabric.api.event.Event;
-import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemUseAnimation;
@@ -17,7 +15,6 @@ import java.util.Optional;
 
 /** 玩家守式只接准入和表现；持续阶段与防御事实分别由功法库和 Damage 提供。 */
 final class HumanGuard {
-    private static final Identifier CLEANUP_PHASE = Identifier.parse("meridian_human:technique_cleanup");
     private static MinecraftServer server;
 
     private HumanGuard() {
@@ -26,7 +23,8 @@ final class HumanGuard {
 
     static void initialize() {
         // 准入先于 Movement LOCK，已举的盾不会因拒绝起式而被放下。
-        lifecycle();
+        ServerLifecycleEvents.SERVER_STARTING.register(starting -> server = starting);
+        ServerLifecycleEvents.SERVER_STOPPED.register(stopped -> server = null);
         TechniqueFabric.SERVICE_STARTED.register(service -> {
             service.addCastCheck((entity, request) -> {
                 ServerPlayer player = server.getPlayerList().getPlayer(entity);
@@ -45,15 +43,6 @@ final class HumanGuard {
             });
         });
         VanillaDamageFabric.registerDamageObserver(HumanGuard::hit);
-    }
-
-    private static void lifecycle() {
-        // 功法服务关闭之前宿主仍能结清身体并恢复遗留效果，不能等撤销认领后再取消。
-        ServerLifecycleEvents.SERVER_STARTING.register(starting -> server = starting);
-        ServerLifecycleEvents.SERVER_STOPPING.addPhaseOrdering(CLEANUP_PHASE, Event.DEFAULT_PHASE);
-        ServerLifecycleEvents.SERVER_STOPPING.register(CLEANUP_PHASE, stopping ->
-                stopping.getPlayerList().getPlayers().forEach(HumanTechniqueHost::beforeUnload));
-        ServerLifecycleEvents.SERVER_STOPPED.register(stopped -> server = null);
     }
 
     static boolean isGuard(TechniqueReference technique) {

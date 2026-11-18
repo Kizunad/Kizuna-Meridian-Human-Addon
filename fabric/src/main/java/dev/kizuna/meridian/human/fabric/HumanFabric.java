@@ -81,10 +81,13 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /** Fabric 宿主绑定；集成服务器与专服走相同的服务端权威路径。 */
 public final class HumanFabric implements ModInitializer {
     private static final Logger LOG = LoggerFactory.getLogger("meridian_human_host");
+    private static final Identifier TECHNIQUE_CLEANUP =
+            Identifier.fromNamespaceAndPath("meridian_human", "technique_cleanup");
     private static final Identifier DISCONNECT_CLEANUP =
             Identifier.fromNamespaceAndPath("meridian_human", "disconnect_cleanup");
     /** 每名玩家最多每 5 tick 推一次身体视图（每秒 4 次）。 */
@@ -208,8 +211,10 @@ public final class HumanFabric implements ModInitializer {
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> join(handler.player, server));
         // 功法库在默认阶段取消当前施放，Human 随后才结束自己的动作并撤销认领。
         ServerPlayConnectionEvents.DISCONNECT.addPhaseOrdering(Event.DEFAULT_PHASE, DISCONNECT_CLEANUP);
-        ServerPlayConnectionEvents.DISCONNECT.register(DISCONNECT_CLEANUP,
-                (handler, server) -> leave(handler.player, server));
+        ServerPlayConnectionEvents.DISCONNECT.register(DISCONNECT_CLEANUP, (handler, server) -> {
+            HumanTechniqueHost.beforeUnload(handler.player);
+            leave(handler.player, server);
+        });
         ServerEntityLevelChangeEvents.AFTER_PLAYER_CHANGE_LEVEL.register(
                 (player, origin, destination) -> resetGathering(player));
         ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
@@ -320,13 +325,13 @@ public final class HumanFabric implements ModInitializer {
                 fail(player, failure);
             }
         });
+        // 先取消施放并解锁，保留认领供默认阶段清理组织效果，服务关闭后再结清人体。
+        ServerLifecycleEvents.SERVER_STOPPING.addPhaseOrdering(TECHNIQUE_CLEANUP, Event.DEFAULT_PHASE);
+        ServerLifecycleEvents.SERVER_STOPPING.register(TECHNIQUE_CLEANUP,
+                server -> cleanOnlinePlayers(server, HumanTechniqueHost::beforeUnload));
         ServerLifecycleEvents.SERVER_STOPPING.addPhaseOrdering(Event.DEFAULT_PHASE, DISCONNECT_CLEANUP);
-        ServerLifecycleEvents.SERVER_STOPPING.register(DISCONNECT_CLEANUP, server -> {
-            // 保存前结清仍在线玩家，停止移动占用；不能把断线后的整段时间当作跑步。
-            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                leave(player, server);
-            }
-        });
+        ServerLifecycleEvents.SERVER_STOPPING.register(DISCONNECT_CLEANUP,
+                server -> cleanOnlinePlayers(server, player -> leave(player, server)));
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
             // 写盘线程上还没写完的交给它写完，再丢掉这次服务器的世界状态。
             if (state != null) {
@@ -679,29 +684,43 @@ public final class HumanFabric implements ModInitializer {
         return HealthHostProtobuf.encodeResponse(response.setFailure(failure).build());
     }
 
-    private void leave(ServerPlayer player, MinecraftServer server) {
-        // 先清施放与实体效果，再结束人体移动和吐纳并撤销认领。
-        HumanTechniqueHost.beforeUnload(player);
-        HumanPlayerBody body = state == null ? null : state.find(player.getUUID());
-        if (body != null && observers.containsKey(player.getUUID()) && !failed.contains(player.getUUID())) {
+    private static void cleanOnlinePlayers(MinecraftServer server, Consumer<ServerPlayer> cleanup) {
+        // 单个身体的清理失败要留下身份和堆栈，其余玩家和世界仍须完成停服保存。
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             try {
-                body.disconnectGathering(millis(server));
-                body.observe(millis(server), HumanPlayerBody.Motion.IDLE);
-                body.settle(millis(server));
-                state.setDirty();
+                cleanup.accept(player);
+            } catch (RuntimeException failure) {
+                LOG.error(HumanErrors.STOP_CLEANUP_FAILED + ": " + player.getUUID(), failure);
+            }
+        }
+    }
+
+    private void leave(ServerPlayer player, MinecraftServer server) {
+        // 功法库已完成取消和组织效果清理，晚到的断线回调可以安全重复释放。
+        UUID playerId = player.getUUID();
+        HumanTechniqueHost.disconnect(playerId);
+        if (state != null && observers.containsKey(playerId) && !failed.contains(playerId)) {
+            try {
+                HumanPlayerBody body = state.find(playerId);
+                if (body != null) {
+                    long now = millis(server);
+                    body.disconnectGathering(now);
+                    body.observe(now, HumanPlayerBody.Motion.IDLE);
+                    body.settle(now);
+                    state.setDirty();
+                }
             } catch (RuntimeException failure) {
                 fail(player, failure);
             }
         }
-        observers.remove(player.getUUID());
-        refreshBodyView(player.getUUID());
-        sentStructures.remove(player.getUUID());
-        receipts.forget(player.getUUID());
-        watching.remove(player.getUUID());
-        introspecting.remove(player.getUUID());
-        gatheringPackets.remove(player.getUUID());
+        observers.remove(playerId);
+        refreshBodyView(playerId);
+        sentStructures.remove(playerId);
+        receipts.forget(playerId);
+        watching.remove(playerId);
+        introspecting.remove(playerId);
+        gatheringPackets.remove(playerId);
         animations.stop(player);
-        HumanTechniqueHost.disconnect(player.getUUID());
     }
 
     private void revive(ServerPlayer player) {
