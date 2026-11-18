@@ -4,6 +4,7 @@ package dev.kizuna.meridian.human.server;
 public final class HumanTechniqueAnimations {
     public record Direction(double yawDegrees, double x, double z) { }
     public enum CastHand { MAIN, OFF }
+    public enum GuardMotion { HOLD, LOWER, HIT }
     /** 交给 PA 的起播时刻（世界 tick）和播放倍率。 */
     public record Playback(long startTick, float rate) { }
 
@@ -13,6 +14,9 @@ public final class HumanTechniqueAnimations {
     public static String resolve(String presentationId, Direction direction, CastHand selectedHand) {
         // 出招手来自起手快照；左右惯用手的镜像由 PA 在客户端处理。
         String path = presentationId.substring(presentationId.indexOf(':') + 1);
+        if (path.equals("guard_arms")) {
+            return guard(GuardMotion.HOLD);
+        }
         // 破门斩八式和行矢各式都分主手、副手两套剪辑。
         boolean handed = presentationId.startsWith("meridian_door_breaker:door_breaker_")
                 || presentationId.startsWith("meridian_wayfarer:wayfarer_");
@@ -58,5 +62,14 @@ public final class HumanTechniqueAnimations {
 
     private HumanTechniqueAnimations() {
         // 仅提供无 Minecraft 依赖的公开内容映射。
+    }
+
+    public static String guard(GuardMotion motion) {
+        // 三段守式动作集中映射到 PA 剪辑，玩法时间仍由功法数据控制。
+        return switch (motion) {
+            case HOLD -> "block_two_hand";
+            case LOWER -> "stance_exit";
+            case HIT -> "block_two_hand_hit";
+        };
     }
 }

@@ -520,7 +520,11 @@ public final class HumanTechniqueGameTest {
         int learned = HumanTestCommands.run(server.createCommandSourceStack(),
                 "meridian technique learn " + fixture.player.getStringUUID() + " "
                         + HumanTechniqueTestCatalog.TECHNIQUE_ID);
-        context.assertTrue(learned == 1 && TechniqueFabric.service().known(fixture.player.getUUID()).size() == 1,
+        var known = TechniqueFabric.service().known(fixture.player.getUUID());
+        long learnedCount = known.stream()
+                .filter(entry -> entry.technique().getId().equals(HumanTechniqueTestCatalog.TECHNIQUE_ID))
+                .count();
+        context.assertTrue(learned == 1 && learnedCount == 1,
                 "学会命令未写入可信知识");
     }
 

@@ -44,7 +44,7 @@ final class HumanTechniqueEffects {
             .buildAndRegister(Identifier.fromNamespaceAndPath("meridian_human", "technique_player_break_blocks"));
     private final Map<UUID, Executors> executors = new HashMap<>();
     // 每个玩家正在施放的 cast ID 及该式是否放行右键。
-    private final Map<UUID, Map<String, MovementIntent>> castingIds = new HashMap<>();
+    private final Map<UUID, Map<String, EffectIntent>> castingIds = new HashMap<>();
     private final Map<UUID, Map<String, EffectIntent>> requests = new HashMap<>();
     private final Map<UUID, Map<EffectKey, EffectIntent>> effects = new HashMap<>();
     private final Map<UUID, Map<String, EffectIntent>> executingRequests = new HashMap<>();
@@ -152,11 +152,12 @@ final class HumanTechniqueEffects {
 
     boolean blocksUse(Player player, InteractionHand hand, BlockPos target) {
         // 所有活动约束都必须放行；副手特例只适用于目录声明的目标方块标签。
-        Map<String, MovementIntent> casts = castingIds.get(player.getUUID());
+        Map<String, EffectIntent> casts = castingIds.get(player.getUUID());
         if (casts == null) {
             return false;
         }
-        for (MovementIntent movement : casts.values()) {
+        for (EffectIntent effect : casts.values()) {
+            MovementIntent movement = effect.getMovement();
             if (movement.getAllowUseWhileCasting()) {
                 continue;
             }
@@ -176,28 +177,44 @@ final class HumanTechniqueEffects {
         return false;
     }
 
+    boolean blocksSprint(UUID playerId) {
+        // 按已成功施加的锁及其精确功法判断，覆盖起手、守段和完整收势。
+        return castingIds.getOrDefault(playerId, Map.of()).values().stream()
+                .anyMatch(effect -> HumanGuard.isGuard(effect.getTechnique()));
+    }
+
+    boolean hasCast(UUID playerId, String castId) {
+        // 表现只认当前宿主仍持有的施放身份。
+        return castingIds.getOrDefault(playerId, Map.of()).containsKey(castId);
+    }
+
     private void updateCasting(ServerPlayer player, EffectIntent effect) {
         // 承接先结束旧式再开始新式，施放状态按稳定身份独立维护。
         UUID playerId = player.getUUID();
-        if (effect.getMovement().getAction() == MovementAction.LOCK) {
-            boolean allowUse = effect.getMovement().getAllowUseWhileCasting();
+        MovementIntent movement = effect.getMovement();
+        String castId = effect.getCastId();
+        if (movement.getAction() == MovementAction.LOCK) {
+            boolean allowUse = movement.getAllowUseWhileCasting();
             if (!allowUse) {
                 player.stopUsingItem();
             }
             castingIds.computeIfAbsent(playerId, id -> new HashMap<>())
-                    .put(effect.getCastId(), effect.getMovement());
+                    .put(castId, effect);
+            if (blocksSprint(playerId)) {
+                player.setSprinting(false /* sprinting */);
+            }
         } else {
-            Map<String, MovementIntent> casts = castingIds.get(playerId);
+            Map<String, EffectIntent> casts = castingIds.get(playerId);
             if (casts != null) {
-                MovementIntent removed = casts.remove(effect.getCastId());
-                if (removed != null && !removed.getAllowUseWhileCasting()) {
+                EffectIntent removed = casts.remove(castId);
+                if (removed != null && !removed.getMovement().getAllowUseWhileCasting()) {
                     player.stopUsingItem();
                 }
                 if (casts.isEmpty()) {
                     castingIds.remove(playerId);
                 }
             }
-            finish(player, effect.getCastId());
+            finish(player, castId);
         }
     }
 
@@ -356,5 +373,6 @@ final class HumanTechniqueEffects {
         current.world().finish(castId);
         current.limbs().finish(castId);
         current.projectiles().finish(castId);
+        HumanTechniquePresentation.stopCast(player, castId);
     }
 }

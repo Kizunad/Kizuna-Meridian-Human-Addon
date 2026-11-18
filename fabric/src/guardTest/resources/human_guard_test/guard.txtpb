@@ -1,0 +1,39 @@
+schema_version: 1
+namespace: "human_guard_test"
+definitions {
+  id: "human_guard_test:guard"
+  version: 1
+  category: DEFENSE
+  minimum_realm: WANDERING_QI
+  innate: true
+  cost {}
+  phases {
+    warmup_millis: 200
+    active_duration: ACTIVE_DURATION_UNTIL_RELEASE
+    recovery_millis: 300
+    interruptible_by_damage: true
+  }
+  movement_speed_multiplier: 0.4
+  cooldown_millis: 0
+  effects {
+    at_millis: 0
+    presentation { id: "human_guard_test:guard_arms" duration: UNTIL_ACTIVE_END }
+  }
+  effects {
+    at_millis: 200
+    guard {
+      angle { value: 120 unit: DEGREE }
+      damage_multiplier { value: 0.7 unit: RATIO }
+      damage_tags: "meridian:melee"
+      damage_tags: "minecraft:is_projectile"
+    }
+  }
+  ai_hints {
+    minimum_distance { value: 0 unit: METER }
+    maximum_distance { value: 0 unit: METER }
+    maximum_hp_ratio { value: 1 unit: RATIO }
+    minimum_qi_ratio { value: 0 unit: RATIO }
+    category_weight { value: 1 unit: RATIO }
+    support { role: AI_ROLE_GUARD }
+  }
+}

@@ -20,6 +20,7 @@ dependencies {
     // 玩家动画、Damage、库存 UI 服务端、功法库与成长附属在 settings 中以源码组合，依赖处写替换坐标。
     implementation 'dev.kizuna:kizuna-players-animation'
     implementation 'dev.kizuna.meridian.vanilla:fabric'
+    implementation 'dev.kizuna.meridian.vanilla:server'
     implementation 'dev.kizuna.inventoryui:server'
     implementation 'dev.kizuna.meridian.technique:fabric'
     implementation 'dev.kizuna.meridian.technique:server'
@@ -78,6 +79,14 @@ sourceSets {
         runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
     }
     gametest {
+        java.srcDir 'src/guardTest/java'
+        resources.srcDir 'src/guardTest/resources'
+        compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
+        runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
+    }
+    clienttest {
+        java.srcDir 'src/guardTest/java'
+        resources.srcDir 'src/guardTest/resources'
         compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
         runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
     }
@@ -89,6 +98,7 @@ dependencies {
 loom {
     mods {
         meridian_human_test { sourceSet sourceSets.gametest }
+        meridian_human_clienttest { sourceSet sourceSets.clienttest }
     }
     runs {
         gametest {
@@ -106,6 +116,24 @@ loom {
             runDir 'build/spawn-protection'
             vmArg '-Dmeridian.human.spawnProtectionTest=true'
         }
+        clientGametest {
+            client()
+            name 'Human Guard Client Test'
+            source sourceSets.clienttest
+            runDir providers.gradleProperty('humanClienttestRunDir').getOrElse('build/clienttest')
+            vmArg '-Dfabric.client.gametest'
+            vmArg '-Dfabric.client.gametest.modid=meridian_human_clienttest'
+            programArgs '--width', '1280', '--height', '960'
+        }
+    }
+}
+
+tasks.named('runClientGametest') {
+    doFirst {
+        // 独立测试目录跳过首启引导，不读取玩家实例或存档。
+        def runDirectory = file(providers.gradleProperty('humanClienttestRunDir').getOrElse('build/clienttest'))
+        runDirectory.mkdirs()
+        new File(runDirectory, 'options.txt').text = 'onboardAccessibility:false\nlang:zh_cn\n'
     }
 }
 

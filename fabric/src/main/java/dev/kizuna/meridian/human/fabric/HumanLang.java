@@ -2,6 +2,7 @@ package dev.kizuna.meridian.human.fabric;
 
 /** 指令反馈的 lang 键；文案在 assets/meridian_human_host/lang，部位、组织、器官名沿用解剖数据中文名。 */
 final class HumanLang {
+    static final String GUARD_SHIELD_RAISED = "meridian_human_host.guard.shield_raised";
     static final String TARGET_NOT_PLAYER = "commands.meridian_human_host.target_not_player";
     static final String STATUS_NO_BODY = "commands.meridian_human_host.status.no_body";
     static final String WATCH_BODY_ON = "commands.meridian_human_host.watch.body.on";

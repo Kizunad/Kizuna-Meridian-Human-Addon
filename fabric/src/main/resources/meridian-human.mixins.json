@@ -3,7 +3,9 @@
   "package": "dev.kizuna.meridian.human.fabric.mixin",
   "compatibilityLevel": "JAVA_25",
   "mixins": ["TechniqueHandSwingMixin", "TechniqueArrowMixin", "TechniqueProjectileShieldMixin",
-    "StaggerItemMixin", "StaggerBlockMixin", "PlayerDownPoseMixin", "ControlPacketMixin", "ControlMenuMixin"],
-  "client": ["ControlInputMixin", "ControlInputAccess", "ControlKeysMixin", "ControlMouseMixin", "ControlScreenMixin"],
+    "StaggerItemMixin", "StaggerBlockMixin", "PlayerDownPoseMixin", "ControlPacketMixin", "ControlMenuMixin",
+    "GuardSprintMixin", "TechniqueTransferMixin"],
+  "client": ["ControlInputMixin", "ControlInputAccess", "ControlKeysMixin", "ControlMouseMixin", "ControlScreenMixin",
+    "GuardSprintClientMixin"],
   "injectors": {"defaultRequire": 1}
 }

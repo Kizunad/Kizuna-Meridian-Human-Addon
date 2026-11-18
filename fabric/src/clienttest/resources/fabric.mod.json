@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "meridian_human_clienttest",
+  "version": "1.0.0",
+  "name": "Human Guard Client Test",
+  "environment": "*",
+  "entrypoints": {
+    "meridian_technique_catalog": ["dev.kizuna.meridian.human.fabric.HumanGuardTestCatalog"],
+    "fabric-client-gametest": ["dev.kizuna.meridian.human.fabric.HumanGuardClientTest"]
+  }
+}

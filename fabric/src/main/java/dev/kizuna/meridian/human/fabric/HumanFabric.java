@@ -117,6 +117,7 @@ public final class HumanFabric implements ModInitializer {
                 .resolve(HumanCultivationRules.FILE_NAME));
         // 宿主生命周期独立于客户端窗口，关掉 UI 后玩家移动仍正常记入同一身体。
         HumanTechniqueEffects.initialize();
+        HumanGuard.initialize();
         HumanControl.initialize();
         CultivationStateTrigger.register();
         HumanStaggerLock.initialize();
@@ -679,7 +680,8 @@ public final class HumanFabric implements ModInitializer {
     }
 
     private void leave(ServerPlayer player, MinecraftServer server) {
-        // 仅结束宿主自己的移动实例，其他附属动作保持各自的生命周期规则。
+        // 先清施放与实体效果，再结束人体移动和吐纳并撤销认领。
+        HumanTechniqueHost.beforeUnload(player);
         HumanPlayerBody body = state == null ? null : state.find(player.getUUID());
         if (body != null && observers.containsKey(player.getUUID()) && !failed.contains(player.getUUID())) {
             try {

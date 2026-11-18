@@ -43,6 +43,40 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
         return effects.isCasting(playerId);
     }
 
+    public static boolean blocksSprint(UUID playerId) {
+        // 服务端实体入口读取同一份 Movement 锁。
+        return effects.blocksSprint(playerId);
+    }
+
+    static boolean hasCast(UUID playerId, String castId) {
+        // 伤后表现不能通过过期身份重新启动旧动作。
+        return effects.hasCast(playerId, castId);
+    }
+
+    public static void beforeUnload(ServerPlayer player) {
+        // 撤销旧实体访问前完成取消，直接恢复适配器负责遗留 STOP/UNLOCK。
+        Binding current = binding;
+        UUID playerId = player.getUUID();
+        if (current == null || !ready.contains(playerId)) {
+            return;
+        }
+        var service = TechniqueFabric.service();
+        HumanWorldState state = current.state();
+        service.cancelOnUnload(playerId);
+        HumanPlayerBody body = state.find(playerId);
+        if (body != null) {
+            // 暂停身体只清遗留施放，不能借断线清理推进被冻结的资源。
+            if (!current.failed().test(playerId)) {
+                body.settle(nowMillis(current));
+            }
+            service.recoverOnLoad(playerId, recovery(player, body));
+            state.setDirty();
+            current.changed().accept(playerId);
+        }
+        effects.forget(playerId);
+        impulseMovement.remove(playerId);
+    }
+
     public static boolean blocksUse(Player player, InteractionHand hand, BlockPos target) {
         // 目标来自服务端交互事件，空气使用与实体交互不能借方块白名单放行。
         return HumanStaggerLock.isLocked(player.getUUID()) || effects.blocksUse(player, hand, target);

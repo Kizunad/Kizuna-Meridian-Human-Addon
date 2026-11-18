@@ -1,4 +1,5 @@
 {
+  "meridian_human_host.guard.shield_raised": "Your shield is up; no arm is free to guard",
   "message.meridian_human_host.welcome.notes": "Cultivation begins with a scroll of Qi Meridian Notes: look in the chests of dungeons, abandoned mineshafts, desert pyramids and jungle temples; skeletons sometimes carry one. Right-click it, then press %s to open the cultivation page.",
   "message.meridian_human_host.welcome.techniques": "Villagers, traders, pillagers, vindicators, evokers and witches all know techniques; defeat one yourself and it may drop a scroll of what it knew.",
   "message.meridian_human_host.revival.explained": "After respawning: every wound comes back only to one tenth and the rest heals slowly; your qi scattered at death, so breathe it in again; your muscles are spent and recover with rest. Meridians, realm and learned techniques are kept.",

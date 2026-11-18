@@ -10,11 +10,13 @@
       "dev.kizuna.meridian.human.fabric.HumanSpawnProtectionTest"
     ],
     "meridian_technique_catalog": [
+      "dev.kizuna.meridian.human.fabric.HumanGuardTestCatalog",
       "dev.kizuna.meridian.human.fabric.HumanTechniqueTestCatalog",
       "dev.kizuna.meridian.human.fabric.HumanCombatTestCatalog",
       "dev.kizuna.meridian.human.fabric.HumanFistTestCatalog"
     ],
     "fabric-gametest": [
+      "dev.kizuna.meridian.human.fabric.HumanGuardGameTest",
       "dev.kizuna.meridian.human.fabric.HumanInnerVisionGameTest",
       "dev.kizuna.meridian.human.fabric.HumanRevivalGameTest",
       "dev.kizuna.meridian.human.fabric.HumanHintsGameTest",
