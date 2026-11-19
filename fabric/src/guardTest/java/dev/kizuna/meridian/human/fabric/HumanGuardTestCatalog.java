@@ -74,9 +74,14 @@ public final class HumanGuardTestCatalog implements TechniqueRegistryEntrypoint 
     }
 
     public static CastOutcome start(ServerPlayer player) {
+        // 独立宿主用例始终施放自身目录中的守式。
+        return start(player, GUARD);
+    }
+
+    static CastOutcome start(ServerPlayer player, String techniqueId) {
         // 由真实服务分配阶段、锁和动作，测试不写施放状态。
         var reference = TechniqueReference.newBuilder()
-                .setId(GUARD)
+                .setId(techniqueId)
                 .setVersion(1)
                 .build();
         var request = CastRequest.newBuilder()

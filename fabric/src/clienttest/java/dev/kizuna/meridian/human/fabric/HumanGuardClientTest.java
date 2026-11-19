@@ -1,5 +1,6 @@
 package dev.kizuna.meridian.human.fabric;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import dev.kizuna.meridian.human.fabric.client.HumanGuardClient;
 import dev.kizuna.meridian.technique.fabric.client.TechniqueCastStatusClient;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastPhase;
@@ -12,23 +13,33 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.screenshot.TestScreenshotOptions;
 import net.fabricmc.fabric.api.client.gametest.v1.world.TestWorldSave;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.client.CameraType;
+import net.minecraft.client.DeltaTracker;
+import net.minecraft.client.Screenshot;
 import net.minecraft.client.Minecraft;
+import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.monster.zombie.Husk;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import org.lwjgl.glfw.GLFW;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.apache.commons.lang3.Validate.isTrue;
@@ -46,6 +57,13 @@ public final class HumanGuardClientTest implements FabricClientGameTest {
     private static final int FRAME_WIDTH = 1280;
     private static final int FRAME_HEIGHT = 720;
     private static final int ESTABLISH_TICKS = 20;
+    private static final String FORMAL_GUARD = "meridian_basic_techniques:guard";
+    private static final int RAISE_SHOT_TICKS = 24;
+    private static final int LATE_LEAD_TICKS = 5;
+    private static final int EARLY_LEAD_TICKS = 9;
+    private static final int STRIKE_LEAD_TICKS = 7;
+    private static final long MILLIS_PER_TICK = 50;
+    private static final double ATTACKER_SIDE = 1.1;
     private static final int UNARMED_TICKS = 55;
     private static final int ARMED_TICKS = 65;
     private static final int AFTER_CONTACT_TICKS = 45;
@@ -69,6 +87,7 @@ public final class HumanGuardClientTest implements FabricClientGameTest {
         var serverThread = world.getServer().computeOnServer(MinecraftServer::getRunningThread);
         try {
             prepare(context, world);
+            recordWindup(context, world);
             sprintBeforeGuard(context);
             String cast = start(context, world);
             assertLocked(context);
@@ -266,9 +285,155 @@ public final class HumanGuardClientTest implements FabricClientGameTest {
         server.runOnServer(host -> player(host).setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY));
     }
 
+    private static void recordWindup(ClientGameTestContext context, TestSingleplayerContext world) {
+        // 同一机位和伤害请求可在两版完整装配中重放，由实际目录决定是否赶上。
+        String directory = System.getenv("HUMAN_GUARD_WINDUP_FRAMES");
+        if (directory == null) {
+            return;
+        }
+        var root = Path.of(directory);
+        context.runOnClient(client -> client.options.fov().set(REVIEW_FOV));
+        context.getInput().lookAt(0, REVIEW_PITCH);
+        for (var item : List.of(Items.AIR, Items.IRON_SWORD)) {
+            var stack = new ItemStack(item);
+            world.getServer().runOnServer(server -> player(server).setItemInHand(InteractionHand.MAIN_HAND, stack));
+            String shot = item == Items.AIR ? "arms" : "sword";
+            var frames = new GuardFrames(root.resolve(shot).toString());
+            frames.advance(context, ESTABLISH_TICKS);
+            var cast = world.getServer().computeOnServer(HumanGuardClientTest::startFormalGuard);
+            frames.advance(context, RAISE_SHOT_TICKS);
+            world.getServer().runOnServer(server -> HumanGuardTestCatalog.release(player(server), cast));
+            frames.advance(context, AFTER_RECOVERY_TICKS);
+        }
+        world.getServer().runOnServer(server ->
+                player(server).setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY));
+        contactShot(context, world, new GuardFrames(root.resolve("late").toString()), LATE_LEAD_TICKS);
+        contactShot(context, world, new GuardFrames(root.resolve("early").toString()), EARLY_LEAD_TICKS);
+    }
+
+    private static String startFormalGuard(MinecraftServer server) {
+        // 录像只通过服务端施放装配里的正式格挡。
+        var outcome = HumanGuardTestCatalog.start(player(server), FORMAL_GUARD);
+        isTrue(outcome.getPhase() == CastPhase.WARMUP, "正式格挡起手失败：" + outcome);
+        return outcome.getCastId();
+    }
+
+    private static Husk opponent(MinecraftServer server) {
+        // 对手在正前方偏侧举剑，正面镜头同时看见挥手和守者的双臂。
+        var target = player(server);
+        var husk = EntityTypes.HUSK.create(target.level(), EntitySpawnReason.COMMAND);
+        husk.setNoAi(true /* noAi */);
+        husk.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.IRON_SWORD));
+        husk.setPos(target.position().add(ATTACKER_SIDE, 0, ATTACK_DISTANCE));
+        husk.lookAt(EntityAnchorArgument.Anchor.EYES, target.getEyePosition());
+        husk.setYBodyRot(husk.getYRot());
+        target.level().addFreshEntity(husk);
+        return husk;
+    }
+
+    private static void contactShot(ClientGameTestContext context, TestSingleplayerContext world,
+                                    GuardFrames frames, int leadTicks) {
+        // 两次出剑到命中的间隔相同，只有玩家按下格挡的时间不同。
+        var host = world.getServer();
+        var attacker = host.computeOnServer(HumanGuardClientTest::opponent);
+        var shot = host.computeOnServer(server -> new ContactShot(attacker, leadTicks));
+        host.runOnServer(server -> ContactShot.active = shot);
+        try {
+            frames.advance(context, ESTABLISH_TICKS + RAISE_SHOT_TICKS);
+            host.runOnServer(server -> {
+                isTrue(shot.resolved, "镜头未覆盖挥剑命中");
+                HumanGuardTestCatalog.release(player(server), shot.castId);
+            });
+        } finally {
+            host.runOnServer(server -> {
+                ContactShot.active = null;
+                attacker.discard();
+            });
+        }
+        frames.advance(context, AFTER_RECOVERY_TICKS);
+    }
+
+    private static final class ContactShot {
+        private static ContactShot active;
+        private final Husk attacker;
+        private final int leadTicks;
+        private int tick;
+        private String castId;
+        private boolean resolved;
+
+        static {
+            ServerTickEvents.END_SERVER_TICK.register(server -> {
+                if (active != null) {
+                    active.advance(server);
+                }
+            });
+        }
+
+        ContactShot(Husk attacker, int leadTicks) {
+            // 由同一个服务端时钟驱动出剑、起守和实际结算。
+            this.attacker = attacker;
+            this.leadTicks = leadTicks;
+        }
+
+        void advance(MinecraftServer server) {
+            // 命中固定在建立镜头的最后一拍。
+            tick++;
+            if (tick == ESTABLISH_TICKS - STRIKE_LEAD_TICKS) {
+                attacker.swing(InteractionHand.MAIN_HAND);
+            }
+            if (tick == ESTABLISH_TICKS - leadTicks) {
+                castId = startFormalGuard(server);
+            }
+            if (tick == ESTABLISH_TICKS) {
+                checkContact(player(server), attacker, leadTicks);
+                resolved = true;
+            }
+        }
+    }
+
+    private static void checkContact(ServerPlayer target, Husk attacker, int leadTicks) {
+        // 录制时核对真实施放时钟及本击扣血部位，错过防御时头部应直接吃下伤害。
+        var body = HumanTechniqueHost.state().find(target.getUUID());
+        var cast = TechniqueState.read(body.snapshot()).getActiveCast();
+        long warmup = cast.getWarmupEndMillis() - cast.getStartedMillis();
+        long elapsed = target.level().getGameTime() * MILLIS_PER_TICK - cast.getStartedMillis();
+        isTrue(elapsed == leadTicks * MILLIS_PER_TICK, "镜头时钟偏移 " + elapsed);
+        var damage = new VanillaDamageFabric.DirectDamage(target, target.damageSources().mobAttack(attacker),
+                "head", HIT_HP);
+        var hit = VanillaDamageFabric.damageDirect(damage).orElseThrow();
+        var losses = hit.health().getDamageResolution().getLossesList();
+        String part = losses.getFirst().getTarget().getPartId();
+        boolean onTime = elapsed >= warmup;
+        if (onTime) {
+            isTrue(Set.of("left_forearm", "right_forearm").contains(part), "应挡住，实际命中 " + part);
+        } else {
+            isTrue("head".equals(part), "起手中，实际命中 " + part);
+        }
+        LoggerFactory.getLogger(HumanGuardClientTest.class)
+                .info("正式格挡起手 {} ms，按键至命中 {} ms，扣血部位 {}", warmup, elapsed, part);
+    }
+
     private static final class GuardFrames {
-        private final String directory = System.getenv("HUMAN_GUARD_FRAMES");
+        private final Path directory;
         private int frame;
+
+        GuardFrames() {
+            // 宿主回归沿用原有的可选逐帧输出目录。
+            this(System.getenv("HUMAN_GUARD_FRAMES"));
+        }
+
+        GuardFrames(String directory) {
+            // 每个连续镜头的逐拍截图写入自己的目录。
+            if (directory == null) {
+                this.directory = null;
+                return;
+            }
+            try {
+                this.directory = Files.createDirectories(Path.of(directory));
+            } catch (IOException failure) {
+                throw new UncheckedIOException(failure);
+            }
+        }
 
         void advance(ClientGameTestContext context, int ticks) {
             // Fabric 在指定游戏时刻渲染真实世界，每 tick 输出一帧，普通回归只推进时间。
@@ -276,15 +441,39 @@ public final class HumanGuardClientTest implements FabricClientGameTest {
                 context.waitTicks(ticks);
                 return;
             }
-            Path destination = Path.of(directory);
             for (int tick = 0; tick < ticks; tick++) {
                 context.waitTick();
-                String name = "guard-%04d".formatted(frame++);
-                var options = TestScreenshotOptions.of(name)
-                        .withDestinationDir(destination)
-                        .withSize(FRAME_WIDTH, FRAME_HEIGHT)
-                        .disableCounterPrefix();
-                context.takeScreenshot(options);
+                Path path = directory.resolve("guard-%04d.png".formatted(frame++));
+                context.runOnClient(client -> capture(client, path));
+            }
+        }
+
+        private static void capture(Minecraft client, Path path) {
+            // 异步读回这一拍的完整画面，等待截图落盘会额外推进游戏时钟。
+            var renderer = client.gameRenderer;
+            var window = client.getWindow();
+            int width = window.getWidth();
+            int height = window.getHeight();
+            window.setWidth(FRAME_WIDTH);
+            window.setHeight(FRAME_HEIGHT);
+            var target = renderer.mainRenderTarget();
+            target.resize(FRAME_WIDTH, FRAME_HEIGHT);
+            try {
+                renderer.update(DeltaTracker.ONE);
+                renderer.extract(DeltaTracker.ONE, true /* renderLevel */);
+                renderer.render(DeltaTracker.ONE, true /* renderLevel */);
+                RenderSystem.getDevice().createCommandEncoder().submit();
+                Screenshot.takeScreenshot(target, image -> {
+                    try (image) {
+                        image.writeToFile(path);
+                    } catch (IOException failure) {
+                        throw new UncheckedIOException(failure);
+                    }
+                });
+            } finally {
+                window.setWidth(width);
+                window.setHeight(height);
+                target.resize(width, height);
             }
         }
     }
