@@ -109,9 +109,9 @@ public final class HumanFabric implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        // 身体创建前固定模板伤害规则，玩家与类人共用同一服务端配置。
-        HumanDamage.configure(FabricLoader.getInstance().getConfigDir()
-                .resolve(HumanDamageRules.FILE_NAME));
+        // 等各附属登记完模板，再于世界加载前固定玩家与类人共用的规则。
+        Path damageConfig = FabricLoader.getInstance().getConfigDir().resolve(HumanDamageRules.FILE_NAME);
+        ServerLifecycleEvents.SERVER_STARTING.register(server -> HumanDamage.configure(damageConfig));
         // 吐纳配方随人体内容包一次建成，份额要在任何身体宿主载入内容之前读好。
         HumanBreathingRules.configure(FabricLoader.getInstance().getConfigDir()
                 .resolve(HumanBreathingRules.FILE_NAME));

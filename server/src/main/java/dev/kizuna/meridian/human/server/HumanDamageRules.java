@@ -167,4 +167,34 @@ public final class HumanDamageRules {
     public record BodilessNumb(int ticks, int slownessLevel, int weaknessLevel) { }
 
     private record Template(double defaultMultiplier, Map<String, Double> parts) { }
+
+    static final class TemplateDefaults {
+        private final Map<String, Template> additions = new HashMap<>();
+        private boolean installed;
+
+        synchronized void register(String target, String bundledSource) {
+            // 来源只查随包数据，服主对来源模板的改动只用于该模板自身。
+            if (installed) {
+                throw new IllegalStateException(HumanErrors.SPILLOVER_ALREADY_INSTALLED);
+            }
+            var bundled = defaults().templates;
+            if (bundledSource == null || !bundled.containsKey(bundledSource)) {
+                throw HumanErrors.invalid(HumanErrors.SPILLOVER_UNKNOWN_SOURCE + bundledSource);
+            }
+            if (target == null || target.isBlank() || bundled.containsKey(target)
+                    || additions.putIfAbsent(target, bundled.get(bundledSource)) != null) {
+                throw HumanErrors.invalid(HumanErrors.SPILLOVER_INVALID_TARGET + target);
+            }
+        }
+
+        synchronized HumanDamageRules install(Path file) {
+            // 服主配置的整段优先。合并只在内存中进行，已有文件按原样保留。
+            var configured = load(file);
+            var merged = new HashMap<>(additions);
+            merged.putAll(configured.templates);
+            var rules = new HumanDamageRules(configured.entities, merged, configured.bodilessNumb);
+            installed = true;
+            return rules;
+        }
+    }
 }

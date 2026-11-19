@@ -6,6 +6,7 @@
   "environment": "*",
   "entrypoints": {
     "main": [
+      "dev.kizuna.meridian.human.fabric.HumanSpilloverRegistrationGameTest",
       "dev.kizuna.meridian.human.fabric.HumanLegacyBodyTestBootstrap",
       "dev.kizuna.meridian.human.fabric.HumanSpawnProtectionTest"
     ],
@@ -16,6 +17,7 @@
       "dev.kizuna.meridian.human.fabric.HumanFistTestCatalog"
     ],
     "fabric-gametest": [
+      "dev.kizuna.meridian.human.fabric.HumanSpilloverRegistrationGameTest",
       "dev.kizuna.meridian.human.fabric.HumanGuardGameTest",
       "dev.kizuna.meridian.human.fabric.HumanInnerVisionGameTest",
       "dev.kizuna.meridian.human.fabric.HumanRevivalGameTest",

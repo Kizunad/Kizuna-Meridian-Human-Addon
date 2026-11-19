@@ -25,6 +25,9 @@ public final class HumanErrors {
     public static final String INVALID_DAMAGE_KIND = "人体伤害需要已知的致伤机制";
     public static final String INVALID_SPILLOVER = "人体伤害蔓延配置或剂量无效";
     public static final String SPILLOVER_LOAD_FAILED = "人体伤害蔓延配置读取失败";
+    public static final String SPILLOVER_ALREADY_INSTALLED = "伤害蔓延配置已安装，须在模组初始化时登记模板";
+    public static final String SPILLOVER_UNKNOWN_SOURCE = "找不到随包伤害蔓延模板：";
+    public static final String SPILLOVER_INVALID_TARGET = "伤害蔓延目标模板为空或重复：";
     public static final String INVALID_BREATHING =
             "人体吐纳配置无效：true_qi_gas_share、native_share 要是 0 到 1 之间的小数";
     public static final String BREATHING_LOAD_FAILED = "人体吐纳配置读取失败";

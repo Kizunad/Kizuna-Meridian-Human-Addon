@@ -25,7 +25,8 @@ public final class HumanDamage implements BodyDamageHandler {
     private static final Set<String> VITAL_PARTS = Set.of("head", "neck", "chest");
     /** 要害器官的种类：身上这一种的器官全都归零就死（人只有一颗心）。按种类认，换过的心也算。 */
     private static final Set<String> VITAL_ORGAN_KINDS = Set.of("human:heart");
-    private static HumanDamageRules configuredRules = HumanDamageRules.defaults();
+    private static final HumanDamageRules.TemplateDefaults templateDefaults = new HumanDamageRules.TemplateDefaults();
+    private static volatile HumanDamageRules configuredRules = HumanDamageRules.defaults();
     private final HumanDamageRules rules;
     private final String entityType;
 
@@ -45,9 +46,14 @@ public final class HumanDamage implements BodyDamageHandler {
         this.entityType = entityType;
     }
 
+    public static void registerTemplateDefaults(String template, String bundledSource) {
+        // 附属在模组初始化时指定随包来源，安装服务端配置时再应用服主覆盖。
+        templateDefaults.register(template, bundledSource);
+    }
+
     public static void configure(Path file) {
         // 在身体宿主开始工作之前读取一次服务端配置。
-        configuredRules = HumanDamageRules.load(file);
+        configuredRules = templateDefaults.install(file);
     }
 
     public static HumanDamageRules configuredRules() {

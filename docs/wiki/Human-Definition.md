@@ -144,6 +144,8 @@
 
 首次服务端启动导出 `config/meridian-human-damage.toml`。`templates."human:adult".parts` 单独配置上述 17 部位；`default_multiplier = 1.0` 用于该模板改造新增的未登记部位。系数允许有限非负数，零表示不传递该来源余量。`[entities]` 的 `"minecraft:player" = false` 仅关闭玩家；村民、流浪商人、掠夺者、卫道士、唤魔者、女巫、幻术师有各自开关，未登记实体采用 `default_enabled`。不挂规则的模板不蔓延。配置修改后重启生效，既有身体也使用新配置，坏配置拒绝启动。
 
+附属在模组初始化时调用 `HumanDamage.registerTemplateDefaults(目标模板, 随包来源模板)` 可沿用随包部位系数。服务端启动时，服主为目标模板写的整段配置优先。已有文件保持原样。目标重复、来源不在随包配置中或安装后才登记都会报错。
+
 同一个文件的 `[bodiless_numb]` 管另一件事：没绑身体的目标（原版生物）挨了带「麻」的肢击，改给原版缓慢和虚弱，
 `ticks` 是时长，`slowness_level`、`weakness_level` 是各自的等级（从 1 起，0 表示不给）；随包初值 60 tick、各一级。
 这一节是后加的，老文件里没有时按随包初值算。经过见 [Technique-Host](Technique-Host)。
