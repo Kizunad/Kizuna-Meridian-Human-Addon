@@ -5,6 +5,25 @@ public final class HumanTechniqueAnimations {
     public record Direction(double yawDegrees, double x, double z) { }
     public enum CastHand { MAIN, OFF }
     public enum GuardMotion { HOLD, LOWER, HIT }
+    public enum GuardStyle {
+        ARMS("guard_arms"), WEAPON("guard_weapon");
+
+        private final String hold;
+
+        GuardStyle(String hold) {
+            // 保持片段的 ID 也是受击、收势片段的词根。
+            this.hold = hold;
+        }
+
+        public String clip(GuardMotion motion) {
+            // 同一种守姿的三个片段使用 PA 的同一组命名。
+            return switch (motion) {
+                case HOLD -> hold;
+                case LOWER -> hold + "_lower";
+                case HIT -> hold + "_hit";
+            };
+        }
+    }
     /** 交给 PA 的起播时刻（世界 tick）和播放倍率。 */
     public record Playback(long startTick, float rate) { }
 
@@ -66,10 +85,6 @@ public final class HumanTechniqueAnimations {
 
     public static String guard(GuardMotion motion) {
         // 三段守式动作集中映射到 PA 剪辑，玩法时间仍由功法数据控制。
-        return switch (motion) {
-            case HOLD -> "guard_arms";
-            case LOWER -> "guard_arms_lower";
-            case HIT -> "guard_arms_hit";
-        };
+        return GuardStyle.ARMS.clip(motion);
     }
 }

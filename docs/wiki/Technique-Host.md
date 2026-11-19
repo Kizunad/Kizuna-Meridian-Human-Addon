@@ -24,8 +24,12 @@ Damage 的 `DamageInput.guarded` 提供本击冻结的 body/cast 身份，匹配
 最后前臂毁掉的顺序是命中反馈、停止保持与反馈、收势，硬控取消直接停止而不播放收势。
 实际片段按施放身份跟踪，重复收势和旧施放通知不会重播或停止后一次守。
 
-动作映射集中在 `HumanTechniqueAnimations`：保持 → `guard_arms`，收势 → `guard_arms_lower`，
-受击 → `guard_arms_hit`，三段都是 Players-Animation 里为空手抱架做的片段。
+玩家起守和放下时都看当刻的逻辑主手。主手物品属于 Damage 的 `#meridian_vanilla_damage:guard_weapons`
+（默认剑、斧）时，保持、受击、放下分别用 `guard_weapon`、`guard_weapon_hit`、`guard_weapon_lower`；
+空手、持其他物品或只在副手拿剑时用 `guard_arms`、`guard_arms_hit`、`guard_arms_lower`。左主手由 PA 镜像。
+切换快捷栏、缴械或碎裂后，保持片段沿用同一施放的起播 tick 和倍率。受击片段读取 Damage 在命中时冻结的
+`weaponGuarded()`。按默认规则，兵器承接守式减伤后九成的伤害，前臂承受一成；这一击用尽耐久时兵器碎裂，
+减伤后的整击落在前臂，立即切回空手守并播空手受击。
 宿主在玩法收势结束时主动停止落手片段。死亡沿原取消/恢复清理；断线、跨维度与实体替换在旧实体
 仍可访问时先取消，再通过恢复入口完成遗留清理。停服清理排在功法服务关闭之前，不能遗留身体进度、属性和实际动作。
 

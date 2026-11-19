@@ -20,8 +20,10 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.GameType;
@@ -47,6 +49,7 @@ public final class HumanGuardGameTest {
     private static final int DIG_SEQUENCE = 7;
     private static final float FRONT_YAW = 0;
     private static final float BACK_YAW = 180;
+    private static final String WEAPON_ENVIRONMENT = "meridian_human_test:weapon_guard";
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void raisedShieldRejectsBeforeStoppingUse(GameTestHelper context) {
@@ -244,6 +247,101 @@ public final class HumanGuardGameTest {
                 attacker.discard();
             }
         });
+    }
+
+    @GameTest(environment = WEAPON_ENVIRONMENT, maxTicks = DEFAULT_TIMEOUT)
+    public void guardOpensWithTheActualMainHand(GameTestHelper context) {
+        // 左主手铁剑、右主手铁斧均横架；副手的剑不会让空主手进入兵器守姿。
+        assertOpening(context, Items.IRON_SWORD, Items.AIR, HumanoidArm.LEFT, GuardAnimationProbe.WEAPON_HOLD);
+        assertOpening(context, Items.IRON_AXE, Items.AIR, HumanoidArm.RIGHT, GuardAnimationProbe.WEAPON_HOLD);
+        assertOpening(context, Items.AIR, Items.IRON_SWORD, HumanoidArm.RIGHT, GuardAnimationProbe.HOLD);
+        assertOpening(context, Items.AIR, Items.AIR, HumanoidArm.RIGHT, GuardAnimationProbe.HOLD);
+        context.succeed();
+    }
+
+    private static void assertOpening(GameTestHelper context, Item main, Item off, HumanoidArm arm, String clip) {
+        // 起手当刻检查服务端发出的片段，排除稍后换姿掩盖错误的首次播放。
+        try (var fixture = new HumanTechniqueTestPlayer(context)) {
+            var player = fixture.player;
+            player.setMainArm(arm);
+            player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(main));
+            player.setItemInHand(InteractionHand.OFF_HAND, new ItemStack(off));
+            start(context, fixture);
+            GuardAnimationProbe.assertPlays(context, fixture, clip, 1);
+            context.assertTrue(GuardAnimationProbe.startTick(fixture, clip) == player.level().getGameTime(),
+                    "守式起播时间应等于起手当刻");
+        }
+    }
+
+    @GameTest(environment = WEAPON_ENVIRONMENT, maxTicks = DEFAULT_TIMEOUT)
+    public void switchingToStickKeepsTheGuardClock(GameTestHelper context) {
+        // 在有效守窗切快捷栏，下一 tick 已经换姿，施放与动画时钟都不能重置。
+        var fixture = new HumanTechniqueTestPlayer(context);
+        var player = fixture.player;
+        var inventory = player.getInventory();
+        player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.IRON_SWORD));
+        int stickSlot = 1;
+        inventory.setItem(stickSlot, new ItemStack(Items.STICK));
+        String cast = start(context, fixture);
+        long origin = GuardAnimationProbe.startTick(fixture, GuardAnimationProbe.WEAPON_HOLD);
+        context.runAfterDelay(WARMUP_TICKS + 1, () -> {
+            inventory.setSelectedSlot(stickSlot);
+            context.runAfterDelay(1, () -> {
+                try (fixture) {
+                    GuardAnimationProbe.assertStopped(context, fixture, GuardAnimationProbe.WEAPON_HOLD);
+                    GuardAnimationProbe.assertPlays(context, fixture, GuardAnimationProbe.HOLD, 1);
+                    context.assertTrue(GuardAnimationProbe.startTick(fixture, GuardAnimationProbe.HOLD) == origin,
+                            "换姿重播了抬手");
+                    var guard = TechniqueFabric.service().activeGuard(player.getUUID()).orElseThrow();
+                    context.assertTrue(cast.equals(guard.castId()), "换姿中断了原守窗");
+                    HumanGuardTestCatalog.release(player, cast);
+                    GuardAnimationProbe.assertPlays(context, fixture, GuardAnimationProbe.LOWER, 1);
+                    context.succeed();
+                }
+            });
+        });
+    }
+
+    @GameTest(environment = WEAPON_ENVIRONMENT, maxTicks = DEFAULT_TIMEOUT)
+    public void weaponContactAndBreakChooseTheMatchingClips(GameTestHelper context) {
+        // 同一击结算完成后立即看 PA 包；完整剑由兵器吃力，碎剑当场回空手。
+        var armed = swordsman(context);
+        var breaking = swordsman(context);
+        var attacker = context.spawn(EntityTypes.ZOMBIE, 1, 1, 1);
+        attacker.setNoAi(true /* noAi */);
+        var worn = breaking.player.getMainHandItem();
+        worn.setDamageValue(worn.getMaxDamage() - 1);
+        String cast = start(context, armed);
+        start(context, breaking);
+        context.runAfterDelay(WARMUP_TICKS + 1, () -> {
+            try (armed; breaking) {
+                for (var fixture : List.of(armed, breaking)) {
+                    attacker.setPos(fixture.player.position().add(0, 0, ATTACK_DISTANCE));
+                    GuardAnimationProbe.hit(fixture.player, fixture.player.damageSources().mobAttack(attacker),
+                            "head", SMALL_HIT);
+                }
+                GuardAnimationProbe.assertPlays(context, armed, GuardAnimationProbe.WEAPON_HIT, 1);
+                HumanGuardTestCatalog.release(armed.player, cast);
+                GuardAnimationProbe.assertPlays(context, armed, GuardAnimationProbe.WEAPON_LOWER, 1);
+                context.assertTrue(breaking.player.getMainHandItem().isEmpty(), "最后一点耐久的剑应当碎掉");
+                GuardAnimationProbe.assertPlays(context, breaking, GuardAnimationProbe.HIT, 1);
+                GuardAnimationProbe.assertPlays(context, breaking, GuardAnimationProbe.WEAPON_HIT, 0);
+                GuardAnimationProbe.assertStopped(context, breaking, GuardAnimationProbe.WEAPON_HOLD);
+                GuardAnimationProbe.assertPlays(context, breaking, GuardAnimationProbe.HOLD, 1);
+                context.succeed();
+            } finally {
+                attacker.discard();
+            }
+        });
+    }
+
+    private static HumanTechniqueTestPlayer swordsman(GameTestHelper context) {
+        // 两名守方都用生存模式，让 Damage 对其真实主手兑现耐久损耗。
+        var fixture = new HumanTechniqueTestPlayer(context);
+        fixture.player.setGameMode(GameType.SURVIVAL);
+        fixture.player.setYRot(FRONT_YAW);
+        fixture.player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.IRON_SWORD));
+        return fixture;
     }
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)

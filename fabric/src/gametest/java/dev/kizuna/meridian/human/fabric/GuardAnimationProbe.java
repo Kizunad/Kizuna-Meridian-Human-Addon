@@ -22,6 +22,9 @@ final class GuardAnimationProbe {
     static final String HOLD = "guard_arms";
     static final String HIT = "guard_arms_hit";
     static final String LOWER = "guard_arms_lower";
+    static final String WEAPON_HOLD = "guard_weapon";
+    static final String WEAPON_HIT = "guard_weapon_hit";
+    static final String WEAPON_LOWER = "guard_weapon_lower";
     private static final double ORGAN_SHARE = 0.6;
 
     private GuardAnimationProbe() {
@@ -70,6 +73,26 @@ final class GuardAnimationProbe {
         var events = events(fixture);
         context.assertTrue(events.stream().filter(event -> event.equals("play:" + clip)).count() == count,
                 "动画次数不符：" + clip + " / " + events);
+    }
+
+    static long startTick(HumanTechniqueTestPlayer fixture, String clip) {
+        // 取自己连接上该剪辑首次 PLAY 的权威时间，过滤同一世界中其他夹具的广播。
+        String playerId = fixture.player.getStringUUID();
+        for (var packet : fixture.connection.packets()) {
+            if (packet instanceof ClientboundCustomPayloadPacket custom
+                    && custom.payload() instanceof AnimationPackets.Payload payload
+                    && payload.type().equals(AnimationPackets.PLAY)) {
+                try {
+                    var play = AnimationPackets.read(payload, PlayRequest.parser());
+                    if (play.getPlayerUuid().equals(playerId) && play.getAnimationId().equals(clip)) {
+                        return play.getStartTick();
+                    }
+                } catch (InvalidProtocolBufferException invalid) {
+                    throw new AssertionError("动画消息非法", invalid);
+                }
+            }
+        }
+        throw new AssertionError("没有播放 " + clip);
     }
 
     static void assertStopped(GameTestHelper context, HumanTechniqueTestPlayer fixture, String clip) {

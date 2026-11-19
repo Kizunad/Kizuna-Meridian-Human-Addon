@@ -17,14 +17,18 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.level.GameType;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import org.lwjgl.glfw.GLFW;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.UUID;
 
 import static org.apache.commons.lang3.Validate.isTrue;
@@ -34,6 +38,18 @@ public final class HumanGuardClientTest implements FabricClientGameTest {
     private static final String HOLD = "guard_arms";
     private static final String HIT = "guard_arms_hit";
     private static final String LOWER = "guard_arms_lower";
+    private static final String WEAPON_HOLD = "guard_weapon";
+    private static final String WEAPON_HIT = "guard_weapon_hit";
+    private static final String WEAPON_LOWER = "guard_weapon_lower";
+    private static final int REVIEW_FOV = 46;
+    private static final int REVIEW_PITCH = -9;
+    private static final int FRAME_WIDTH = 1280;
+    private static final int FRAME_HEIGHT = 720;
+    private static final int ESTABLISH_TICKS = 20;
+    private static final int UNARMED_TICKS = 55;
+    private static final int ARMED_TICKS = 65;
+    private static final int AFTER_CONTACT_TICKS = 45;
+    private static final int FINISH_TICKS = 32;
     private static final int SETTLE_TICKS = 3;
     private static final int LONG_GUARD_TICKS = 45;
     private static final int AFTER_RECOVERY_TICKS = 12;
@@ -62,6 +78,7 @@ public final class HumanGuardClientTest implements FabricClientGameTest {
             feedback(context, world);
             release(context, world, cast);
             shortTap(context, world);
+            weaponGuard(context, world);
             departing = departure(context, world);
             world.getServer().runOnServer(HumanGuardClientTest::markForSave);
         } finally {
@@ -198,22 +215,78 @@ public final class HumanGuardClientTest implements FabricClientGameTest {
 
     private static void feedback(ClientGameTestContext context, TestSingleplayerContext world) {
         // 正面头部真实肢击产生短反馈，反馈结束后原保持段仍在。
-        world.getServer().runOnServer(server -> {
-            var target = player(server);
-            var attacker = EntityTypes.ZOMBIE.create(target.level(), EntitySpawnReason.COMMAND);
-            attacker.setNoAi(true /* noAi */);
-            attacker.setPos(target.position().add(0, 0, ATTACK_DISTANCE));
-            target.setYRot(0);
-            target.level().addFreshEntity(attacker);
-            var damage = new VanillaDamageFabric.DirectDamage(target, target.damageSources().mobAttack(attacker),
-                    "head", HIT_HP);
-            isTrue(VanillaDamageFabric.damageDirect(damage).isPresent(), "客户端场景命中未结算");
-            attacker.discard();
-        });
+        world.getServer().runOnServer(HumanGuardClientTest::strike);
         context.waitFor(client -> playing(client, HIT));
         screenshot(context, "p4-guard-hit");
         context.waitTicks(AFTER_RECOVERY_TICKS);
         context.runOnClient(client -> isTrue(playing(client, HOLD), "受击反馈后没有回到保持"));
+    }
+
+    private static void strike(MinecraftServer server) {
+        // 固定从玩家正面击中头部，防御结果与动画均走正式服务端入口。
+        var target = player(server);
+        var attacker = EntityTypes.ZOMBIE.create(target.level(), EntitySpawnReason.COMMAND);
+        attacker.setNoAi(true /* noAi */);
+        attacker.setPos(target.position().add(0, 0, ATTACK_DISTANCE));
+        target.setYRot(0);
+        target.level().addFreshEntity(attacker);
+        var damage = new VanillaDamageFabric.DirectDamage(target, target.damageSources().mobAttack(attacker),
+                "head", HIT_HP);
+        isTrue(VanillaDamageFabric.damageDirect(damage).isPresent(), "客户端场景命中未结算");
+        attacker.discard();
+    }
+
+    private static void weaponGuard(ClientGameTestContext context, TestSingleplayerContext world) {
+        // 同一连接从空手切到铁剑，受击与松手仍由同一次服务器施放触发。
+        var frames = new GuardFrames();
+        var server = world.getServer();
+        context.runOnClient(client -> client.options.fov().set(REVIEW_FOV));
+        context.getInput().lookAt(0, REVIEW_PITCH);
+        frames.advance(context, ESTABLISH_TICKS);
+        String cast = start(context, world);
+        context.waitFor(client -> playing(client, HOLD));
+        frames.advance(context, UNARMED_TICKS);
+        server.runOnServer(host -> player(host).setItemInHand(
+                InteractionHand.MAIN_HAND, new ItemStack(Items.IRON_SWORD)));
+        context.waitFor(client -> playing(client, WEAPON_HOLD) && client.player.getMainHandItem().is(Items.IRON_SWORD));
+        frames.advance(context, ARMED_TICKS);
+        screenshot(context, "weapon-guard-hold");
+        server.runOnServer(HumanGuardClientTest::strike);
+        context.waitFor(client -> playing(client, WEAPON_HIT));
+        frames.advance(context, 1);
+        screenshot(context, "weapon-guard-hit");
+        frames.advance(context, AFTER_CONTACT_TICKS);
+        server.runOnServer(host -> HumanGuardTestCatalog.release(player(host), cast));
+        context.waitFor(client -> playing(client, WEAPON_LOWER));
+        frames.advance(context, 1);
+        screenshot(context, "weapon-guard-lower");
+        frames.advance(context, FINISH_TICKS);
+        context.runOnClient(client -> isTrue(!playing(client, WEAPON_HOLD) && !playing(client, WEAPON_LOWER),
+                "持剑收势结束后仍有守姿"));
+        server.runOnServer(host -> player(host).setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY));
+    }
+
+    private static final class GuardFrames {
+        private final String directory = System.getenv("HUMAN_GUARD_FRAMES");
+        private int frame;
+
+        void advance(ClientGameTestContext context, int ticks) {
+            // Fabric 在指定游戏时刻渲染真实世界，每 tick 输出一帧，普通回归只推进时间。
+            if (directory == null) {
+                context.waitTicks(ticks);
+                return;
+            }
+            Path destination = Path.of(directory);
+            for (int tick = 0; tick < ticks; tick++) {
+                context.waitTick();
+                String name = "guard-%04d".formatted(frame++);
+                var options = TestScreenshotOptions.of(name)
+                        .withDestinationDir(destination)
+                        .withSize(FRAME_WIDTH, FRAME_HEIGHT)
+                        .disableCounterPrefix();
+                context.takeScreenshot(options);
+            }
+        }
     }
 
     private static void release(ClientGameTestContext context, TestSingleplayerContext world, String cast) {

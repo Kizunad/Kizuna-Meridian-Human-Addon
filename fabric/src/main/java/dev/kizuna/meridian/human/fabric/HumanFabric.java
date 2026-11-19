@@ -783,6 +783,7 @@ public final class HumanFabric implements ModInitializer {
             }
             try {
                 HumanPlayerBody body = state.find(id);
+                HumanTechniquePresentation.refreshGuard(player);
                 // 先用旧区域完成刚过去的呼吸区间，再切换位置与结算运动，避免新位置追溯摄入。
                 boolean breathingChanged = body.advanceGathering(millis);
                 state.selectEnvironment(player, millis);
