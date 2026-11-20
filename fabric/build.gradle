@@ -94,6 +94,13 @@ sourceSets {
 dependencies {
     // 登录假玩家夹具来自功法库的 testFixtures，与功法 fabric 同经源码组合解析。
     gametestImplementation testFixtures('dev.kizuna.meridian.technique:fabric')
+    // 真客户端从出身卡确认，再点吐纳窗口；这些界面只在测试编译时使用。
+    clienttestCompileOnly libs.owo
+    clienttestCompileOnly files(kizunaWorkspace.artifact('inventory-ui', '', false),
+            kizunaWorkspace.artifact('origin', 'fabric', false),
+            kizunaWorkspace.artifact('origin', 'shared', false),
+            kizunaWorkspace.artifact('ui', 'client', false),
+            kizunaWorkspace.artifact('progression', 'client', false))
 }
 loom {
     mods {
@@ -123,6 +130,9 @@ loom {
             runDir providers.gradleProperty('humanClienttestRunDir').getOrElse('build/clienttest')
             vmArg '-Dfabric.client.gametest'
             vmArg '-Dfabric.client.gametest.modid=meridian_human_clienttest'
+            if (providers.gradleProperty('humanTestReborn').isPresent()) {
+                vmArg '-Dmeridian.human.testReborn=true'
+            }
             programArgs '--width', '1280', '--height', '960'
         }
     }

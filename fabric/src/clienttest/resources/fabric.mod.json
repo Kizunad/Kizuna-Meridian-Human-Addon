@@ -4,6 +4,9 @@
   "version": "1.0.0",
   "name": "Human Guard Client Test",
   "environment": "*",
+  "custom": {
+    "meridian_technique:catalogs": "data/meridian_human_test/breathing_practice.txtpb"
+  },
   "entrypoints": {
     "meridian_technique_catalog": ["dev.kizuna.meridian.human.fabric.HumanGuardTestCatalog"],
     "fabric-client-gametest": ["dev.kizuna.meridian.human.fabric.HumanGuardClientTest"]

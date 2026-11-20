@@ -27,6 +27,7 @@ import dev.kizuna.meridian.protocol.pb.EnvironmentMessages.*;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.*;
 import dev.kizuna.meridian.server.AddonRegistry;
 import dev.kizuna.meridian.server.BodyCommandHandler;
+import dev.kizuna.meridian.server.BreathingModifiers;
 import dev.kizuna.meridian.server.InMemoryBodyStore;
 import dev.kizuna.meridian.server.GatheringSession;
 import dev.kizuna.meridian.protocol.pb.GatheringMessages.*;
@@ -51,6 +52,152 @@ import static dev.kizuna.meridian.protocol.pb.OperationUiMessages.OperationMeter
 public class HumanGatheringTest {
     /** 手动吐纳每步之间宿主推进的时间，和其他手动吐纳用例一样。 */
     private static final long BREATH_STEP_MILLIS = 250;
+    private static final long HALF_STEP = BREATH_STEP_MILLIS / 2;
+    private static final long FIRST_REST_TIMEOUT = 140_000;
+    private static final long EXPECTED_NORMAL_AUTO_MILLIS = 66_667;
+    private static final long MILLIS_PER_SECOND = 1_000;
+    private static final double TEST_SPACE_BLOCKS = 100;
+    private static final double REBORN_INTAKE = 1.5;
+    private static final double HALF_WORK = 0.5;
+    private static final double FULL_RESPIRATORY_BUDGET = 10_000;
+    private static final double ATTENTION_BUDGET = 300;
+    private static final double PRECISION = 1e-9;
+
+    @Test
+    public void manualBreathingChargesEachIntervalAtItsOwnRespiratoryRate() throws IOException {
+        // 在一步正中间起式和收式，同一口气的三段分别按普通、减半、普通收膈肌费用。
+        Host host = new Host(source(TEST_SPACE_BLOCKS), null);
+        var session = host.session();
+        session.enableBreathing(HumanContent.breathing());
+        breath(session, 1, BreathAction.BEGIN_BREATHING, 0, 0);
+        breath(session, 2, BreathAction.INHALE, 0, 0);
+        String sessionId = session.view().getBreathing().getSessionId();
+        host.now = HALF_STEP;
+        setFactors(host, session, new BreathingModifiers(REBORN_INTAKE, HALF_WORK));
+        assertEquals(REBORN_INTAKE, session.view().getBreathing().getIntakeMultiplier(), 0);
+        host.now += BREATH_STEP_MILLIS;
+        setFactors(host, session, BreathingModifiers.NORMAL);
+        host.now += HALF_STEP;
+        session.advance();
+        var view = session.view().getBreathing();
+        double fullSeconds = 2.0 * BREATH_STEP_MILLIS / MILLIS_PER_SECOND;
+        double chargedSeconds = fullSeconds * (1 + HALF_WORK) / 2;
+        var profile = HumanContent.breathing();
+        assertEquals(profile.getRespiratoryWatts() * chargedSeconds,
+                (1 - view.getStaminaRatio()) * FULL_RESPIRATORY_BUDGET, PRECISION);
+        assertEquals(profile.getAttentionWatts() * fullSeconds,
+                (1 - view.getAttentionRatio()) * ATTENTION_BUDGET, PRECISION);
+        assertEquals(sessionId, view.getSessionId());
+        assertEquals(1, view.getIntakeMultiplier(), 0);
+        assertTrue(host.body().organStates().stream().allMatch(organ -> organ.fatigueJoules() == 0));
+    }
+
+    @Test
+    public void discountedBreathingDoublesAutomaticWorkBeforeFirstRest() throws IOException {
+        // 自动始终用同一膈肌从满耐力做到休息线，注意组织全程不付费。
+        long normal = firstAutomaticRest(BreathingModifiers.NORMAL);
+        long improved = firstAutomaticRest(new BreathingModifiers(REBORN_INTAKE, HALF_WORK));
+        assertEquals(EXPECTED_NORMAL_AUTO_MILLIS, normal, BREATH_STEP_MILLIS);
+        assertEquals(EXPECTED_NORMAL_AUTO_MILLIS / HALF_WORK, improved, BREATH_STEP_MILLIS);
+        System.out.printf("自动吐纳首次休息：普通 %d ms，膈肌减半 %d ms%n", normal, improved);
+    }
+
+    private static long firstAutomaticRest(BreathingModifiers factors) throws IOException {
+        // 用无粒子来源隔离取样随机性，真实吸呼和组织做功仍沿生产通路推进。
+        Host host = breathingHost();
+        var session = host.session();
+        session.enableBreathing(HumanContent.breathing());
+        setFactors(host, session, factors);
+        var control = BreathControl.newBuilder()
+                .setAction(BreathAction.BEGIN_BREATHING)
+                .setAutomatic(true /* automatic */)
+                .setSequence(1)
+                .build();
+        var request = GatheringRequest.newBuilder()
+                .setProtocolVersion(1)
+                .setBodyId(host.body().id().value())
+                .setRequestId("auto")
+                .setBreath(control)
+                .build();
+        assertTrue(GatheringResponse.parseFrom(session.handle(request.toByteArray())).hasView());
+        while (session.view().getBreathing().getActive() && host.now <= FIRST_REST_TIMEOUT) {
+            host.now += BREATH_STEP_MILLIS;
+            session.advance();
+        }
+        var stopped = session.view().getBreathing();
+        assertFalse(stopped.getActive());
+        assertTrue(stopped.getAutomatic());
+        assertEquals(1, stopped.getAttentionRatio(), 0);
+        return host.now;
+    }
+
+    @Test
+    public void manualAttentionRunsOutAtTheSameBodyTimeWithEitherRate() throws IOException {
+        // 真实换气直到注意力耗尽，记录整段身体时间，而非以初始焦耳数推算。
+        long normal = manualDuration(BreathingModifiers.NORMAL);
+        long improved = manualDuration(new BreathingModifiers(REBORN_INTAKE, HALF_WORK));
+        assertEquals(normal, improved);
+        System.out.printf("手动吐纳首次精力耗尽：普通 %d ms，膈肌减半 %d ms%n", normal, improved);
+    }
+
+    private static Host breathingHost() {
+        // 环境有效期覆盖测量全程，空库存只隔离粒子采样，不改变呼吸费用。
+        var environment = source(TEST_SPACE_BLOCKS).toBuilder()
+                .setValidUntil(time(FIRST_REST_TIMEOUT))
+                .setInventory(BodyMessages.QiInventory.getDefaultInstance())
+                .build();
+        return new Host(environment, null);
+    }
+
+    private static long manualDuration(BreathingModifiers factors) throws IOException {
+        // 每步按真实肺容量决定是否换方向，持续发送输入以刷新操作租约。
+        Host host = breathingHost();
+        var session = host.session();
+        session.enableBreathing(HumanContent.breathing());
+        setFactors(host, session, factors);
+        long sequence = 1;
+        breath(session, sequence++, BreathAction.BEGIN_BREATHING, 0, 0);
+        BreathAction action = BreathAction.INHALE;
+        var view = session.view().getBreathing();
+        while (view.getActive() && host.now < FIRST_REST_TIMEOUT) {
+            if (view.getAirLiters() >= view.getCapacityLiters()) {
+                action = BreathAction.EXHALE;
+            } else if (view.getAirLiters() <= 0) {
+                action = BreathAction.INHALE;
+            }
+            breath(session, sequence++, action, 0, 0);
+            host.now += BREATH_STEP_MILLIS;
+            session.advance();
+            view = session.view().getBreathing();
+        }
+        assertFalse(view.getActive());
+        assertTrue(view.getAttentionRatio() < 0.001);
+        assertTrue(view.getStaminaRatio() > HALF_WORK);
+        return host.now;
+    }
+
+    private static void setFactors(Host host, GatheringSession<String> session, BreathingModifiers factors) {
+        // 与宿主一样先提交因子，再按原费率补结到交界时刻的膈肌做功。
+        var body = host.body();
+        var previous = BreathingModifiers.read(body);
+        var progress = SetAddonProgress.newBuilder()
+                .setId(BreathingModifiers.KEY)
+                .setProgress(factors.pack())
+                .build();
+        var command = BodyCommand.newBuilder()
+                .setBodyId(body.id().value())
+                .setExpectedRevision(body.revision())
+                .setSetAddonProgress(progress)
+                .build();
+        var request = RequestEnvelope.newBuilder()
+                .setProtocolVersion(1)
+                .setRequestId("factors-" + body.revision())
+                .setBodyCommand(command)
+                .build();
+        byte[] reply = host.handler().handleAddonProgress("owner", request.toByteArray());
+        assertTrue(MeridianProtocol.decodeResponse(reply).hasCommandCommitted());
+        session.settleBreathingModifierBoundary(previous);
+    }
 
     @Test
     public void eightWanderingQiMeridiansFormMiddleJiaoCycleAndRegularCycleCrossesBothSides() {

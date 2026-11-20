@@ -33,11 +33,11 @@ Human 不携带具体功法目录，不复制协议或新增战斗 UI 频道。
 
 Progression 是必装依赖。`SERVER_STARTING` 安装当前服务器的 `ProgressionStore`；读取和写入定位 UUID 绑定的同一 `HumanPlayerBody`。`meridian_progression:progress` 使用 `PlayerProgress` Any 保存在身体，初始版本 1、未读；写入通过 Framework 的可信附属事务，随 Human 世界存档标脏保存，重启和玩家实体替换保留。
 
-吐纳和开脉在实际 `HumanPlayerBody` 请求入口独立检查已读状态，未读返回 `ACCESS_DENIED`。内观在 `meridian:body_view_request` 的 `BodyViewRequest` 订阅入口同时校验身体归属、札记和内观残卷，未授权不发布开脉规则与操作卡。整个检视窗口包含体表也需内观卷；出生 0.36 元、自然扩散、普通运动与 OP 真元调试保持各自业务流程。
+吐纳和开脉在实际 `HumanPlayerBody` 请求入口独立检查权限。吐纳在未读两卷时只接受当前在线出身的基础吐纳授权，其他未授权请求返回 `ACCESS_DENIED`；开脉仍要求札记。内观在 `meridian:body_view_request` 的 `BodyViewRequest` 订阅入口同时校验身体归属、札记和内观残卷，未授权不发布开脉规则与操作卡。整个检视窗口包含体表也需内观卷；出生 0.36 元、自然扩散、普通运动与 OP 真元调试保持各自业务流程。
 
 重置在服务器主线程结束吐纳、暂停开脉、解除动作占用、停止打坐动画并撤销内观订阅，再发布权威进度与新快照。没有第二份解锁布尔值或独立存档。客户端隐藏入口和关窗由 UI 使用 Progression 投影完成。
 
-四卷进度仍保存为 schema 1；新字段 `inner_vision_scroll_read=5` 在旧存档中默认为未读，沿用登录、重生和身体事务同步。单独 `/meridian progression reset inner_vision` 仅撤销检视订阅和客户端窗口，不中断其他卷活动；单卷重新解锁后，必须重新发起内部订阅，旧订阅不会复活。
+五卷进度仍保存为 schema 1；新字段 `inner_vision_scroll_read=5` 和 `true_qi_scroll_read=6` 在旧存档中默认为未读，沿用登录、重生和身体事务同步。`basic_breathing_granted=7` 只在当前在线身体的进度投影中出现，身体事务写入时清除，不作为持久授权。单独 `/meridian progression reset inner_vision` 仅撤销检视订阅和客户端窗口，不中断其他卷活动；单卷重新解锁后，必须重新发起内部订阅，旧订阅不会复活。
 
 ## 玩家真元调试命令
 

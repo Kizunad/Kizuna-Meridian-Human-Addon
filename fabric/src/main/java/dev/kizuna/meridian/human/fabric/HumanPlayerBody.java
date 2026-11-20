@@ -54,10 +54,14 @@ import dev.kizuna.meridian.protocol.pb.OpeningMessages;
 import dev.kizuna.meridian.server.AddonRegistry;
 import dev.kizuna.meridian.server.BodyCommandHandler;
 import dev.kizuna.meridian.server.BodyTimeSource;
+import dev.kizuna.meridian.server.BreathingModifiers;
 import dev.kizuna.meridian.server.GatheringSession;
 import dev.kizuna.meridian.server.InMemoryBodyStore;
 import dev.kizuna.meridian.server.OpeningSession;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
+import dev.kizuna.meridian.technique.server.TechniqueBreathingPractice;
+import dev.kizuna.meridian.technique.server.TechniqueBreathingPractice.Settlement;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostRequest;
 import dev.kizuna.meridian.technique.server.TechniqueBodyStamp;
 import dev.kizuna.meridian.technique.server.TechniqueErrors;
@@ -79,6 +83,7 @@ final class HumanPlayerBody {
     static final String MOVEMENT_INSTANCE = "human.minecraft.locomotion";
     static final double WALK_ENDURANCE_SECONDS = 300;
     static final double SPRINT_ENDURANCE_SECONDS = 75;
+    private static final long PRACTICE_BILLING_MILLIS = 1000;
     private static final double MILLIS_PER_SECOND = 1000;
     private static final long MILLIS_PER_TICK = 50;
     /** 身体年龄与模拟时间同速；结清计划、事件边界和寿元终点都用这个倍率。 */
@@ -111,8 +116,10 @@ final class HumanPlayerBody {
     private GatheringSession<String> gathering;
     private OpeningSession<String> openingSession;
     private Consumer<GatheringResponse> gatheringOutput;
+    private BasicBreathingGrant basicBreathingGrant = BasicBreathingGrant.ABSENT;
     private Consumer<QiInventory> releaseSink = released -> { /* 独立身体测试无需世界路由。 */ };
     private DoubleSupplier movementLoad = () -> HumanMovementLoads.UNLOADED;
+    private Runnable practiceEnd = () -> { /* 独立身体没有原版实体图标。 */ };
     private final Set<String> breathingActions = new HashSet<>();
     private boolean debugAuthorized;
     private String trustedActivityCaller;
@@ -210,6 +217,13 @@ final class HumanPlayerBody {
         }
     }
 
+    PlayerProgress progressProjection() {
+        // 当前出身授权随权威进度同步，但不把在线派生状态写入身体存档。
+        return progress().toBuilder()
+                .setBasicBreathingGranted(hasBasicBreathingGrant())
+                .build();
+    }
+
     boolean canIntrospect(String bodyId) {
         // 内观订阅同时校验身体归属和已读事实，客户端隐藏入口不能代替服务端授权。
         PlayerProgress progress = progress();
@@ -221,7 +235,8 @@ final class HumanPlayerBody {
         if (progress.getSchemaVersion() != ProgressionProtocol.PROGRESS_SCHEMA) {
             throw HumanErrors.invalid(HumanErrors.INVALID_PROGRESS);
         }
-        PlayerProgress previous = snapshot().addonProgress().containsKey(ProgressionProtocol.PROGRESS_KEY)
+        BodySnapshot current = snapshot();
+        PlayerProgress previous = current.addonProgress().containsKey(ProgressionProtocol.PROGRESS_KEY)
                 ? progress() : PlayerProgress.getDefaultInstance();
         if (previous.getQiNotesRead() && !progress.getQiNotesRead()
                 || previous.getGatheringScrollRead() && !progress.getGatheringScrollRead()
@@ -229,10 +244,24 @@ final class HumanPlayerBody {
             // 只在撤权时结束旧活动；阅读新卷不会断开已经接好的吐纳会话。
             disconnectGathering(targetMillis);
         }
-        var request = RequestEnvelope.newBuilder().setProtocolVersion(1).setRequestId(UUID.randomUUID().toString())
-                .setBodyCommand(BodyCommand.newBuilder().setBodyId(id.value()).setExpectedRevision(snapshot().revision())
-                        .setSetAddonProgress(SetAddonProgress.newBuilder().setId(ProgressionProtocol.PROGRESS_KEY)
-                                .setProgress(com.google.protobuf.Any.pack(progress)))).build();
+        PlayerProgress savedProgress = progress.toBuilder()
+                .clearBasicBreathingGranted()
+                .build();
+        SetAddonProgress update = SetAddonProgress.newBuilder()
+                .setId(ProgressionProtocol.PROGRESS_KEY)
+                .setProgress(com.google.protobuf.Any.pack(savedProgress))
+                .build();
+        BodySnapshot commandSnapshot = snapshot();
+        BodyCommand command = BodyCommand.newBuilder()
+                .setBodyId(id.value())
+                .setExpectedRevision(commandSnapshot.revision())
+                .setSetAddonProgress(update)
+                .build();
+        RequestEnvelope request = RequestEnvelope.newBuilder()
+                .setProtocolVersion(1)
+                .setRequestId(UUID.randomUUID().toString())
+                .setBodyCommand(command)
+                .build();
         ResponseEnvelope response = MeridianProtocol.decodeResponse(captureRelease(
                 () -> commands.handleAddonProgress(id.value(), request.toByteArray())));
         if (response.hasFailure()) {
@@ -260,6 +289,7 @@ final class HumanPlayerBody {
     void resume(long millis) {
         // 离线区间仅按世界模拟时间推进年龄，暂停的单机世界没有额外现实时间恢复。
         long savedMillis = snapshot().settledAt().elapsedMillis();
+        abandonPractice();
         targetMillis = millis;
         timeMode = TimeAdvanceMode.LIFESPAN_ONLY;
         advanceTime();
@@ -380,22 +410,7 @@ final class HumanPlayerBody {
         settleGuard();
         long boundary;
         do {
-            BodySnapshot body = snapshot();
-            long cultivation = millis;
-            long step = nextStepMillis();
-            if (step < millis && !body.vitality().dead() && needsCultivationAdvance(body)) {
-                cultivation = step;
-            }
-            var guard = HumanGuardStamina.holding(body);
-            boundary = cultivation;
-            if (guard.isPresent()) {
-                boundary = HumanGuardStamina.boundary(body, guard.get(), cultivation);
-                if (hasMovementAction() || !body.modifiers().isEmpty()) {
-                    // 移动做功和能力曲线会改变下一段可付余量，迟到推进也逐拍复核。
-                    long clock = body.settledAt().elapsedMillis();
-                    boundary = clock + Math.min(MILLIS_PER_TICK, boundary - clock);
-                }
-            }
+            boundary = settlementBoundary(millis);
             settleInterval(boundary);
             settleGuard();
         } while (boundary < millis);
@@ -434,6 +449,30 @@ final class HumanPlayerBody {
         }
     }
 
+    private long settlementBoundary(long millis) {
+        // 迟到推进先停在费用能覆盖的最后边界，再让其后的吸呼按普通费率运行。
+        var body = snapshot();
+        if (body.vitality().dead()) {
+            return millis;
+        }
+        long next = TechniqueBreathingPractice.expiresAt(body).orElse(millis);
+        long step = nextStepMillis();
+        if (step < millis && needsCultivationAdvance(body)) {
+            next = Math.min(next, step);
+        }
+        long now = body.settledAt().elapsedMillis();
+        long target = Math.clamp(next, Math.min(millis, now), millis);
+        var guard = HumanGuardStamina.holding(body);
+        if (guard.isEmpty()) {
+            return target;
+        }
+        long guardBoundary = HumanGuardStamina.boundary(body, guard.orElseThrow(), target);
+        if (hasMovementAction() || !body.modifiers().isEmpty()) {
+            return now + Math.min(MILLIS_PER_TICK, guardBoundary - now);
+        }
+        return guardBoundary;
+    }
+
     private void settleInterval(long millis) {
         // 同一时刻的观察和查询不能重复扣费；时间来自服务端主世界累计 tick。
         if (millis < accountedMillis) {
@@ -442,6 +481,7 @@ final class HumanPlayerBody {
         double elapsedSeconds = (millis - accountedMillis) / MILLIS_PER_SECOND;
         targetMillis = millis;
         advanceTime();
+        settlePractice(Settlement.MAINTAIN);
         if (elapsedSeconds > 0 && hasMovementAction() && !snapshot().vitality().dead()) {
             exertMovement(elapsedSeconds);
         }
@@ -552,9 +592,43 @@ final class HumanPlayerBody {
         gatheringOutput = output;
     }
 
+    boolean hasBasicBreathingGrant() {
+        // 只有在线出身来源可以授予基础吐纳，离线快照只保存真实的阅读记录。
+        return basicBreathingGrant == BasicBreathingGrant.PRESENT;
+    }
+
+    boolean gatheringConnected() {
+        // 撤销残卷会关闭旧会话，在线连接需要接收新的输入。
+        return gathering != null;
+    }
+
+    void updateBasicBreathingGrant(BasicBreathingGrant grant) {
+        // 进服、改换出身及资源重载时替换当前会话的授权。
+        basicBreathingGrant = grant;
+    }
+
+    private boolean learnedGathering() {
+        // 这两本残卷一起开放完整的聚气配方和环境详情。
+        var reading = progress();
+        return reading.getQiNotesRead() && reading.getGatheringScrollRead();
+    }
+
+    GatheringResponse visibleGathering(GatheringResponse receipt) {
+        // 专有授权只允许读呼吸状态，环境详情和旧聚气配方仍需要原来的阅读进度。
+        if (!receipt.hasView() || !hasBasicBreathingGrant() || learnedGathering()) {
+            return receipt;
+        }
+        var view = receipt.getView().toBuilder()
+                .clearEnvironment()
+                .clearChoices()
+                .clearProgress()
+                .build();
+        return receipt.toBuilder().setView(view).build();
+    }
+
     GatheringResponse gather(long millis, GatheringRequest request) {
         // 请求只有输入方向与序号；玩家、时钟、环境和能力由当前宿主绑定。
-        if (!progress().getQiNotesRead() || !progress().getGatheringScrollRead()) {
+        if (!learnedGathering() && (request.hasStart() || !hasBasicBreathingGrant())) {
             return gatheringFailure(request, FailureCode.ACCESS_DENIED);
         }
         if (startsBreathing(request) && refiningBreathingOrgan()) {
@@ -664,7 +738,8 @@ final class HumanPlayerBody {
 
     void publishGathering() {
         // 恢复或气流改变后推送同一身体投影，使关闭吐纳后的余力也跟随实际恢复。
-        if (gathering != null && gatheringOutput != null && progress().getQiNotesRead()) {
+        if (gathering != null && gatheringOutput != null && (progress().getQiNotesRead()
+                || hasBasicBreathingGrant())) {
             GatheringView view = gathering.view();
             lastBreathing = view.getBreathing();
             gatheringOutput.accept(GatheringResponse.newBuilder().setProtocolVersion(1)
@@ -905,6 +980,9 @@ final class HumanPlayerBody {
         settle(millis);
         ResponseEnvelope response = MeridianProtocol.decodeResponse(
                 captureRelease(() -> commands.handleHealthEffect(id.value(), MeridianProtocol.encodeRequest(request))));
+        if (response.hasCommandCommitted() && snapshot().vitality().dead()) {
+            abandonPractice();
+        }
         scheduleNextBoundary();
         publishGathering();
         return response;
@@ -941,7 +1019,8 @@ final class HumanPlayerBody {
 
     private void settleBeforeSession(long millis) {
         // 吐纳和开脉能直接推进框架时钟，持守时也要先经过相同的成架和耗尽边界。
-        if (HumanGuardStamina.holding(snapshot()).isPresent()) {
+        var body = snapshot();
+        if (HumanGuardStamina.holding(body).isPresent() || TechniqueBreathingPractice.active(body).isPresent()) {
             settle(millis);
         }
     }
@@ -973,6 +1052,105 @@ final class HumanPlayerBody {
     void bindMovementLoad(DoubleSupplier load) {
         // 世界宿主按实时玩家实体读取负荷；独立身体测试保持无负荷倍率。
         movementLoad = java.util.Objects.requireNonNull(load);
+    }
+
+    void bindPracticeEnd(Runnable callback) {
+        // 同一玩家更换实体后，撤效总是落在当前实体上。
+        practiceEnd = java.util.Objects.requireNonNull(callback);
+    }
+
+    boolean beginPractice(long millis, String castId, TechniqueDefinition definition) {
+        // 切换后的首次接触用新摄入倍率，截止切换时刻的膈肌负担用旧费率。
+        settle(millis);
+        var body = snapshot();
+        if (body.vitality().dead() || !TechniqueBreathingPractice.canPay(body)) {
+            return false;
+        }
+        var change = TechniqueBreathingPractice.begin(body, castId, definition.getId(),
+                definition.getMaintainedBreathing());
+        if (change.isEmpty()) {
+            return false;
+        }
+        applyActivity(change.orElseThrow());
+        finishBreathingInterval(BreathingModifiers.read(body));
+        scheduleNextBoundary();
+        publishGathering();
+        return true;
+    }
+
+    boolean endPractice(long millis) {
+        // 断线、外部清效和主动收势可能重合，按身体中正在维持的身份结束一次。
+        if (TechniqueBreathingPractice.active(snapshot()).isEmpty()) {
+            return false;
+        }
+        settle(millis);
+        settlePractice(Settlement.END);
+        scheduleNextBoundary();
+        return true;
+    }
+
+
+    private void settlePractice(Settlement mode) {
+        // 帐款、付讫游标和撤效是一笔活动。
+        // 随后结清已付时间的肌肉负载，同刻粒子读取新倍率。
+        var body = snapshot();
+        if (!body.addonProgress().containsKey(TechniqueBreathingPractice.KEY)) {
+            return;
+        }
+        if (body.vitality().dead()) {
+            abandonPractice();
+            return;
+        }
+        var plan = TechniqueBreathingPractice.settle(body, mode);
+        if (plan.isEmpty()) {
+            return;
+        }
+        var activity = plan.orElseThrow();
+        applyActivity(activity);
+        if (activity.containsProgress(BreathingModifiers.KEY)) {
+            practiceEnd.run();
+            finishBreathingInterval(BreathingModifiers.read(body));
+            publishGathering();
+        }
+    }
+
+    private void finishBreathingInterval(BreathingModifiers previous) {
+        // 守住会话动作占用、释放回调以及同一步内的输入和空气状态。
+        if (gathering != null && !snapshot().vitality().dead()) {
+            var actions = actionIds();
+            captureRelease(() -> {
+                gathering.settleBreathingModifierBoundary(previous);
+                return null;
+            });
+            rememberBreathingActions(actions);
+        }
+    }
+
+    private void abandonPractice() {
+        // 死体允许可信进度清理；异常重启先撤旧因子，再推进离线时钟。
+        var body = snapshot();
+        var abandoned = TechniqueBreathingPractice.abandoned(body);
+        if (!BreathingModifiers.NORMAL.equals(BreathingModifiers.read(body))) {
+            replacePracticeProgress(BreathingModifiers.KEY, BreathingModifiers.NORMAL.pack());
+        }
+        abandoned.ifPresent(state -> replacePracticeProgress(TechniqueBreathingPractice.KEY, state));
+        if (abandoned.isPresent()) {
+            practiceEnd.run();
+        }
+    }
+
+    private void replacePracticeProgress(String key, com.google.protobuf.Any value) {
+        // 每次重新读取版本，重读档在两次写之间中断后可继续清理。
+        var change = SetAddonProgress.newBuilder()
+                .setId(key)
+                .setProgress(value)
+                .build();
+        var command = BodyCommand.newBuilder()
+                .setBodyId(id.value())
+                .setExpectedRevision(snapshot().revision())
+                .setSetAddonProgress(change)
+                .build();
+        submitRecovery(UUID.randomUUID().toString(), command);
     }
 
     private <T> T captureRelease(Supplier<T> operation) {
@@ -1070,6 +1248,11 @@ final class HumanPlayerBody {
         }
         if (needsCultivationAdvance(body)) {
             nextBoundaryMillis = Math.min(nextBoundaryMillis, accountedMillis + HumanCultivationNumbers.STEP_MILLIS);
+        }
+        var expires = TechniqueBreathingPractice.expiresAt(body);
+        if (expires.isPresent()) {
+            long nextPayment = Math.min(expires.getAsLong(), accountedMillis + PRACTICE_BILLING_MILLIS);
+            nextBoundaryMillis = Math.min(nextBoundaryMillis, nextPayment);
         }
     }
 

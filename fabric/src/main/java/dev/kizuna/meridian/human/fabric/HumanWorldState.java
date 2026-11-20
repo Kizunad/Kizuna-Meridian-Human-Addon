@@ -27,6 +27,7 @@ import dev.kizuna.meridian.protocol.pb.EnvironmentMessages.TerrainQiRegionReques
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.CommandReceipt;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.server.InMemoryBodyStore;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueBreathingStatuses;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -396,6 +397,7 @@ final class HumanWorldState {
     void bindReleaseSink(ServerPlayer player) {
         // 重生会替换实体；释放回调和行走负荷都必须先于新实体的任何身体命令重新绑定。
         HumanPlayerBody body = players.get(player.getUUID());
+        body.bindPracticeEnd(() -> TechniqueBreathingStatuses.clear(player));
         body.bindMovementLoad(() -> HumanMovementLoads.multiplier(player));
         body.bindReleaseSink(qi -> {
             // 回调读取实时玩家位置，不保留登录时或旧窗口的区域。

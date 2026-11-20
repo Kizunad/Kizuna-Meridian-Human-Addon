@@ -5,6 +5,7 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import dev.kizuna.meridian.fabric.MeridianChannels;
 import dev.kizuna.meridian.fabric.MeridianCommands;
 import dev.kizuna.meridian.fabric.ProtobufChannel;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueBreathingStatuses;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.EnvironmentHostRequest;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.EnvironmentHostResponse;
 import dev.kizuna.meridian.human.server.HumanContent;
@@ -127,6 +128,8 @@ public final class HumanFabric implements ModInitializer {
         HumanStaggerAnimation.initialize();
         HumanTempo.initialize();
         HumanOrganRefineHost.initialize();
+        HumanBreathingPractice.initialize(() -> activeServer);
+        BasicBreathingGrant.CHANGED.register(this::refreshBasicBreathing);
         AttackEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
             if (HumanTechniqueHost.isCasting(player.getUUID()) || HumanStaggerLock.isLocked(player.getUUID())
                     || HumanControl.blocksAction(player.getUUID())) {
@@ -156,7 +159,7 @@ public final class HumanFabric implements ModInitializer {
             @Override
             public PlayerProgress read(UUID playerId) {
                 // 适配器属于这次服务器实例；身体必须由登录流程先加载。
-                return requireBody(playerId).progress();
+                return requireBody(playerId).progressProjection();
             }
 
             @Override
@@ -171,7 +174,7 @@ public final class HumanFabric implements ModInitializer {
                     if (!progress.getQiNotesRead() || !progress.getInnerVisionScrollRead()) {
                         introspecting.remove(playerId);
                     }
-                    if (!progress.getQiNotesRead()) {
+                    if (!body.gatheringConnected() || !progress.getQiNotesRead() && !body.hasBasicBreathingGrant()) {
                         animations.stop(player);
                         receipts.forget(playerId);
                         body.connectGathering(millis(server), response -> sendGathering(player, response));
@@ -228,6 +231,7 @@ public final class HumanFabric implements ModInitializer {
             // 原版外部死亡先结束施放，允许后续死亡确认保留已经清理的功法进度。
             if (entity instanceof ServerPlayer player && state != null
                     && !failed.contains(player.getUUID())) {
+                HumanBreathingPractice.end(player);
                 HumanTechniqueHost.beforeDeath(player);
             }
             return true;
@@ -406,6 +410,8 @@ public final class HumanFabric implements ModInitializer {
                 throw HumanErrors.invalid(HumanErrors.INVALID_SAVED_BODY);
             }
             HumanPlayerBody body = state.join(player, millis(server));
+            body.updateBasicBreathingGrant(BasicBreathingGrant.ABSENT);
+            TechniqueBreathingStatuses.clear(player);
             HumanTechniqueHost.reconnect(player);
             state.selectEnvironment(player, millis(server));
             sentStructures.remove(player.getUUID());
@@ -419,6 +425,28 @@ public final class HumanFabric implements ModInitializer {
         } catch (RuntimeException failure) {
             fail(player, failure);
         }
+    }
+
+    private void refreshBasicBreathing(ServerPlayer player, BasicBreathingGrant grant) {
+        // 出身在身体就绪后通知。撤掉最后一种授权时结束当前气流并清掉延后的回执。
+        var id = player.getUUID();
+        if (!observers.containsKey(id) || failed.contains(id)) {
+            return;
+        }
+        var body = requireBody(id);
+        if (body.hasBasicBreathingGrant() == (grant == BasicBreathingGrant.PRESENT)) {
+            return;
+        }
+        body.updateBasicBreathingGrant(grant);
+        var reading = body.progress();
+        if (grant == BasicBreathingGrant.ABSENT && !(reading.getQiNotesRead() && reading.getGatheringScrollRead())) {
+            animations.stop(player);
+            receipts.forget(id);
+            body.connectGathering(millis(player.level().getServer()), response -> sendGathering(player, response));
+            state.setDirty();
+        }
+        ProgressionFabric.publishProgress(player);
+        body.publishGathering();
     }
 
     private byte[] environment(byte[] payload) {
@@ -698,6 +726,7 @@ public final class HumanFabric implements ModInitializer {
     private void leave(ServerPlayer player, MinecraftServer server) {
         // 功法库已完成取消和组织效果清理，晚到的断线回调可以安全重复释放。
         UUID playerId = player.getUUID();
+        HumanBreathingPractice.end(player);
         HumanTechniqueHost.disconnect(playerId);
         if (state != null && observers.containsKey(playerId) && !failed.contains(playerId)) {
             try {
@@ -749,6 +778,7 @@ public final class HumanFabric implements ModInitializer {
         }
         try {
             long nowMillis = millis(player.level().getServer());
+            HumanBreathingPractice.end(player);
             state.bindReleaseSink(player);
             receipts.forget(player.getUUID());
             body.connectGathering(nowMillis, response -> sendGathering(player, response));
@@ -841,9 +871,11 @@ public final class HumanFabric implements ModInitializer {
     }
 
     private void sendReceipt(ServerPlayer player, GatheringResponse receipt) {
-        // 已连接却缺少必装 UI 通道必须报告错误。
+        // 延后发送的回执也按此刻的权限过滤，基础吐纳只需要呼吸视图。
         requireChannel(player, MeridianChannels.GATHERING_RESPONSE);
-        ServerPlayNetworking.send(player, MeridianChannels.GATHERING_RESPONSE.payload(receipt.toByteArray()));
+        var body = state.find(player.getUUID());
+        var visible = body.visibleGathering(receipt);
+        ServerPlayNetworking.send(player, MeridianChannels.GATHERING_RESPONSE.payload(visible.toByteArray()));
     }
 
     private void publishBodyView(ServerPlayer player, dev.kizuna.meridian.protocol.pb.BodyMessages.BodySnapshot body) {

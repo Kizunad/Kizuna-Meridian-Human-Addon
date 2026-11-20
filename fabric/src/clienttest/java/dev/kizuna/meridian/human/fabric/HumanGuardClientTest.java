@@ -2,7 +2,10 @@ package dev.kizuna.meridian.human.fabric;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.kizuna.meridian.human.fabric.client.HumanGuardClient;
+import dev.kizuna.meridian.server.BreathingModifiers;
+import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.fabric.client.TechniqueCastStatusClient;
+import dev.kizuna.meridian.technique.server.TechniqueBreathingPractice;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastPhase;
 import dev.kizuna.meridian.technique.server.TechniqueState;
 import dev.kizuna.meridian.vanilla.fabric.VanillaDamageFabric;
@@ -20,6 +23,8 @@ import net.minecraft.client.Screenshot;
 import net.minecraft.client.Minecraft;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
@@ -58,6 +63,7 @@ public final class HumanGuardClientTest implements FabricClientGameTest {
     private static final int FRAME_HEIGHT = 720;
     private static final int ESTABLISH_TICKS = 20;
     private static final String FORMAL_GUARD = "meridian_basic_techniques:guard";
+    private static final String PRACTICE = "meridian_human_test:practice";
     private static final int RAISE_SHOT_TICKS = 24;
     private static final int LATE_LEAD_TICKS = 5;
     private static final int EARLY_LEAD_TICKS = 9;
@@ -80,6 +86,11 @@ public final class HumanGuardClientTest implements FabricClientGameTest {
 
     @Override
     public void runTest(ClientGameTestContext context) {
+        // 重生场景需要进服弹出身卡，使用单独的客户端验收入口和存档。
+        if (Boolean.getBoolean("meridian.human.testReborn")) {
+            new dev.kizuna.meridian.origin.fabric.client.RebornBreathingClientTest().runTest(context);
+            return;
+        }
         // 在收势中停服，并在同一存档重进核对玩家、区块和身体。
         Departing departing;
         var world = context.worldBuilder().create();
@@ -98,6 +109,7 @@ public final class HumanGuardClientTest implements FabricClientGameTest {
             release(context, world, cast);
             shortTap(context, world);
             weaponGuard(context, world);
+            startPractice(context, world);
             departing = departure(context, world);
             world.getServer().runOnServer(HumanGuardClientTest::markForSave);
         } finally {
@@ -123,6 +135,7 @@ public final class HumanGuardClientTest implements FabricClientGameTest {
         var playerId = player.getUUID();
         var state = HumanTechniqueHost.state();
         var body = state.find(playerId);
+        isTrue(TechniqueBreathingPractice.active(body.snapshot()).isPresent(), "停服前后台运功已经结束");
         isTrue(HumanTechniqueHost.isCasting(playerId), "停服前玩家应仍在施放");
         isTrue(!body.progress().getQiNotesRead(), "测试身体已有已读标记");
         var progress = body.progress().toBuilder()
@@ -142,6 +155,9 @@ public final class HumanGuardClientTest implements FabricClientGameTest {
             var body = HumanWorldState.load(file).find(playerId);
             isTrue(body != null && body.progress().getQiNotesRead(), "停服未写入已读进度");
             isTrue(!TechniqueState.read(body.snapshot()).hasActiveCast(), "停服存档残留施放");
+            isTrue(TechniqueBreathingPractice.active(body.snapshot()).isEmpty(), "停服存档残留运功");
+            isTrue(BreathingModifiers.read(body.snapshot()).equals(BreathingModifiers.NORMAL),
+                    "停服存档残留吐纳倍率");
         } catch (IOException failure) {
             throw new AssertionError("无法读取停服后的人体存档 " + file, failure);
         }
@@ -154,6 +170,22 @@ public final class HumanGuardClientTest implements FabricClientGameTest {
         isTrue(server.overworld().getBlockState(SAVED_BLOCK).is(Blocks.EMERALD_BLOCK), "重进后世界方块丢失");
         var body = HumanTechniqueHost.state().find(player.getUUID());
         isTrue(body != null && body.progress().getQiNotesRead(), "重进后人体进度丢失");
+        var effect = BuiltInRegistries.MOB_EFFECT.get(Identifier.parse(PRACTICE)).orElseThrow();
+        isTrue(!player.hasEffect(effect), "重进后仍有运功图标");
+        isTrue(TechniqueFabric.service().known(player.getUUID()).stream()
+                .anyMatch(entry -> entry.technique().getId().equals(PRACTICE)), "停服后忘掉了已学的功法");
+    }
+
+    private static void startPractice(ClientGameTestContext context, TestSingleplayerContext world) {
+        // 守式起手前先运行后台功法，停服时两种生命周期会同时结束。
+        world.getServer().runOnServer(server -> {
+            var player = player(server);
+            TechniqueFabric.service().learn(player.getUUID(), PRACTICE);
+            var cast = HumanGuardTestCatalog.start(player, PRACTICE);
+            isTrue(cast.getPhase() == CastPhase.WARMUP, "运功起手失败：" + cast);
+        });
+        var effect = BuiltInRegistries.MOB_EFFECT.get(Identifier.parse(PRACTICE)).orElseThrow();
+        context.waitFor(client -> client.player.hasEffect(effect));
     }
 
     private static Departing departure(ClientGameTestContext context, TestSingleplayerContext world) {
