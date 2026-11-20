@@ -1,5 +1,7 @@
 package dev.kizuna.meridian.human.fabric;
 
+import dev.kizuna.meridian.human.server.HumanStamina;
+import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.HealthHostProtobuf;
 import dev.kizuna.meridian.protocol.pb.BodyMessages.BodySnapshot;
 import dev.kizuna.meridian.protocol.pb.HealthHostMessages.HealthHostRequest;
@@ -18,6 +20,9 @@ import static dev.kizuna.meridian.human.fabric.HumanGameTestTicks.DEFAULT_TIMEOU
 /** 玩家健康宿主使用真实在线绑定转发普通做功命令。 */
 public final class HumanExertionGameTest {
     private static final double EXCESSIVE_POWER = 1_000_000;
+    private static final double WORK_WATTS = 1;
+    private static final double WORK_SECONDS = 1;
+    private static final double JOULE_TOLERANCE = 1e-8;
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void exertionChargesOnceRejectsCapacityAndChecksBoundIdentity(GameTestHelper context) {
@@ -31,7 +36,7 @@ public final class HumanExertionGameTest {
                     .setInspect(true /* inspect */)
                     .build();
             BodySnapshot initial = exchange(inspect).getBody();
-            var request = request(subject, initial, 1);
+            var request = request(subject, initial, WORK_WATTS);
             var first = exchange(request);
             context.assertTrue(first.hasBody(), "玩家宿主未接受普通做功：" + first);
             BodySnapshot exerted = first.getBody();
@@ -39,6 +44,11 @@ public final class HumanExertionGameTest {
             context.assertTrue(!first.hasHealth(), "做功不能伪造健康效果回执");
             context.assertTrue(!exerted.getTissueStatesList().equals(initial.getTissueStatesList()),
                     "做功未增加组织疲劳");
+            double before = HumanStamina.from(BodyProtobuf.fromMessage(initial)).availableJoules();
+            double after = HumanStamina.from(BodyProtobuf.fromMessage(exerted)).availableJoules();
+            double expectedCost = WORK_WATTS * WORK_SECONDS;
+            context.assertTrue(Math.abs(before - after - expectedCost) < JOULE_TOLERANCE,
+                    "玩家宿主做功后的全身体力差与实际焦耳不符");
             context.assertTrue(exchange(request).getBody().equals(exerted), "重放做功重复扣疲劳");
             var rejected = exchange(request(subject, exerted, EXCESSIVE_POWER));
             context.assertTrue(rejected.getFailure().getCode() == FailureCode.TISSUE_LOAD_EXCEEDED,
@@ -61,7 +71,7 @@ public final class HumanExertionGameTest {
                 .setTissueId(tissue)
                 .setForceNewtons(1)
                 .setPowerWatts(power)
-                .setDurationSeconds(1)
+                .setDurationSeconds(WORK_SECONDS)
                 .build();
         var loads = ExertTissues.newBuilder().addLoads(load).build();
         var command = BodyCommand.newBuilder()

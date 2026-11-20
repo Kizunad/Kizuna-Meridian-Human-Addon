@@ -62,6 +62,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHost
 import dev.kizuna.meridian.technique.server.TechniqueBodyStamp;
 import dev.kizuna.meridian.technique.server.TechniqueErrors;
 import dev.kizuna.meridian.technique.server.TechniqueHost;
+import dev.kizuna.meridian.technique.server.TechniqueState;
 
 import java.util.HashSet;
 import java.util.List;
@@ -70,6 +71,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /** 单玩家的可信运动编排；账本、占用与恢复只由框架命令处理器修改。 */
@@ -78,6 +80,7 @@ final class HumanPlayerBody {
     static final double WALK_ENDURANCE_SECONDS = 300;
     static final double SPRINT_ENDURANCE_SECONDS = 75;
     private static final double MILLIS_PER_SECOND = 1000;
+    private static final long MILLIS_PER_TICK = 50;
     /** 身体年龄与模拟时间同速；结清计划、事件边界和寿元终点都用这个倍率。 */
     static final double AGING_RATE = 1;
     private static final int GATHERING_PROTOCOL_VERSION = 1;
@@ -113,6 +116,8 @@ final class HumanPlayerBody {
     private final Set<String> breathingActions = new HashSet<>();
     private boolean debugAuthorized;
     private String trustedActivityCaller;
+    private Function<BodySnapshot, Optional<TechniqueHost.Submission>> pendingGuardRelease =
+            ignored -> Optional.empty();
     private BreathingView lastBreathing = BreathingView.getDefaultInstance();
     private BodySnapshot cultivationChecked;
     private boolean cultivationNeeded;
@@ -254,11 +259,13 @@ final class HumanPlayerBody {
 
     void resume(long millis) {
         // 离线区间仅按世界模拟时间推进年龄，暂停的单机世界没有额外现实时间恢复。
+        long savedMillis = snapshot().settledAt().elapsedMillis();
         targetMillis = millis;
         timeMode = TimeAdvanceMode.LIFESPAN_ONLY;
         advanceTime();
         timeMode = TimeAdvanceMode.ACTIVE;
         accountedMillis = millis;
+        preserveGuardDelay(savedMillis, millis);
         if (!snapshot().vitality().dead() && (HumanCultivation.state(snapshot()).getRunning()
                 || HumanCultivation.state(snapshot()).getMobilizing())) {
             applyActivity(HumanCultivation.cancel(snapshot()));
@@ -356,13 +363,75 @@ final class HumanPlayerBody {
     }
 
     void settle(long millis) {
-        // 长区间按活动边界逐步结算，不能把60秒燃料一次检查或在结束后补扣疲劳。
-        // 先比时间：剩下不足一步时不用判断中焦和储备要不要推进。
-        while (nextStepMillis() < millis && !snapshot().vitality().dead() && needsCultivationAdvance(snapshot())) {
-            // 吐纳或开脉会先推进身体游标，运动账尚未结清时也不能回拨身体时钟。
-            settleInterval(nextStepMillis());
+        // 先用当刻状态同步守式占用，长区间再逐个经过起手、耗尽和修炼边界。
+        BodySnapshot before = snapshot();
+        long now = before.settledAt().elapsedMillis();
+        if (millis > now && !before.vitality().dead()) {
+            pendingGuardRelease.apply(before).ifPresent(release -> {
+                targetMillis = now;
+                var command = BodyCommand.newBuilder()
+                        .setBodyId(id.value())
+                        .setExpectedRevision(release.expectedRevision())
+                        .setExecuteActivity(release.activity())
+                        .build();
+                submitRecovery(release.requestId(), command);
+            });
         }
-        settleInterval(millis);
+        settleGuard();
+        long boundary;
+        do {
+            BodySnapshot body = snapshot();
+            long cultivation = millis;
+            long step = nextStepMillis();
+            if (step < millis && !body.vitality().dead() && needsCultivationAdvance(body)) {
+                cultivation = step;
+            }
+            var guard = HumanGuardStamina.holding(body);
+            boundary = cultivation;
+            if (guard.isPresent()) {
+                boundary = HumanGuardStamina.boundary(body, guard.get(), cultivation);
+                if (hasMovementAction() || !body.modifiers().isEmpty()) {
+                    // 移动做功和能力曲线会改变下一段可付余量，迟到推进也逐拍复核。
+                    long clock = body.settledAt().elapsedMillis();
+                    boundary = clock + Math.min(MILLIS_PER_TICK, boundary - clock);
+                }
+            }
+            settleInterval(boundary);
+            settleGuard();
+        } while (boundary < millis);
+    }
+
+    private void settleGuard() {
+        // 取同一个版本算游标、费用、占用与撤窗，任何拒绝均保留待结区间。
+        BodySnapshot body = snapshot();
+        HumanGuardStamina.holding(body).flatMap(guard -> HumanGuardStamina.payment(body, guard))
+                .ifPresent(this::applyActivity);
+    }
+
+    void bindGuardRelease(Function<BodySnapshot, Optional<TechniqueHost.Submission>> pending) {
+        // 在线施放会话持有首次松手请求，身体只在即将推进到下一时刻时查看。
+        pendingGuardRelease = pending;
+    }
+
+    private void preserveGuardDelay(long savedMillis, long nowMillis) {
+        // 离线只走寿元，登录后还须等待离开时剩余的禁守时间。
+        BodySnapshot body = snapshot();
+        if (body.vitality().dead() || nowMillis <= savedMillis
+                || !body.addonProgress().containsKey(TechniqueState.KEY)) {
+            return;
+        }
+        var progress = TechniqueState.read(body);
+        var updated = progress.toBuilder();
+        progress.getGuardBreakEndsMap().forEach((id, deadline) -> {
+            if (deadline > savedMillis) {
+                updated.putGuardBreakEnds(id, Math.addExact(nowMillis, deadline - savedMillis));
+            }
+        });
+        var shifted = updated.build();
+        if (!shifted.equals(progress)) {
+            var payload = TechniqueState.pack(shifted);
+            applyActivity(ActivityMessages.BodyActivity.newBuilder().putProgress(TechniqueState.KEY, payload).build());
+        }
     }
 
     private void settleInterval(long millis) {
@@ -492,6 +561,7 @@ final class HumanPlayerBody {
             // 肺炼期间肺忙于炼化，开始吐纳与纳气都要等炼化收尾；结束与查看照常。
             return gatheringFailure(request, FailureCode.ORGAN_BUSY);
         }
+        settleBeforeSession(millis);
         targetMillis = millis;
         gathering.synchronizeBodyRevision();
         Set<String> previous = actionIds();
@@ -580,6 +650,7 @@ final class HumanPlayerBody {
         if (gathering == null || gathering.nextBoundaryMillis() == 0 || millis < gathering.nextBoundaryMillis()) {
             return false;
         }
+        settleBeforeSession(millis);
         gathering.synchronizeBodyRevision();
         Set<String> previous = actionIds();
         boolean changed = captureRelease(() -> gathering.advance());
@@ -611,6 +682,7 @@ final class HumanPlayerBody {
             applyActivity(HumanCultivation.cancel(snapshot()));
         }
         if (gathering != null) {
+            settleBeforeSession(millis);
             captureRelease(() -> {
                 // 关闭也可能推进身体时间，先收集本次释放再销毁会话。
                 gathering.close();
@@ -850,6 +922,7 @@ final class HumanPlayerBody {
             return ResponseEnvelope.newBuilder().setProtocolVersion(1).setRequestId(request.getRequestId())
                     .setFailure(RequestFailure.newBuilder().setCode(FailureCode.ACCESS_DENIED)).build();
         }
+        settleBeforeSession(millis);
         targetMillis = millis;
         if (openingSession == null) {
             openingSession = new OpeningSession<>(id.value(), id, commands, store,
@@ -864,6 +937,13 @@ final class HumanPlayerBody {
     Set<String> breathingActions() {
         // 保存宿主自己的占用身份，重连不会误删其他附属启动的动作。
         return Set.copyOf(breathingActions);
+    }
+
+    private void settleBeforeSession(long millis) {
+        // 吐纳和开脉能直接推进框架时钟，持守时也要先经过相同的成架和耗尽边界。
+        if (HumanGuardStamina.holding(snapshot()).isPresent()) {
+            settle(millis);
+        }
     }
 
     private Set<String> actionIds() {

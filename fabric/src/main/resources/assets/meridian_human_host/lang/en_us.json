@@ -1,4 +1,6 @@
 {
+  "meridian_human_host.guard.broken": "Guard broken. You cannot guard yet.",
+  "meridian_human_host.guard.weak": "Not enough stamina to guard.",
   "meridian_human_host.guard.shield_raised": "Your shield is up; no arm is free to guard",
   "message.meridian_human_host.welcome.notes": "Cultivation begins with a scroll of Qi Meridian Notes: look in the chests of dungeons, abandoned mineshafts, desert pyramids and jungle temples; skeletons sometimes carry one. Right-click it, then press %s to open the cultivation page.",
   "message.meridian_human_host.welcome.techniques": "Villagers, traders, pillagers, vindicators, evokers and witches all know techniques; defeat one yourself and it may drop a scroll of what it knew.",

@@ -3,6 +3,8 @@ package dev.kizuna.meridian.human.fabric;
 import dev.kizuna.meridian.human.server.HumanTechniqueAnimations.GuardMotion;
 import dev.kizuna.meridian.human.server.HumanTechniqueAnimations.GuardStyle;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
+import dev.kizuna.meridian.technique.server.TechniqueState;
+import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastPhase;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueEffect;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
@@ -35,9 +37,22 @@ final class HumanGuard {
         TechniqueFabric.SERVICE_STARTED.register(service -> {
             service.addCastCheck((entity, request) -> {
                 ServerPlayer player = server.getPlayerList().getPlayer(entity);
-                if (player != null && isGuard(request.getTechnique()) && player.isUsingItem()
-                        && player.getUseItem().getUseAnimation() == ItemUseAnimation.BLOCK) {
+                if (player == null) {
+                    return Optional.empty();
+                }
+                var reference = request.getTechnique();
+                var guard = service.registry().find(reference).stream()
+                        .flatMap(definition -> definition.getEffectsList().stream())
+                        .filter(TechniqueEffect::hasGuard).map(TechniqueEffect::getGuard).findFirst();
+                if (guard.isEmpty()) {
+                    return Optional.empty();
+                }
+                if (player.isUsingItem() && player.getUseItem().getUseAnimation() == ItemUseAnimation.BLOCK) {
                     return Optional.of(HumanLang.GUARD_SHIELD_RAISED);
+                }
+                if (guard.get().hasStamina()) {
+                    var body = service.statusHost(entity).orElseThrow().inspect().body();
+                    return HumanGuardStamina.rejection(body, reference.getId(), guard.get().getStamina());
                 }
                 return Optional.empty();
             });
@@ -45,7 +60,17 @@ final class HumanGuard {
                 ServerPlayer player = server.getPlayerList().getPlayer(event.entityUuid());
                 var active = event.active();
                 if (player != null && active.hasSustained() && event.phase() == CastPhase.RECOVERING) {
-                    HumanTechniquePresentation.lowerGuard(player, active.getRequest().getCastId());
+                    var sustained = active.getSustained();
+                    String cast = active.getRequest().getCastId();
+                    if (sustained.getExhausted()) {
+                        GuardStyle style = style(player);
+                        if (sustained.hasWeaponContactOnBreak()) {
+                            style = sustained.getWeaponContactOnBreak() ? GuardStyle.WEAPON : GuardStyle.ARMS;
+                        }
+                        HumanTechniquePresentation.breakGuard(player, cast, style);
+                    } else {
+                        HumanTechniquePresentation.lowerGuard(player, cast);
+                    }
                 }
             });
         });
@@ -75,6 +100,12 @@ final class HumanGuard {
         event.input().guarded().ifPresent(guard -> {
             if (guard.bodyId().equals(body.getId())
                     && HumanTechniqueHost.hasCast(player.getUUID(), guard.castId())) {
+                if (guard.guard().hasStamina()) {
+                    var progress = TechniqueState.read(BodyProtobuf.fromMessage(body));
+                    if (progress.getActiveCast().getSustained().getExhausted()) {
+                        return;
+                    }
+                }
                 HumanTechniquePresentation.refreshGuard(player);
                 GuardStyle contact = event.input().weaponGuarded() ? GuardStyle.WEAPON : GuardStyle.ARMS;
                 HumanTechniquePresentation.guardMotion(player, guard.castId(), GuardMotion.HIT, contact);

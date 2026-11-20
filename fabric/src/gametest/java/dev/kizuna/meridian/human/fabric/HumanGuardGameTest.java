@@ -44,6 +44,11 @@ public final class HumanGuardGameTest {
     private static final double ATTACK_DISTANCE = 2;
     private static final double SMALL_HIT = 0.1;
     private static final double DESTROY_ARM = 100;
+    private static final double REMAINING_ARM_HP = 1;
+    private static final int ALMOST_EXHAUSTED_TICKS = 180;
+    private static final int EXHAUSTED_TICKS = 183;
+    private static final int EXHAUST_TIMEOUT = 210;
+    private static final double BREAKING_HIT = 10;
     private static final long CONTROL_MILLIS = 1000;
     private static final int DIG_WAIT_TICKS = 55;
     private static final int DIG_SEQUENCE = 7;
@@ -219,7 +224,7 @@ public final class HumanGuardGameTest {
         // 用真实 Damage 事实驱动表现；原前臂、背面与透劲不能伪装成格挡。
         var fixture = new HumanTechniqueTestPlayer(context);
         fixture.player.setGameMode(GameType.SURVIVAL);
-        var attacker = context.spawn(EntityTypes.ZOMBIE, 1, 1, 1);
+        var attacker = context.spawn(EntityTypes.COW, 1, 1, 1);
         attacker.setNoAi(true /* noAi */);
         attacker.setPos(fixture.player.position().add(0, 0, ATTACK_DISTANCE));
         fixture.player.setYRot(FRONT_YAW);
@@ -237,8 +242,13 @@ public final class HumanGuardGameTest {
                 GuardAnimationProbe.penetrate(fixture.player, source, SMALL_HIT);
                 GuardAnimationProbe.assertPlays(context, fixture, GuardAnimationProbe.HIT, 1);
                 GuardAnimationProbe.hit(fixture.player, source, "left_forearm", DESTROY_ARM);
+                // 先用非格挡的前臂直击准备最后一点 HP，末击仍有充足体力支付命中费。
+                double rightHp = fixture.body().snapshot().partStates().stream()
+                        .filter(part -> part.id().value().equals("right_forearm"))
+                        .findFirst().orElseThrow().hp();
+                GuardAnimationProbe.hit(fixture.player, source, "right_forearm", rightHp - REMAINING_ARM_HP);
                 fixture.connection.packets().clear();
-                GuardAnimationProbe.hit(fixture.player, source, "head", DESTROY_ARM);
+                GuardAnimationProbe.hit(fixture.player, source, "head", BREAKING_HIT);
                 GuardAnimationProbe.assertLastArmOrder(context, fixture);
                 context.assertTrue(TechniqueFabric.service().activeGuard(fixture.player.getUUID()).isEmpty(),
                         "毁尽前臂未撤防");
@@ -344,6 +354,39 @@ public final class HumanGuardGameTest {
         return fixture;
     }
 
+    @GameTest(environment = WEAPON_ENVIRONMENT, maxTicks = EXHAUST_TIMEOUT)
+    public void exhaustedGuardsPlayOneContactClipWithoutLowering(GameTestHelper context) {
+        // 同时观测空守、完整剑和碎剑，从真实连线记录分别数受击和收势片段。
+        var idle = swordsman(context);
+        var armed = swordsman(context);
+        var broken = swordsman(context);
+        idle.player.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+        var worn = broken.player.getMainHandItem();
+        worn.setDamageValue(worn.getMaxDamage() - 1);
+        var attacker = EntityTypes.COW.create(context.getLevel(), net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        for (var fixture : List.of(idle, armed, broken)) {
+            context.runBeforeTestEnd(fixture::close);
+            start(context, fixture);
+        }
+        context.runAfterDelay(WARMUP_TICKS + ALMOST_EXHAUSTED_TICKS, () -> {
+            for (var fixture : List.of(armed, broken)) {
+                attacker.setPos(fixture.player.position().add(0, 0, ATTACK_DISTANCE));
+                var source = fixture.player.damageSources().mobAttack(attacker);
+                GuardAnimationProbe.hit(fixture.player, source, "head", BREAKING_HIT);
+            }
+        });
+        context.runAfterDelay(WARMUP_TICKS + EXHAUSTED_TICKS + 1, () -> {
+            for (var fixture : List.of(idle, armed, broken)) {
+                int weapon = fixture == armed ? 1 : 0;
+                GuardAnimationProbe.assertPlays(context, fixture, GuardAnimationProbe.HIT, 1 - weapon);
+                GuardAnimationProbe.assertPlays(context, fixture, GuardAnimationProbe.WEAPON_HIT, weapon);
+                GuardAnimationProbe.assertPlays(context, fixture, GuardAnimationProbe.LOWER, 0);
+                GuardAnimationProbe.assertPlays(context, fixture, GuardAnimationProbe.WEAPON_LOWER, 0);
+            }
+            context.succeed();
+        });
+    }
+
     @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void hardControlsCancelWithoutLowering(GameTestHelper context) {
         // 三种硬控都直接停保持；硬控自己的移速锁释放后没有守式残留。
@@ -439,6 +482,11 @@ public final class HumanGuardGameTest {
             assertClean(context, recovering.player, recoveringSpeed);
             context.assertTrue(!TechniqueState.read(heldBody.snapshot()).hasActiveCast(), "守中断线残留身体施放");
             context.assertTrue(!TechniqueState.read(recoveringBody.snapshot()).hasActiveCast(), "收势中断线残留身体施放");
+            for (var body : List.of(heldBody, recoveringBody)) {
+                var snapshot = body.snapshot();
+                context.assertTrue(snapshot.actions().isEmpty(), "断线残留肌肉占用");
+                context.assertTrue(TechniqueState.read(snapshot).getGuardBreakEndsCount() == 0, "断线误记破防");
+            }
             context.succeed();
         });
     }

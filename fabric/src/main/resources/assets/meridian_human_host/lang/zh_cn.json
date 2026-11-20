@@ -1,4 +1,6 @@
 {
+  "meridian_human_host.guard.broken": "破防中，暂时无法格挡",
+  "meridian_human_host.guard.weak": "体力不足，无法格挡",
   "meridian_human_host.guard.shield_raised": "举着盾，腾不出手来架",
   "message.meridian_human_host.welcome.notes": "修炼从一卷《炁脉札记》开始：地牢、废弃矿井、沙漠神殿、丛林神庙的箱子里有，骷髅手里偶尔也拿着。拿到后右键，再按 %s 打开修炼页。",
   "message.meridian_human_host.welcome.techniques": "村民、商人、掠夺者、卫道士、唤魔者、女巫都会功法；亲手打倒他们，有机会掉下他们会的功法卷轴。",

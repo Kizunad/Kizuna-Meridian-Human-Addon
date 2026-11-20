@@ -136,6 +136,21 @@ public final class HumanTechniquePresentation {
         guardMotion(player, castId, GuardMotion.LOWER, HumanGuard.style(player));
     }
 
+    static void breakGuard(ServerPlayer player, String castId, GuardStyle style) {
+        // 收势期间用破防短片替换保持，死亡和卸载仍按本次施放清理。
+        UUID playerId = player.getUUID();
+        String key = castId + "/guard/break";
+        if (!HumanTechniqueHost.hasCast(playerId, castId)
+                || playing.getOrDefault(playerId, Map.of()).containsKey(key)) {
+            return;
+        }
+        stopCast(player, castId);
+        String clip = style.clip(GuardMotion.HIT);
+        ServerPlayerAnimations.play(player, clip);
+        var clock = new Playback(player.level().getGameTime(), 1);
+        playing.computeIfAbsent(playerId, id -> new HashMap<>()).put(key, new PlayingClip(clip, clock));
+    }
+
     static void stopCast(ServerPlayer player, String castId) {
         // 停实际播过的片段，包含中途选出的受击和收势，不能影响下一次施放。
         UUID playerId = player.getUUID();

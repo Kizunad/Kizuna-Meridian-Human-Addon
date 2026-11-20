@@ -117,10 +117,13 @@ public final class HumanTechniqueHost implements TechniqueHostEntrypoint {
     static void reconnect(ServerPlayer player) {
         // 恢复残留施放后才对外认领；没有可靠效果游标时不补发离线效果。
         Binding current = binding;
-        HumanPlayerBody body = current.state().find(player.getUUID());
+        UUID entity = player.getUUID();
+        HumanPlayerBody body = current.state().find(entity);
+        var service = TechniqueFabric.service();
+        service.recoverOnLoad(entity, recovery(player, body));
+        body.bindGuardRelease(snapshot -> service.pendingGuardRelease(entity, snapshot));
         body.settle(nowMillis(current));
-        TechniqueFabric.service().recoverOnLoad(player.getUUID(), recovery(player, body));
-        ready.add(player.getUUID());
+        ready.add(entity);
     }
 
     static void beforeDeath(ServerPlayer player) {

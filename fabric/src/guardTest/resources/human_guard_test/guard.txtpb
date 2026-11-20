@@ -27,6 +27,7 @@ definitions {
       damage_multiplier { value: 0.7 unit: RATIO }
       damage_tags: "meridian:melee"
       damage_tags: "minecraft:is_projectile"
+      stamina { joules_per_second: 10000 joules_per_damage_prevented: 3000 break_millis: 1750 restart_ratio: 0.2 }
     }
   }
   ai_hints {
