@@ -4,6 +4,7 @@ import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastPhase;
 import dev.kizuna.meridian.technique.server.TechniqueService;
 import dev.kizuna.meridian.technique.server.TechniqueState;
+import dev.kizuna.meridian.human.server.HumanStamina;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
@@ -33,6 +34,7 @@ import net.minecraft.world.phys.Vec3;
 
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 import static dev.kizuna.meridian.human.fabric.HumanGameTestTicks.DEFAULT_TIMEOUT;
 import static dev.kizuna.meridian.human.fabric.HumanGuardTestCatalog.RECOVERY_TICKS;
@@ -48,6 +50,8 @@ public final class HumanGuardGameTest {
     private static final int ALMOST_EXHAUSTED_TICKS = 180;
     private static final int EXHAUSTED_TICKS = 183;
     private static final int EXHAUST_TIMEOUT = 210;
+    private static final int OFFLINE_TICKS = 40;
+    private static final int ONLINE_HOLD_TICKS = 20;
     private static final double BREAKING_HIT = 10;
     private static final long CONTROL_MILLIS = 1000;
     private static final int DIG_WAIT_TICKS = 55;
@@ -489,6 +493,85 @@ public final class HumanGuardGameTest {
             }
             context.succeed();
         });
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT + OFFLINE_TICKS + 20)
+    public void heldStaminaDoesNotChargeOffline(GameTestHelper context) {
+        // 真实断线与重连之间的世界时间只冻结自然年龄，守式体力不重复扣在线段。
+        var fixture = new HumanTechniqueTestPlayer(context);
+        try {
+            start(context, fixture);
+            context.runAfterDelay(WARMUP_TICKS + 1, () -> {
+                HumanPlayerBody body = fixture.body();
+                body.settle(HumanTechniqueHost.nowMillis());
+                double beforeOnlineHold = stamina(body);
+                context.runAfterDelay(ONLINE_HOLD_TICKS, () -> {
+                    body.settle(HumanTechniqueHost.nowMillis());
+                    double beforeDisconnect = stamina(body);
+                    context.assertTrue(beforeDisconnect < beforeOnlineHold - EPSILON, "在线持守没有扣体力");
+                    UUID playerId = fixture.player.getUUID();
+                    fixture.close();
+                    double afterDisconnect = stamina(body);
+                    context.assertTrue(Math.abs(afterDisconnect - beforeDisconnect) < EPSILON,
+                            "断线清理重复扣了持守体力");
+                    context.runAfterDelay(OFFLINE_TICKS, () -> {
+                        try (var reconnected = new HumanTechniqueTestPlayer(context, playerId)) {
+                            double afterReconnect = stamina(reconnected.body());
+                            context.assertTrue(Math.abs(afterReconnect - beforeDisconnect) < EPSILON,
+                                    "持守离线期间扣了体力");
+                            context.assertTrue(!TechniqueState.read(reconnected.body().snapshot()).hasActiveCast(),
+                                    "重连后残留持守");
+                            context.succeed();
+                        }
+                    });
+                });
+            });
+        } catch (Throwable failure) {
+            fixture.close();
+            throw failure;
+        }
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void heldStaminaIsChargedOnceAcrossDimensionTransfer(GameTestHelper context) {
+        var fixture = new HumanTechniqueTestPlayer(context);
+        try {
+            start(context, fixture);
+            context.runAfterDelay(WARMUP_TICKS + 1, () -> {
+                HumanPlayerBody body = fixture.body();
+                body.settle(HumanTechniqueHost.nowMillis());
+                double beforeOnlineHold = stamina(body);
+                context.runAfterDelay(ONLINE_HOLD_TICKS, () -> {
+                    try (fixture) {
+                        body.settle(HumanTechniqueHost.nowMillis());
+                        double beforeTransfer = stamina(body);
+                        context.assertTrue(beforeTransfer < beforeOnlineHold - EPSILON,
+                                "换维前在线持守没有扣体力");
+                        var player = fixture.player;
+                        var nether = player.level().getServer().getLevel(Level.NETHER);
+                        player.teleportTo(nether, player.getX(), player.getY(), player.getZ(), Set.of(),
+                                player.getYRot(), player.getXRot(), true /* resetCamera */);
+                        context.assertTrue(player.level() == nether, "玩家没有实际换维度");
+                        context.assertTrue(!TechniqueState.read(body.snapshot()).hasActiveCast(),
+                                "换维后仍残留持守");
+                        double afterTransfer = stamina(body);
+                        context.assertTrue(Math.abs(afterTransfer - beforeTransfer) < EPSILON,
+                                "换维交接重复扣了持守体力");
+                        body.settle(HumanTechniqueHost.nowMillis());
+                        context.assertTrue(Math.abs(stamina(body) - afterTransfer) < EPSILON,
+                                "同一交接时刻再次结算持守体力");
+                        context.succeed();
+                    }
+                });
+            });
+        } catch (Throwable failure) {
+            fixture.close();
+            throw failure;
+        }
+    }
+
+    private static double stamina(HumanPlayerBody body) {
+        return HumanStamina.from(body.snapshot()).availableJoules();
     }
 
     private static String start(GameTestHelper context, HumanTechniqueTestPlayer fixture) {

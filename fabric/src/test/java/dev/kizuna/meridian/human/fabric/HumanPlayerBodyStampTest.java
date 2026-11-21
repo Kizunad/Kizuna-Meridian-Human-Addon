@@ -2,6 +2,7 @@ package dev.kizuna.meridian.human.fabric;
 
 import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.core.BodyTimeAdvancement;
+import dev.kizuna.meridian.human.server.HumanAgingRules;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.pb.BodyMessages;
 import dev.kizuna.meridian.technique.server.TechniqueBodyStamp;
@@ -18,7 +19,10 @@ public class HumanPlayerBodyStampTest {
     private static final long SETTLED_MILLIS = 2_000;
     private static final long LATER_MILLIS = 2_500;
     private static final double SECONDS_LEFT = 1;
-    private static final long MILLIS_LEFT = 1_000;
+    private static final long MILLIS_LEFT = 1;
+    private static final double OVERWORLD_REMAINING_SECONDS = 72;
+    private static final double NETHER_REMAINING_SECONDS = 144;
+    private static final long EXPECTED_BOUNDARY_MILLIS = 10;
 
     @Test
     public void stampMatchesWhatSettleCommits() {
@@ -38,7 +42,9 @@ public class HumanPlayerBodyStampTest {
         // 寿元终点前一毫秒照常报数；终点当毫秒结清会停在终点并判死，读数答不出，死后同样答不出。
         HumanPlayerBody body = withLifespanLeft(SECONDS_LEFT);
         BodySnapshot shortened = body.snapshot();
-        long end = BodyTimeAdvancement.nextLifespanBoundary(shortened, HumanPlayerBody.AGING_RATE)
+        long end = BodyTimeAdvancement.nextLifespanBoundary(shortened,
+                HumanAgingRules.GAME_DAY_AGE_SECONDS_PER_SIMULATION_SECOND
+                        * HumanAgingRules.DEFAULT_OVERWORLD_MULTIPLIER)
                 .orElseThrow()
                 .elapsedMillis();
         assertEquals(MILLIS_LEFT, end - shortened.settledAt().elapsedMillis(), 1);
@@ -57,6 +63,33 @@ public class HumanPlayerBodyStampTest {
         body.settle(LATER_MILLIS);
         assertTrue(body.bodyStamp(SETTLED_MILLIS).isEmpty());
         assertThrows(IllegalArgumentException.class, () -> body.settle(SETTLED_MILLIS));
+    }
+
+    @Test
+    public void lifespanBoundaryUsesDimensionAgeRate() {
+        // 主世界每模拟秒增加 7200 生物秒，下界每模拟秒增加 14400 生物秒。
+        // 边界前仍可读身体。
+        HumanPlayerBody overworld = withLifespanLeft(OVERWORLD_REMAINING_SECONDS);
+        overworld.selectEnvironment("test:overworld", "minecraft:overworld", 0);
+        double overworldRate = HumanAgingRules.configured().agingRate("minecraft:overworld");
+        assertBoundary(overworld, OVERWORLD_REMAINING_SECONDS, overworldRate, EXPECTED_BOUNDARY_MILLIS);
+
+        HumanPlayerBody nether = withLifespanLeft(NETHER_REMAINING_SECONDS);
+        nether.selectEnvironment("test:nether", "minecraft:the_nether", 0);
+        double netherRate = HumanAgingRules.configured().agingRate("minecraft:the_nether");
+        assertBoundary(nether, NETHER_REMAINING_SECONDS, netherRate, EXPECTED_BOUNDARY_MILLIS);
+    }
+
+    private static void assertBoundary(HumanPlayerBody body, double remainingSeconds,
+                                       double agingRate, long expectedBoundaryMillis) {
+        long boundary = BodyTimeAdvancement.nextLifespanBoundary(body.snapshot(), agingRate)
+                .orElseThrow()
+                .elapsedMillis();
+        assertEquals(expectedBoundaryMillis, boundary);
+        assertTrue(body.bodyStamp(boundary - MILLIS_LEFT).isPresent());
+        assertTrue(body.bodyStamp(boundary).isEmpty());
+        body.settle(boundary);
+        assertTrue(body.snapshot().vitality().dead());
     }
 
     private static HumanPlayerBody withLifespanLeft(double secondsLeft) {

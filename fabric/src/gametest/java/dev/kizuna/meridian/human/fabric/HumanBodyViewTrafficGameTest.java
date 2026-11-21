@@ -1,9 +1,13 @@
 package dev.kizuna.meridian.human.fabric;
 
+import dev.kizuna.meridian.core.BodyTimeAdvancement;
 import dev.kizuna.meridian.fabric.MeridianChannels;
 import dev.kizuna.meridian.fabric.ProtobufChannel;
 import dev.kizuna.meridian.human.server.HumanContent;
+import dev.kizuna.meridian.human.server.HumanAgingRules;
 import dev.kizuna.meridian.human.server.HumanCultivation;
+import dev.kizuna.meridian.protocol.BodyProtobuf;
+import dev.kizuna.meridian.protocol.pb.BodyMessages;
 import dev.kizuna.meridian.protocol.pb.BodyMessages.BodyStructure;
 import dev.kizuna.meridian.protocol.pb.BreathingMessages.BreathAction;
 import dev.kizuna.meridian.protocol.pb.BreathingMessages.BreathControl;
@@ -62,6 +66,12 @@ public final class HumanBodyViewTrafficGameTest {
     /** 改了构型或换了维度之后量几 tick：每 tick inspect 一次，身体视图每 5 tick 推一份，够推好几份。 */
     private static final int FOLLOW_UP_TICKS = 20;
     private static final long MILLIS_PER_TICK = 50;
+    private static final int DIMENSION_AGE_WAIT_TICKS = 10;
+    private static final double AGE_EPSILON = 1e-6;
+    private static final double OVERWORLD_LIFESPAN_REMAINING_SECONDS = 7_200;
+    private static final double NETHER_LIFESPAN_REMAINING_SECONDS = 14_400;
+    private static final long LIFESPAN_BOUNDARY_MILLIS = 1_000;
+    private static final long ONE_MILLISECOND = 1;
     /** deflate 输出缓冲比输入多留的字节，放得下不可压缩数据的块头。 */
     private static final int DEFLATE_SLACK = 64;
 
@@ -197,6 +207,105 @@ public final class HumanBodyViewTrafficGameTest {
             fixture.close();
             throw failure;
         }
+    }
+
+    @GameTest(maxTicks = TIMEOUT)
+    public void realDimensionTransferSplitsNaturalAge(GameTestHelper context) {
+        // 原版 ServerPlayer.teleportTo 触发真实换维回调，年龄按传送前后的实际世界时钟分段。
+        var fixture = new HumanTechniqueTestPlayer(context);
+        try {
+            context.runAfterDelay(WARMUP_TICKS, () -> {
+                try {
+                    HumanPlayerBody body = fixture.body();
+                    long overworldStart = HumanTechniqueHost.nowMillis();
+                    body.settle(overworldStart);
+                    double startAge = body.snapshot().vitality().ageSeconds();
+                    context.runAfterDelay(DIMENSION_AGE_WAIT_TICKS,
+                            () -> transferPlayerAndAssertAge(context, fixture, body, overworldStart, startAge));
+                } catch (Throwable failure) {
+                    fixture.close();
+                    throw failure;
+                }
+            });
+        } catch (Throwable failure) {
+            fixture.close();
+            throw failure;
+        }
+    }
+
+    private static void transferPlayerAndAssertAge(GameTestHelper context, HumanTechniqueTestPlayer fixture,
+                                                    HumanPlayerBody body, long overworldStart,
+                                                    double startAge) {
+        try {
+            long transferMillis = HumanTechniqueHost.nowMillis();
+            body.settle(transferMillis);
+            double transferAge = body.snapshot().vitality().ageSeconds();
+            assertAgeDelta(context, "主世界", transferAge - startAge,
+                    transferMillis - overworldStart, HumanAgingRules.DEFAULT_OVERWORLD_MULTIPLIER);
+            travelToNether(context, fixture);
+            context.runAfterDelay(DIMENSION_AGE_WAIT_TICKS, () -> {
+                try {
+                    long netherEnd = HumanTechniqueHost.nowMillis();
+                    body.settle(netherEnd);
+                    double endAge = body.snapshot().vitality().ageSeconds();
+                    assertAgeDelta(context, "下界", endAge - transferAge,
+                            netherEnd - transferMillis, HumanAgingRules.DEFAULT_NETHER_MULTIPLIER);
+                    context.succeed();
+                } finally {
+                    fixture.close();
+                }
+            });
+        } catch (Throwable failure) {
+            fixture.close();
+            throw failure;
+        }
+    }
+
+    @GameTest(maxTicks = TIMEOUT)
+    public void lifespanBoundaryUsesDimensionAgeRate(GameTestHelper context) {
+        assertLifespanBoundary(context, "minecraft:overworld", OVERWORLD_LIFESPAN_REMAINING_SECONDS);
+        assertLifespanBoundary(context, "minecraft:the_nether", NETHER_LIFESPAN_REMAINING_SECONDS);
+        context.succeed();
+    }
+
+    private static void assertLifespanBoundary(GameTestHelper context, String dimensionId,
+                                               double remainingSeconds) {
+        long startMillis = HumanTechniqueHost.nowMillis();
+        var born = HumanPlayerBody.born(UUID.randomUUID(), UUID.randomUUID().toString(), startMillis);
+        BodyMessages.BodySnapshot saved = BodyProtobuf.toMessage(born.snapshot());
+        var vitality = saved.getVitality();
+        double lifespanLimit = vitality.getAgeSeconds() + vitality.getSpentLifespanSeconds()
+                + remainingSeconds;
+        var shortenedVitality = vitality.toBuilder()
+                .setLifespanLimitSeconds(lifespanLimit)
+                .build();
+        var shortened = saved.toBuilder()
+                .setVitality(shortenedVitality)
+                .build();
+        var boundaryBody = new HumanPlayerBody(BodyProtobuf.fromMessage(shortened), born.receipts(), born.releasedQi());
+        boundaryBody.selectEnvironment("test:" + dimensionId, dimensionId, startMillis);
+        double agingRate = HumanAgingRules.configured().agingRate(dimensionId);
+        long boundaryMillis = BodyTimeAdvancement.nextLifespanBoundary(boundaryBody.snapshot(), agingRate)
+                .orElseThrow()
+                .elapsedMillis();
+
+        context.assertTrue(boundaryMillis - startMillis == LIFESPAN_BOUNDARY_MILLIS,
+                dimensionId + "寿尽用时不符合新年龄流速");
+        context.assertTrue(boundaryBody.bodyStamp(boundaryMillis - ONE_MILLISECOND).isPresent(),
+                dimensionId + "寿尽前一毫秒未保持存活");
+        context.assertTrue(boundaryBody.bodyStamp(boundaryMillis).isEmpty(),
+                dimensionId + "边界当刻仍提供身体戳");
+        boundaryBody.settle(boundaryMillis);
+        context.assertTrue(boundaryBody.snapshot().vitality().dead(), dimensionId + "寿尽边界身体未死亡");
+    }
+
+    private static void assertAgeDelta(GameTestHelper context, String segment, double actual,
+                                       long elapsedMillis, double dimensionMultiplier) {
+        double biologicalRate = HumanAgingRules.GAME_DAY_AGE_SECONDS_PER_SIMULATION_SECOND
+                * dimensionMultiplier;
+        double expected = elapsedMillis / 1000.0 * biologicalRate;
+        context.assertTrue(Math.abs(actual - expected) < AGE_EPSILON,
+                segment + "真实传送段年龄错误，预期 " + expected + "，实际 " + actual);
     }
 
     /** 等身体视图刚推过的下一 tick 发一个旧版本的开脉请求，再下一 tick 看冲突后有没有立刻补推视图。 */

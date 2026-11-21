@@ -13,6 +13,7 @@ import dev.kizuna.meridian.human.server.HumanDamage;
 import dev.kizuna.meridian.human.server.HumanBreathingRules;
 import dev.kizuna.meridian.human.server.HumanCultivationRules;
 import dev.kizuna.meridian.human.server.HumanDamageRules;
+import dev.kizuna.meridian.human.server.HumanAgingRules;
 import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.human.server.HumanRevival;
 import dev.kizuna.meridian.progression.fabric.ProgressionFabric;
@@ -113,6 +114,8 @@ public final class HumanFabric implements ModInitializer {
         // 等各附属登记完模板，再于世界加载前固定玩家与类人共用的规则。
         Path damageConfig = FabricLoader.getInstance().getConfigDir().resolve(HumanDamageRules.FILE_NAME);
         ServerLifecycleEvents.SERVER_STARTING.register(server -> HumanDamage.configure(damageConfig));
+        HumanAgingRules.configure(FabricLoader.getInstance().getConfigDir()
+                .resolve(HumanAgingRules.FILE_NAME));
         // 吐纳配方随人体内容包一次建成，份额要在任何身体宿主载入内容之前读好。
         HumanBreathingRules.configure(FabricLoader.getInstance().getConfigDir()
                 .resolve(HumanBreathingRules.FILE_NAME));
@@ -219,7 +222,7 @@ public final class HumanFabric implements ModInitializer {
             leave(handler.player, server);
         });
         ServerEntityLevelChangeEvents.AFTER_PLAYER_CHANGE_LEVEL.register(
-                (player, origin, destination) -> resetGathering(player));
+                (player, origin, destination) -> changeDimension(player));
         ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
             // 末地返回等存活换实体不触发复活，也不支出寿元。
             if (!alive) {
@@ -794,6 +797,14 @@ public final class HumanFabric implements ModInitializer {
         } catch (RuntimeException failure) {
             fail(player, failure);
         }
+    }
+
+    private void changeDimension(ServerPlayer player) {
+        // 交接回调位于目标世界，先以身体当前保存的源维度倍率结算到交接时刻。
+        if (state != null && !failed.contains(player.getUUID())) {
+            state.selectEnvironment(player, millis(player.level().getServer()));
+        }
+        resetGathering(player);
     }
 
     private void tick(MinecraftServer server) {

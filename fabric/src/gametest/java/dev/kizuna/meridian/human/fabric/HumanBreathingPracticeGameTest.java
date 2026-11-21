@@ -37,6 +37,7 @@ public final class HumanBreathingPracticeGameTest {
     private static final long OFFLINE_MILLIS = 60_000;
     private static final long HOLD_INTERVAL = 1000;
     private static final long MILLIS_PER_SECOND = 1000;
+    private static final int PRACTICE_TRANSFER_WAIT_TICKS = 20;
     private static final double EPSILON = 1e-9;
 
     @GameTest(environment = ENVIRONMENT, maxTicks = HumanGameTestTicks.DEFAULT_TIMEOUT)
@@ -168,20 +169,42 @@ public final class HumanBreathingPracticeGameTest {
 
     @GameTest(environment = ENVIRONMENT, maxTicks = HumanGameTestTicks.DEFAULT_TIMEOUT)
     public void travelEndsPractice(GameTestHelper context) {
-        // 走原版传送入口，在维度切换回调返回时检查图标和身体。
+        // 在线运功一段时间后走原版传送入口，检查旧维度费用只结算一次。
         var fixture = new HumanTechniqueTestPlayer(context);
         start(context, fixture);
         context.runAfterDelay(AFTER_WARMUP, () -> {
-            try (fixture) {
-                var player = fixture.player;
-                context.assertTrue(TechniqueBreathingPractice.active(fixture.body().snapshot()).isPresent(),
-                        "未起式");
-                var destination = player.level().getServer().getLevel(Level.NETHER);
-                player.teleportTo(destination, player.getX(), player.getY(), player.getZ(), Set.of(),
-                        player.getYRot(), player.getXRot(), true /* resetCamera */);
-                assertEnded(context, fixture);
-                context.succeed();
-            }
+            var body = fixture.body();
+            body.settle(HumanTechniqueHost.nowMillis());
+            var practiceBefore = TechniqueBreathingPractice.active(body.snapshot()).orElseThrow();
+            double qiBeforeOnlineInterval = body.snapshot().totalQi();
+            context.runAfterDelay(PRACTICE_TRANSFER_WAIT_TICKS, () -> {
+                try (fixture) {
+                    long transferMillis = HumanTechniqueHost.nowMillis();
+                    body.settle(transferMillis);
+                    var beforeTransfer = body.snapshot();
+                    var practiceAtTransfer = TechniqueBreathingPractice.active(beforeTransfer).orElseThrow();
+                    long paidMillis = practiceAtTransfer.getPaidMillis() - practiceBefore.getPaidMillis();
+                    double expectedFee = practiceAtTransfer.getDefinition().getQiPerSecond()
+                            * paidMillis / MILLIS_PER_SECOND;
+                    double actualFee = qiBeforeOnlineInterval - beforeTransfer.totalQi();
+                    context.assertTrue(paidMillis > 0, "跨维前运功没有结算在线时间");
+                    context.assertTrue(Math.abs(actualFee - expectedFee) < EPSILON,
+                            "跨维前运功费用未按时间只结算一次");
+
+                    var player = fixture.player;
+                    var destination = player.level().getServer().getLevel(Level.NETHER);
+                    player.teleportTo(destination, player.getX(), player.getY(), player.getZ(), Set.of(),
+                            player.getYRot(), player.getXRot(), true /* resetCamera */);
+                    assertEnded(context, fixture);
+                    double afterTravelQi = body.snapshot().totalQi();
+                    context.assertTrue(Math.abs(afterTravelQi - beforeTransfer.totalQi()) < EPSILON,
+                            "跨维收式重复扣元");
+                    body.settle(HumanTechniqueHost.nowMillis());
+                    context.assertTrue(Math.abs(body.snapshot().totalQi() - afterTravelQi) < EPSILON,
+                            "跨维收式后同一时刻重复扣元");
+                    context.succeed();
+                }
+            });
         });
     }
 

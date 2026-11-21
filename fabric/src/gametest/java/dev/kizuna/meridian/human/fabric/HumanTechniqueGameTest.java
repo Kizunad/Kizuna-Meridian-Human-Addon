@@ -63,6 +63,8 @@ public final class HumanTechniqueGameTest {
     private static final double EPSILON = 1e-7;
     private static final double EXPECTED_SPEED_PER_TICK = 0.5;
     private static final double DIAGONAL_COMPONENT = Math.sqrt(0.5);
+    private static final Vec3 TEST_AREA_STAND = new Vec3(1.5, 1, 1.5);
+    private static final Vec3 TARGET_OFFSET = new Vec3(0, 1, 1);
     private static final String OPEN_MERIDIAN = "left_large_intestine_meridian";
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)
@@ -229,7 +231,9 @@ public final class HumanTechniqueGameTest {
         double component = EXPECTED_SPEED_PER_TICK * DIAGONAL_COMPONENT;
         assertVelocity(context, fixture, new Vec3(component, EXPECTED_SPEED_PER_TICK, component));
         var target = context.spawn(EntityTypes.VILLAGER, 0, 1, 0);
-        target.setPos(fixture.player.position().add(0, 1, 1));
+        Vec3 position = context.absoluteVec(TEST_AREA_STAND);
+        fixture.player.snapTo(position.x, position.y, position.z, fixture.player.getYRot(), fixture.player.getXRot());
+        target.setPos(position.add(TARGET_OFFSET));
         var toward = impulse(fixture.player.getUUID(), "human_test_target", ImpulseDirection.TOWARD_TARGET);
         var towardEffect = toward.getEffect().toBuilder().setTargetId(target.getStringUUID()).build();
         context.assertTrue(exchange(toward.toBuilder().setEffect(towardEffect).build()).getEffectAccepted(),

@@ -1,0 +1,5 @@
+# 年龄每个游戏日的生物秒折算为 72，再乘所在维度倍率。
+[dimensions]
+"minecraft:overworld" = 100.0
+"minecraft:the_nether" = 200.0
+"minecraft:the_end" = 200.0

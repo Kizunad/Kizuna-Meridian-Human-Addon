@@ -1,6 +1,7 @@
 package dev.kizuna.meridian.human.fabric;
 
 import dev.kizuna.meridian.core.BodyActions;
+import dev.kizuna.meridian.human.server.HumanAgingRules;
 import dev.kizuna.meridian.human.server.HumanContent;
 import dev.kizuna.meridian.protocol.ActionProtobuf;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
@@ -30,6 +31,84 @@ import static org.junit.Assert.*;
 
 /** 整体回归：Minecraft 运动编排走人体注册内容与框架权威命令链。 */
 public class HumanPlayerBodyTest {
+    private static final double AGE_EPSILON = 1e-6;
+    private static final long SIMULATION_GAME_DAY_MILLIS = 1_200_000;
+    private static final double AGE_SECONDS_PER_GAME_DAY = 86_400;
+    private static final long SIMULATION_GAME_DAYS = 2;
+    private static final long OFFLINE_START_MILLIS = 1_000;
+    private static final long ONLINE_RESUME_MILLIS = 10_000;
+    private static final long ONLINE_SETTLEMENT_MILLIS = 11_000;
+    private static final long SPRINT_END_MILLIS = 30_000;
+    private static final long FATIGUE_RECOVERY_END_MILLIS = 60_000;
+    private static final double FATIGUE_EPSILON = 1e-9;
+    private static final double OVERWORLD_AGE_SECONDS_PER_SIMULATION_MILLISECOND =
+            AGE_SECONDS_PER_GAME_DAY * HumanAgingRules.DEFAULT_OVERWORLD_MULTIPLIER
+                    / SIMULATION_GAME_DAY_MILLIS;
+
+    @Test
+    public void naturalAgeUsesDimensionRateAndSplitsAtTransfer() {
+        HumanPlayerBody body = born();
+        double initialAge = body.snapshot().vitality().ageSeconds();
+        body.selectEnvironment("test:region", "minecraft:overworld", 0);
+        body.settle(SIMULATION_GAME_DAY_MILLIS);
+        assertEquals(initialAge + AGE_SECONDS_PER_GAME_DAY * HumanAgingRules.DEFAULT_OVERWORLD_MULTIPLIER,
+                body.snapshot().vitality().ageSeconds(), AGE_EPSILON);
+
+        double overworldAge = body.snapshot().vitality().ageSeconds();
+        body.selectEnvironment("test:region", "minecraft:the_nether", SIMULATION_GAME_DAY_MILLIS);
+        body.settle(SIMULATION_GAME_DAY_MILLIS * SIMULATION_GAME_DAYS);
+        assertEquals(overworldAge + AGE_SECONDS_PER_GAME_DAY * HumanAgingRules.DEFAULT_NETHER_MULTIPLIER,
+                body.snapshot().vitality().ageSeconds(), AGE_EPSILON);
+
+        HumanPlayerBody transferred = born();
+        double transferredAge = transferred.snapshot().vitality().ageSeconds();
+        transferred.selectEnvironment("test:region", "minecraft:overworld", 0);
+        transferred.selectEnvironment("test:region", "minecraft:the_nether",
+                SIMULATION_GAME_DAY_MILLIS / SIMULATION_GAME_DAYS);
+        transferred.settle(SIMULATION_GAME_DAY_MILLIS);
+        double transferAge = AGE_SECONDS_PER_GAME_DAY
+                * (HumanAgingRules.DEFAULT_OVERWORLD_MULTIPLIER + HumanAgingRules.DEFAULT_NETHER_MULTIPLIER)
+                / SIMULATION_GAME_DAYS;
+        assertEquals(transferredAge + transferAge,
+                transferred.snapshot().vitality().ageSeconds(), AGE_EPSILON);
+    }
+
+    @Test
+    public void offlineIntervalFreezesAgeThenOnlineSettlementResumesIt() {
+        HumanPlayerBody body = born();
+        body.selectEnvironment("test:region", "minecraft:overworld", 0);
+        body.settle(OFFLINE_START_MILLIS);
+        double savedAge = body.snapshot().vitality().ageSeconds();
+        var restoredSnapshot = BodyProtobuf.decodeSnapshot(BodyProtobuf.encodeSnapshot(body.snapshot()));
+        HumanPlayerBody restored = new HumanPlayerBody(restoredSnapshot, body.receipts(), body.releasedQi());
+
+        restored.resume(ONLINE_RESUME_MILLIS, "minecraft:overworld");
+        assertEquals(savedAge, restored.snapshot().vitality().ageSeconds(), AGE_EPSILON);
+        restored.settle(ONLINE_SETTLEMENT_MILLIS);
+        double onlineMillis = ONLINE_SETTLEMENT_MILLIS - ONLINE_RESUME_MILLIS;
+        assertEquals(savedAge + onlineMillis * OVERWORLD_AGE_SECONDS_PER_SIMULATION_MILLISECOND,
+                restored.snapshot().vitality().ageSeconds(), AGE_EPSILON);
+    }
+
+    @Test
+    public void dimensionRateDoesNotChangeFatigueRecovery() {
+        HumanPlayerBody overworld = born();
+        HumanPlayerBody nether = born();
+        overworld.selectEnvironment("test:region", "minecraft:overworld", 0);
+        nether.selectEnvironment("test:region", "minecraft:the_nether", 0);
+        overworld.observe(0, HumanPlayerBody.Motion.SPRINT);
+        nether.observe(0, HumanPlayerBody.Motion.SPRINT);
+        overworld.observe(SPRINT_END_MILLIS, HumanPlayerBody.Motion.IDLE);
+        nether.observe(SPRINT_END_MILLIS, HumanPlayerBody.Motion.IDLE);
+
+        assertEquals(fatigue(overworld, "left_rectus_femoris"),
+                fatigue(nether, "left_rectus_femoris"), FATIGUE_EPSILON);
+        overworld.observe(FATIGUE_RECOVERY_END_MILLIS, HumanPlayerBody.Motion.IDLE);
+        nether.observe(FATIGUE_RECOVERY_END_MILLIS, HumanPlayerBody.Motion.IDLE);
+        assertEquals(fatigue(overworld, "left_rectus_femoris"),
+                fatigue(nether, "left_rectus_femoris"), FATIGUE_EPSILON);
+    }
+
     @Test
     public void completedProcessingReleasesLossOnceWithoutReplayingHistory() {
         // 从可信加工中存档恢复，真实推进须把损耗交给宿主，并排除历史与重复结算。

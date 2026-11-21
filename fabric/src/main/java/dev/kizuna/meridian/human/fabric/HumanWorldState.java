@@ -389,7 +389,8 @@ final class HumanWorldState {
         HumanPlayerBody body = players.computeIfAbsent(player.getUUID(),
                 id -> HumanPlayerBody.born(id, epoch, millis, store));
         bindReleaseSink(player);
-        body.resume(millis);
+        String dimensionId = player.level().dimension().identifier().toString();
+        body.resume(millis, dimensionId);
         setDirty();
         return body;
     }
@@ -439,7 +440,9 @@ final class HumanWorldState {
     void selectEnvironment(ServerPlayer player, long millis) {
         // 玩家和服务查询共用区域初始化，保持同一区域唯一库存。
         HumanPlayerBody body = players.get(player.getUUID());
-        body.selectEnvironment(ensureRegion(player.level(), player.chunkPosition(), millis), millis);
+        String dimensionId = player.level().dimension().identifier().toString();
+        String sourceId = ensureRegion(player.level(), player.chunkPosition(), millis);
+        body.selectEnvironment(sourceId, dimensionId, millis);
     }
 
     String ensureRegion(ServerLevel world, ChunkPos chunk, long millis) {

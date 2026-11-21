@@ -15,6 +15,7 @@ import dev.kizuna.meridian.human.server.HumanContent;
 import dev.kizuna.meridian.human.server.HumanCultivation;
 import dev.kizuna.meridian.human.server.HumanCultivationNumbers;
 import dev.kizuna.meridian.human.server.HumanDamage;
+import dev.kizuna.meridian.human.server.HumanAgingRules;
 import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.human.server.HumanOpening;
 import dev.kizuna.meridian.human.server.HumanOrganRefining;
@@ -86,8 +87,9 @@ final class HumanPlayerBody {
     private static final long PRACTICE_BILLING_MILLIS = 1000;
     private static final double MILLIS_PER_SECOND = 1000;
     private static final long MILLIS_PER_TICK = 50;
-    /** 身体年龄与模拟时间同速；结清计划、事件边界和寿元终点都用这个倍率。 */
-    static final double AGING_RATE = 1;
+    /** 主世界年龄倍率；测试和出生前的身体默认使用主世界规则。 */
+    static final double AGING_RATE = HumanAgingRules.GAME_DAY_AGE_SECONDS_PER_SIMULATION_SECOND
+            * HumanAgingRules.DEFAULT_OVERWORLD_MULTIPLIER;
     private static final int GATHERING_PROTOCOL_VERSION = 1;
     private static final AddonRegistry CONTENT = installContent();
 
@@ -111,6 +113,8 @@ final class HumanPlayerBody {
     private long targetMillis;
     private long accountedMillis;
     private long nextBoundaryMillis;
+    private double agingRate = AGING_RATE;
+    private String dimensionId;
     private TimeAdvanceMode timeMode = TimeAdvanceMode.ACTIVE;
     private String sourceId;
     private GatheringSession<String> gathering;
@@ -174,7 +178,7 @@ final class HumanPlayerBody {
                 .build();
         return TimeAdvancePlan.newBuilder()
                 .setTarget(target)
-                .setBiologicalSecondsPerSimulationSecond(AGING_RATE)
+                .setBiologicalSecondsPerSimulationSecond(agingRate)
                 .setMode(timeMode)
                 .build();
     }
@@ -287,13 +291,23 @@ final class HumanPlayerBody {
     }
 
     void resume(long millis) {
-        // 离线区间仅按世界模拟时间推进年龄，暂停的单机世界没有额外现实时间恢复。
+        resume(millis, "minecraft:overworld");
+    }
+
+    void resume(long millis, String selectedDimensionId) {
+        // 离线区间只顺延冻结的身体事件，不把缺席时间计入自然年龄。
         long savedMillis = snapshot().settledAt().elapsedMillis();
         abandonPractice();
         targetMillis = millis;
+        agingRate = 0;
+        dimensionId = null;
+        lifespanChecked = null;
         timeMode = TimeAdvanceMode.LIFESPAN_ONLY;
         advanceTime();
         timeMode = TimeAdvanceMode.ACTIVE;
+        dimensionId = selectedDimensionId;
+        agingRate = HumanAgingRules.configured().agingRate(selectedDimensionId);
+        lifespanChecked = null;
         accountedMillis = millis;
         preserveGuardDelay(savedMillis, millis);
         if (!snapshot().vitality().dead() && (HumanCultivation.state(snapshot()).getRunning()
@@ -557,7 +571,7 @@ final class HumanPlayerBody {
     private long lifespanEndMillis(BodySnapshot body) {
         // 快照不可变：同一份快照只算一次寿元终点，每 tick 的读数不重复解寿元。
         if (body != lifespanChecked) {
-            lifespanEndMillis = BodyTimeAdvancement.nextLifespanBoundary(body, AGING_RATE)
+            lifespanEndMillis = BodyTimeAdvancement.nextLifespanBoundary(body, agingRate)
                     .map(TimeCursor::elapsedMillis)
                     .orElse(Long.MAX_VALUE);
             lifespanChecked = body;
@@ -571,10 +585,22 @@ final class HumanPlayerBody {
     }
 
     void selectEnvironment(String sourceId, long millis) {
-        // 跨区域先结清旧位置的时间，不能用新区域浓度追溯领取上一段灵气。
-        if (!java.util.Objects.equals(this.sourceId, sourceId)) {
+        // 兼容无维度信息的身体测试，默认按主世界年龄倍率。
+        selectEnvironment(sourceId, "minecraft:overworld", millis);
+    }
+
+    void selectEnvironment(String sourceId, String selectedDimensionId, long millis) {
+        // 区域或维度切换先结清旧段，不能用新规则追溯上一段时间。
+        double selectedRate = HumanAgingRules.configured().agingRate(selectedDimensionId);
+        boolean sourceChanged = !java.util.Objects.equals(this.sourceId, sourceId);
+        boolean dimensionChanged = !java.util.Objects.equals(dimensionId, selectedDimensionId);
+        if (sourceChanged || dimensionChanged) {
             settle(millis);
             this.sourceId = sourceId;
+            dimensionId = selectedDimensionId;
+            agingRate = selectedRate;
+            lifespanChecked = null;
+            scheduleNextBoundary();
         }
     }
 
@@ -586,7 +612,9 @@ final class HumanPlayerBody {
                 (caller, requested) -> caller.equals(id.value()) && requested.equals(id),
                 (caller, body) -> TimeAdvancePlan.newBuilder()
                         .setTarget(BodyProtobuf.toTime(body.settledAt()).toBuilder().setElapsedMillis(targetMillis))
-                        .setBiologicalSecondsPerSimulationSecond(AGING_RATE).setMode(timeMode).build(),
+                        .setBiologicalSecondsPerSimulationSecond(agingRate)
+                        .setMode(timeMode)
+                        .build(),
                 body -> sourceId == null ? Optional.empty() : store.environmentSource(sourceId), CONTENT.recipes());
         gathering.enableBreathing(HumanContent.breathing());
         gatheringOutput = output;
@@ -1201,7 +1229,7 @@ final class HumanPlayerBody {
         if (timeMode == TimeAdvanceMode.LIFESPAN_ONLY) {
             mode = BodyTimeAdvancement.Mode.LIFESPAN_ONLY;
         }
-        boolean eventDue = BodyTimeAdvancement.nextEventBoundary(body, AGING_RATE, mode)
+        boolean eventDue = BodyTimeAdvancement.nextEventBoundary(body, agingRate, mode)
                 .map(boundary -> boundary.elapsedMillis() <= targetMillis).orElse(false);
         if (targetMillis != body.settledAt().elapsedMillis() || eventDue) {
             execute(BodyCommand.newBuilder().setAdvanceTime(AdvanceTime.getDefaultInstance()));
@@ -1238,7 +1266,7 @@ final class HumanPlayerBody {
             nextBoundaryMillis = Long.MAX_VALUE;
             return;
         }
-        long existingEvent = BodyTimeAdvancement.nextEventBoundary(body, AGING_RATE, BodyTimeAdvancement.Mode.ACTIVE)
+        long existingEvent = BodyTimeAdvancement.nextEventBoundary(body, agingRate, BodyTimeAdvancement.Mode.ACTIVE)
                 .map(boundary -> boundary.elapsedMillis()).orElse(Long.MAX_VALUE);
         boolean hasFatigue = body.tissueStates().stream().anyMatch(tissue -> tissue.fatigue() > 0)
                 || body.organStates().stream().anyMatch(organ -> organ.fatigueJoules() > 0);
