@@ -68,12 +68,15 @@ public final class HumanDamage implements BodyDamageHandler {
         var damage = context.getDamage();
         BodySnapshot body = context.getBody();
         HealthTarget hit = DefaultBodyDamageHandler.selectHit(context);
+        double protectedDamageShare = damage.getProtectedDamageShare();
+        double protectedDamageMultiplier = 1 - protectedDamageShare;
 
         // 部位记录总体损伤，内部账户记录不同机制的局部反应；总体 HP 不重复累加这些账户。
         var losses = new ArrayList<HpLoss>();
-        DamageSpillover spillover = partLosses(body, hit, damage.getDamageHp(), losses);
+        double partDamageHp = damage.getDamageHp() * protectedDamageMultiplier;
+        DamageSpillover spillover = partLosses(body, hit, partDamageHp, losses);
         if (hit.hasPartId() && damage.getKind() != DamageKind.CUSTOM) {
-            distributeLocalDamage(body, hit.getPartId(), damage, losses);
+            distributeLocalDamage(body, hit.getPartId(), damage, protectedDamageMultiplier, losses);
         }
 
         boolean lethal = lethal(body, losses);
@@ -161,7 +164,7 @@ public final class HumanDamage implements BodyDamageHandler {
     }
 
     private static void distributeLocalDamage(BodySnapshot body, String partId, DamageBody damage,
-                                              List<HpLoss> losses) {
+                                              double protectedDamageMultiplier, List<HpLoss> losses) {
         // 先从实际构型取得同一部位的组织；替换或移除器官后不再按旧模板 ID 分配。
         double damageHp = damage.getDamageHp();
         DamageProfile profile = profile(damage.getKind());
@@ -176,9 +179,11 @@ public final class HumanDamage implements BodyDamageHandler {
             // 透劲只在这个部位真有器官时起作用；没有器官的部位照原来的比例分给当地组织。
             profile = profile.through(damage.getOrganShare());
         }
-        List<DamageGroup> groups = List.of(new DamageGroup(skin, profile.skin()),
-                new DamageGroup(muscle, profile.muscle()), new DamageGroup(bone, profile.bone()),
-                new DamageGroup(organs, profile.organ()));
+        List<DamageGroup> groups = List.of(
+                new DamageGroup(skin, profile.skin(), protectedDamageMultiplier),
+                new DamageGroup(muscle, profile.muscle(), 1),
+                new DamageGroup(bone, profile.bone(), protectedDamageMultiplier),
+                new DamageGroup(organs, profile.organ(), 1));
 
         // 缺少某层时只在实际存在且有配置权重的层之间重新分配；不转移到身体别处。
         double availableWeight = groups.stream()
@@ -195,7 +200,8 @@ public final class HumanDamage implements BodyDamageHandler {
                 continue;
             }
             double groupShare = group.weight() / availableWeight;
-            double hpPerTarget = damageHp * groupShare / group.targets().size();
+            double originalHpPerTarget = damageHp * groupShare / group.targets().size();
+            double hpPerTarget = originalHpPerTarget * group.protectedDamageMultiplier();
             if (hpPerTarget == 0) {
                 // 极小浮点剂量可能下溢；保留部位主损失，不生成协议不允许的零剂量。
                 continue;
@@ -241,5 +247,5 @@ public final class HumanDamage implements BodyDamageHandler {
         }
     }
 
-    private record DamageGroup(List<HealthTarget> targets, double weight) { }
+    private record DamageGroup(List<HealthTarget> targets, double weight, double protectedDamageMultiplier) { }
 }

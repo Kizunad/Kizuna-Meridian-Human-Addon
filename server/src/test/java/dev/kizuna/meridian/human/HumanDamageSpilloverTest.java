@@ -33,6 +33,8 @@ public final class HumanDamageSpilloverTest {
     private static final double ABDOMEN_MULTIPLIER = 1.5;
     private static final double DAMAGE = 10;
     private static final double TOLERANCE = 1e-10;
+    private static final double BRONZE_HIDE_PROTECTED_SHARE = 0.6;
+    private static final double BRONZE_HIDE_UNPROTECTED_MULTIPLIER = 0.4;
     private static final double CHEST_MAX = 40;
     private static final double ABDOMEN_MAX = 30;
     private static final double SMALL_HP = 2;
@@ -56,6 +58,31 @@ public final class HumanDamageSpilloverTest {
         assertEquals(DAMAGE * ARM_MULTIPLIER * CHEST_MAX / capacity,
                 partLoss(overflow, "chest"), TOLERANCE);
         assertTrue(partLoss(overflow, "head") > 0);
+    }
+
+    @Test
+    public void bronzeHideScalesPartSkinAndBoneButPreservesMuscleAndOrgans() {
+        // 缺省与显式零份额逐位一致；保护只缩放部位、皮和骨，
+        // 不把减掉的剂量转给其他组织。
+        BodySnapshot body = body();
+        DamageResolution baseline = resolveLocal(body, "chest", DAMAGE, DamageKind.BLUNT);
+        DamageResolution explicitZero = resolveLocalProtected(body, "chest", DAMAGE, DamageKind.BLUNT, 0);
+        assertEquals(baseline, explicitZero);
+
+        DamageResolution protectedHit = resolveLocalProtected(body, "chest", DAMAGE, DamageKind.BLUNT,
+                BRONZE_HIDE_PROTECTED_SHARE);
+        HealthTarget skin = tissue("chest_skin");
+        HealthTarget muscle = tissue("diaphragm");
+        HealthTarget bone = tissue("thoracic");
+        HealthTarget heart = organ("heart");
+        assertEquals(partLoss(baseline, "chest") * BRONZE_HIDE_UNPROTECTED_MULTIPLIER,
+                partLoss(protectedHit, "chest"), TOLERANCE);
+        assertEquals(targetLoss(baseline, skin) * BRONZE_HIDE_UNPROTECTED_MULTIPLIER,
+                targetLoss(protectedHit, skin), TOLERANCE);
+        assertEquals(targetLoss(baseline, bone) * BRONZE_HIDE_UNPROTECTED_MULTIPLIER,
+                targetLoss(protectedHit, bone), TOLERANCE);
+        assertEquals(targetLoss(baseline, muscle), targetLoss(protectedHit, muscle), 0);
+        assertEquals(targetLoss(baseline, heart), targetLoss(protectedHit, heart), 0);
     }
 
     @Test
@@ -242,6 +269,61 @@ public final class HumanDamageSpilloverTest {
         // 部位命中与精确组织命中共用同一可信上下文入口。
         HealthTarget hit = HealthTarget.newBuilder().setPartId(part).build();
         return resolve(handler, body, hit, hp);
+    }
+
+    private static DamageResolution resolveLocal(BodySnapshot body, String part, double hp, DamageKind kind) {
+        // 真实人体层使用普通致伤分类，保留部位、组织和器官的原有分配路径。
+        HealthTarget hit = HealthTarget.newBuilder().setPartId(part).build();
+        DamageBody damage = localDamage(hit, hp, kind);
+        return resolveDamage(new HumanDamage(), body, damage);
+    }
+
+    private static DamageResolution resolveLocalProtected(BodySnapshot body, String part, double hp,
+                                                          DamageKind kind, double protectedDamageShare) {
+        // 测试显式保护份额透过可信上下文进入人体分配器。
+        HealthTarget hit = HealthTarget.newBuilder().setPartId(part).build();
+        DamageBody damage = localDamage(hit, hp, kind).toBuilder()
+                .setProtectedDamageShare(protectedDamageShare)
+                .build();
+        return resolveDamage(new HumanDamage(), body, damage);
+    }
+
+    private static DamageBody localDamage(HealthTarget hit, double hp, DamageKind kind) {
+        // 伤害分类与输入剂量固定，便于逐账户比较未保护和受保护结算。
+        return DamageBody.newBuilder()
+                .setSourceId("test:hit")
+                .setDamageType("test:direct")
+                .setKind(kind)
+                .setHit(hit)
+                .setDamageHp(hp)
+                .build();
+    }
+
+    private static DamageResolution resolveDamage(HumanDamage handler, BodySnapshot body, DamageBody damage) {
+        // 只提交一份命中上下文，返回值是身体事务将执行的完整明确剂量。
+        DamageContext context = DamageContext.newBuilder()
+                .setBody(body)
+                .setDamage(damage)
+                .build();
+        return HealthProtobuf.decodeResolution(handler.resolve(HealthProtobuf.encodeContext(context)));
+    }
+
+    private static HealthTarget tissue(String id) {
+        // 局部组织账户用正式人体构型 ID 逐项对照。
+        return HealthTarget.newBuilder().setTissueId(id).build();
+    }
+
+    private static HealthTarget organ(String id) {
+        // 器官账户用正式人体构型 ID 逐项对照。
+        return HealthTarget.newBuilder().setOrganId(id).build();
+    }
+
+    private static double targetLoss(DamageResolution result, HealthTarget target) {
+        // 每个目标至多有一条本次分配剂量，缺失目标表示原分配为零。
+        return result.getLossesList().stream()
+                .filter(loss -> loss.getTarget().equals(target))
+                .mapToDouble(loss -> loss.getHp())
+                .sum();
     }
 
     private static DamageResolution resolve(HumanDamage handler, BodySnapshot body, HealthTarget hit, double hp) {
