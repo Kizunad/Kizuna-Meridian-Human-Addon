@@ -24,10 +24,6 @@ dependencies {
     implementation 'dev.kizuna.inventoryui:server'
     implementation 'dev.kizuna.meridian.technique:fabric'
     implementation 'dev.kizuna.meridian.technique:server'
-    // 与原先读单个 JAR 一致只取成长附属的模块本身，其传递库由完整装配在运行时按同一组件补齐。
-    implementation('dev.kizuna.meridian.progression:fabric') { transitive = false }
-    implementation('dev.kizuna.meridian.progression:shared') { transitive = false }
-    implementation('dev.kizuna.meridian.progression:server') { transitive = false }
     implementation project(':server')
     // 人体资源包的编译期协议已由下方服务端库提供，避免 Loom 再解析一份客户端协议副本。
     implementation(project(':client')) { transitive = false }
@@ -99,8 +95,7 @@ dependencies {
     clienttestCompileOnly files(kizunaWorkspace.artifact('inventory-ui', '', false),
             kizunaWorkspace.artifact('origin', 'fabric', false),
             kizunaWorkspace.artifact('origin', 'shared', false),
-            kizunaWorkspace.artifact('ui', 'client', false),
-            kizunaWorkspace.artifact('progression', 'client', false))
+            kizunaWorkspace.artifact('ui', 'client', false))
 }
 loom {
     mods {

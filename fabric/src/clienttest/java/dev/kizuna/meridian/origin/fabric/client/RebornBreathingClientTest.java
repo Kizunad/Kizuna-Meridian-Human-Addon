@@ -5,7 +5,7 @@ import dev.kizuna.inventoryui.client.InventoryUiClient;
 import dev.kizuna.inventoryui.client.status.StatusIcons;
 import dev.kizuna.inventoryui.client.status.StatusLayout;
 import dev.kizuna.inventoryui.status.StatusArrangement.Single;
-import dev.kizuna.meridian.progression.client.ClientProgression;
+import dev.kizuna.meridian.human.client.HumanProgressionClient;
 import dev.kizuna.meridian.technique.fabric.TechniqueCodex;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastRequest;
@@ -52,19 +52,20 @@ public final class RebornBreathingClientTest implements FabricClientGameTest {
         // 在测试自己的新存档里验出身、书籍事实、真实菜单、控件和网络回执。
         try (var world = context.worldBuilder().create()) {
             world.getConnection().waitForChunksRender();
-            context.waitFor(client -> ClientProgression.synchronizedWithServer() && module().snapshot() != null);
+            context.waitFor(client -> progression().synchronizedWithServer() && module().snapshot() != null);
             context.runOnClient(client -> isTrue(!canOpen(BREATHING), "未选出身已经能打开吐纳"));
             choose(context, world);
             context.waitTicks(SETTLE_TICKS);
             context.runOnClient(client -> {
-                var reading = ClientProgression.requireProgress();
+                var progression = progression();
+                var reading = progression.requireProgress();
                 isTrue(!reading.getQiNotesRead() && !reading.getGatheringScrollRead(), "出身代读了残卷");
-                isTrue(!ClientProgression.canInspect() && !ClientProgression.canUseMiddleJiao(),
+                isTrue(!progression.canInspect() && !progression.canUseMiddleJiao(),
                         "其他残卷权限被放开");
                 isTrue(!canOpen("meridian_ui:aura") && !canOpen("meridian_ui:meridians"),
                         "环境或开脉入口已开放");
                 isTrue(canOpen(BREATHING), "未读重生无法打开吐纳入口");
-                isTrue(!ClientProgression.canGatherDetails() && !canOpen("meridian_ui:aura"),
+                isTrue(!progression.canGatherDetails() && !canOpen("meridian_ui:aura"),
                         "出身授权开放了环境详情");
             });
             startPractice(world);
@@ -73,6 +74,15 @@ public final class RebornBreathingClientTest implements FabricClientGameTest {
             showCodex(context, world);
             hoverPracticeEffect(context);
         }
+    }
+
+    private static HumanProgressionClient progression() {
+        var entries = FabricLoader.getInstance().getEntrypointContainers(
+                HumanProgressionClient.ENTRYPOINT, HumanProgressionClient.class);
+        if (entries.size() != 1) {
+            throw new IllegalStateException("人体客户端进阶入口数量错误：" + entries.size());
+        }
+        return entries.getFirst().getEntrypoint();
     }
 
     private static void choose(ClientGameTestContext context, TestSingleplayerContext world) {

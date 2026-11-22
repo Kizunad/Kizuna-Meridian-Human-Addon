@@ -21,6 +21,6 @@
   },
   "depends": {"java": ">=25", "minecraft": "26.2", "fabricloader": ">=0.20.1", "fabric-api": "*",
     "meridian_framework": "*",
-    "meridian_technique": "*", "kizuna_players_animation": "*", "meridian_progression": "*",
+    "meridian_technique": "*", "kizuna_players_animation": "*",
     "meridian_vanilla_damage": "*", "meridian_vanilla_healing": "*"}
 }

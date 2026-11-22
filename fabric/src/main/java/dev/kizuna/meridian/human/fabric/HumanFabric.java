@@ -16,9 +16,9 @@ import dev.kizuna.meridian.human.server.HumanDamageRules;
 import dev.kizuna.meridian.human.server.HumanAgingRules;
 import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.human.server.HumanRevival;
-import dev.kizuna.meridian.progression.fabric.ProgressionFabric;
+import dev.kizuna.meridian.human.protocol.HumanProgressionProtocol;
+import dev.kizuna.meridian.human.protocol.ProgressionStore;
 import dev.kizuna.meridian.progression.pb.ProgressionMessages.PlayerProgress;
-import dev.kizuna.meridian.progression.server.ProgressionStore;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.GatheringProtobuf;
 import dev.kizuna.meridian.protocol.HealthHostProtobuf;
@@ -108,9 +108,11 @@ public final class HumanFabric implements ModInitializer {
     private final HumanPlayerAnimation animations = new HumanPlayerAnimation();
     private HumanWorldState state;
     private volatile MinecraftServer activeServer;
+    private HumanProgressionHost progressionHost;
 
     @Override
     public void onInitialize() {
+        progressionHost = HumanProgressionHostAccess.require();
         // 等各附属登记完模板，再于世界加载前固定玩家与类人共用的规则。
         Path damageConfig = FabricLoader.getInstance().getConfigDir().resolve(HumanDamageRules.FILE_NAME);
         ServerLifecycleEvents.SERVER_STARTING.register(server -> HumanDamage.configure(damageConfig));
@@ -158,35 +160,38 @@ public final class HumanFabric implements ModInitializer {
         HumanActivityHost.bind(this::activity);
         HumanDebugHost.bind(this::debugQi);
         HumanEnvironmentHost.bind(this::environment);
-        ServerLifecycleEvents.SERVER_STARTING.register(server -> ProgressionFabric.installStore(server, new ProgressionStore() {
-            @Override
-            public PlayerProgress read(UUID playerId) {
-                // 适配器属于这次服务器实例；身体必须由登录流程先加载。
-                return requireBody(playerId).progressProjection();
-            }
+        ServerLifecycleEvents.SERVER_STARTING.register(server ->
+                progressionHost.installStore(server, new ProgressionStore() {
+                    @Override
+                    public PlayerProgress read(UUID playerId) {
+                        // 适配器属于这次服务器实例；身体必须由登录流程先加载。
+                        return requireBody(playerId).progressProjection();
+                    }
 
-            @Override
-            public void write(UUID playerId, PlayerProgress progress) {
-                // 同 tick 内先停主动修炼，再提交身体进度；无独立的玩家解锁旁账。
-                HumanPlayerBody body = requireBody(playerId);
-                body.settle(millis(server));
-                body.writeProgress(progress);
-                state.setDirty();
-                ServerPlayer player = server.getPlayerList().getPlayer(playerId);
-                if (player != null) {
-                    if (!progress.getQiNotesRead() || !progress.getInnerVisionScrollRead()) {
-                        introspecting.remove(playerId);
+                    @Override
+                    public void write(UUID playerId, PlayerProgress progress) {
+                        // 同 tick 内先停主动修炼，再提交身体进度；无独立的玩家解锁旁账。
+                        HumanPlayerBody body = requireBody(playerId);
+                        body.settle(millis(server));
+                        body.writeProgress(progress);
+                        state.setDirty();
+                        ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+                        if (player != null) {
+                            if (!progress.getQiNotesRead() || !progress.getInnerVisionScrollRead()) {
+                                introspecting.remove(playerId);
+                            }
+                            if (!body.gatheringConnected() || !progress.getQiNotesRead()
+                                    && !body.hasBasicBreathingGrant()) {
+                                animations.stop(player);
+                                receipts.forget(playerId);
+                                body.connectGathering(millis(server),
+                                        response -> sendGathering(player, response));
+                            }
+                            refreshBodyView(playerId);
+                            progressionHost.publishProgress(player);
+                        }
                     }
-                    if (!body.gatheringConnected() || !progress.getQiNotesRead() && !body.hasBasicBreathingGrant()) {
-                        animations.stop(player);
-                        receipts.forget(playerId);
-                        body.connectGathering(millis(server), response -> sendGathering(player, response));
-                    }
-                    refreshBodyView(playerId);
-                    ProgressionFabric.publishProgress(player);
-                }
-            }
-        }));
+                }));
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             activeServer = server;
             // 加载失败时保持 null，不能新建身体把损坏存档覆盖掉。
@@ -423,7 +428,7 @@ public final class HumanFabric implements ModInitializer {
             observers.put(player.getUUID(), new HumanMovementObserver());
             refreshBodyView(player.getUUID());
             failed.remove(player.getUUID());
-            ProgressionFabric.publishProgress(player);
+            progressionHost.publishProgress(player);
             HumanHints.welcome(player);
         } catch (RuntimeException failure) {
             fail(player, failure);
@@ -448,7 +453,7 @@ public final class HumanFabric implements ModInitializer {
             body.connectGathering(millis(player.level().getServer()), response -> sendGathering(player, response));
             state.setDirty();
         }
-        ProgressionFabric.publishProgress(player);
+        progressionHost.publishProgress(player);
         body.publishGathering();
     }
 
@@ -792,7 +797,7 @@ public final class HumanFabric implements ModInitializer {
             // 内观订阅跟着客户端的经脉窗、操作窗走，这里不动；每份视图推送时都重查内观权限。
             // 重生时连接还指着旧实体，下面的进度同步到不了客户端，丢掉订阅客户端也不会重订。
             refreshBodyView(player.getUUID());
-            ProgressionFabric.publishProgress(player);
+            progressionHost.publishProgress(player);
             state.setDirty();
         } catch (RuntimeException failure) {
             fail(player, failure);
@@ -936,7 +941,7 @@ public final class HumanFabric implements ModInitializer {
 
     private boolean internalView(ServerPlayer player) {
         // 订阅了内观、进度也允许内观的玩家才拿内部视图。
-        return introspecting.contains(player.getUUID()) && ProgressionFabric.canInspect(player);
+        return introspecting.contains(player.getUUID()) && progressionHost.canInspect(player);
     }
 
     private boolean bodyViewDue(UUID playerId, int tick) {

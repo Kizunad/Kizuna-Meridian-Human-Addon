@@ -2,7 +2,7 @@ package dev.kizuna.meridian.human.fabric;
 
 import com.mojang.authlib.GameProfile;
 import dev.kizuna.meridian.fabric.MeridianChannels;
-import dev.kizuna.meridian.progression.ProgressionProtocol;
+import dev.kizuna.meridian.human.protocol.HumanProgressionProtocol;
 import dev.kizuna.meridian.technique.fabric.testing.RecordingConnection;
 import dev.kizuna.meridian.technique.fabric.testing.TestPlayers;
 import dev.kizuna.playeranimation.network.AnimationPackets;
@@ -48,7 +48,8 @@ final class HumanTechniqueTestPlayer implements AutoCloseable {
         player = factory.create(world.getServer(), world, profile, ClientInformation.createDefault());
         connection = new RecordingConnection(List.of(MeridianChannels.BODY_VIEW.type().id(),
                 MeridianChannels.GATHERING_RESPONSE.type().id(), MeridianChannels.OPENING_RESPONSE.type().id(),
-                Identifier.parse(ProgressionProtocol.EVENT), AnimationPackets.PLAY.id(), AnimationPackets.STOP.id()));
+                Identifier.parse(HumanProgressionProtocol.PROGRESSION_EVENT), AnimationPackets.PLAY.id(),
+                AnimationPackets.STOP.id()));
         TestPlayers.logIn(player, connection);
         player.setGameMode(GameType.CREATIVE);
         player.setNoGravity(true /* noGravity */);

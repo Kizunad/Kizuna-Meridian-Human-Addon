@@ -31,9 +31,3 @@ kizunaWorkspace.includeSource('inventory-ui', [
         '': 'dev.kizuna.inventoryui:kizuna-inventory-ui-framework',
         server: 'dev.kizuna.inventoryui:server'
 ])
-kizunaWorkspace.includeSource('progression', [
-        server: 'dev.kizuna.meridian.progression:server',
-        shared: 'dev.kizuna.meridian.progression:shared',
-        fabric: 'dev.kizuna.meridian.progression:fabric',
-        client: 'dev.kizuna.meridian.progression:client'
-])

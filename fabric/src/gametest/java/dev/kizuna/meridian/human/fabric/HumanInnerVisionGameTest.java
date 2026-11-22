@@ -8,7 +8,6 @@ import dev.kizuna.inventoryui.server.fabric.FabricServerModule;
 import dev.kizuna.inventoryui.server.fabric.UiPayload;
 import dev.kizuna.meridian.fabric.MeridianChannels;
 import dev.kizuna.meridian.fabric.ProtobufChannel;
-import dev.kizuna.meridian.progression.fabric.ProgressionItems;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.protocol.pb.PresentationMessages.BodyViewRequest;
 import dev.kizuna.meridian.protocol.pb.PresentationMessages.BodyViewUpdate;
@@ -24,6 +23,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.LevelBasedPermissionSet;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import java.io.IOException;
 import java.util.UUID;
 
@@ -60,13 +61,16 @@ public final class HumanInnerVisionGameTest {
     private static void readScroll(GameTestHelper context, HumanTechniqueTestPlayer fixture) {
         // give 与真实物品 use 共用正式注册身份，首次提示必须是动作栏消息且只出现一次。
         command(fixture.player, "give @s meridian_progression:inner_vision_scroll");
-        context.assertTrue(fixture.player.getInventory().contains(new ItemStack(ProgressionItems.INNER_VISION_SCROLL)),
+        var scroll = BuiltInRegistries.ITEM.get(Identifier.parse("meridian_progression:inner_vision_scroll"))
+                .orElseThrow()
+                .value();
+        context.assertTrue(fixture.player.getInventory().contains(new ItemStack(scroll)),
                 "give 未得到内观残卷");
-        fixture.player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(ProgressionItems.INNER_VISION_SCROLL));
+        fixture.player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(scroll));
         var world = fixture.player.level();
-        ProgressionItems.INNER_VISION_SCROLL.use(world, fixture.player, InteractionHand.MAIN_HAND);
+        scroll.use(world, fixture.player, InteractionHand.MAIN_HAND);
         context.assertTrue(fixture.body().progress().getInnerVisionScrollRead(), "右键没有立即写入内观进度");
-        ProgressionItems.INNER_VISION_SCROLL.use(world, fixture.player, InteractionHand.MAIN_HAND);
+        scroll.use(world, fixture.player, InteractionHand.MAIN_HAND);
         long prompts = fixture.connection.packets().stream()
                 .filter(ClientboundSystemChatPacket.class::isInstance)
                 .map(ClientboundSystemChatPacket.class::cast)

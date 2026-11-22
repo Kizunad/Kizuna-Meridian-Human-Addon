@@ -21,7 +21,7 @@ import dev.kizuna.meridian.human.server.HumanOpening;
 import dev.kizuna.meridian.human.server.HumanOrganRefining;
 import dev.kizuna.meridian.human.server.HumanRefineRecipes;
 import dev.kizuna.meridian.human.server.HumanRevival;
-import dev.kizuna.meridian.progression.ProgressionProtocol;
+import dev.kizuna.meridian.human.protocol.HumanProgressionProtocol;
 import dev.kizuna.meridian.progression.pb.ProgressionMessages.PlayerProgress;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.MeridianProtocol;
@@ -165,9 +165,12 @@ final class HumanPlayerBody {
                 CONTENT.actions(), CONTENT.openings(),
                 caller -> debugAuthorized && caller.equals(id.value()), new HumanDamage("minecraft:player"));
         migrateModuleTags();
-        if (!saved.addonProgress().containsKey(ProgressionProtocol.PROGRESS_KEY)) {
+        if (!saved.addonProgress().containsKey(HumanProgressionProtocol.PROGRESS_KEY)) {
             // 新身体与尚无进度字段的存档都从未读开始，并写入同一身体事务。
-            writeProgress(PlayerProgress.newBuilder().setSchemaVersion(ProgressionProtocol.PROGRESS_SCHEMA).build());
+            PlayerProgress initialProgress = PlayerProgress.newBuilder()
+                    .setSchemaVersion(HumanProgressionProtocol.PROGRESS_SCHEMA)
+                    .build();
+            writeProgress(initialProgress);
         }
     }
 
@@ -210,9 +213,9 @@ final class HumanPlayerBody {
     PlayerProgress progress() {
         // 只读取身体内的唯一事实；未知类型或版本不能被解释成已解锁。
         try {
-            PlayerProgress progress = snapshot().addonProgress().get(ProgressionProtocol.PROGRESS_KEY)
+            PlayerProgress progress = snapshot().addonProgress().get(HumanProgressionProtocol.PROGRESS_KEY)
                     .unpack(PlayerProgress.class);
-            if (progress.getSchemaVersion() != ProgressionProtocol.PROGRESS_SCHEMA) {
+            if (progress.getSchemaVersion() != HumanProgressionProtocol.PROGRESS_SCHEMA) {
                 throw HumanErrors.invalid(HumanErrors.INVALID_PROGRESS);
             }
             return progress;
@@ -236,11 +239,11 @@ final class HumanPlayerBody {
 
     void writeProgress(PlayerProgress progress) {
         // 重置先终止会话与占用；同一服务器线程随后提交进度，不允许旧输入继续执行。
-        if (progress.getSchemaVersion() != ProgressionProtocol.PROGRESS_SCHEMA) {
+        if (progress.getSchemaVersion() != HumanProgressionProtocol.PROGRESS_SCHEMA) {
             throw HumanErrors.invalid(HumanErrors.INVALID_PROGRESS);
         }
         BodySnapshot current = snapshot();
-        PlayerProgress previous = current.addonProgress().containsKey(ProgressionProtocol.PROGRESS_KEY)
+        PlayerProgress previous = current.addonProgress().containsKey(HumanProgressionProtocol.PROGRESS_KEY)
                 ? progress() : PlayerProgress.getDefaultInstance();
         if (previous.getQiNotesRead() && !progress.getQiNotesRead()
                 || previous.getGatheringScrollRead() && !progress.getGatheringScrollRead()
@@ -252,7 +255,7 @@ final class HumanPlayerBody {
                 .clearBasicBreathingGranted()
                 .build();
         SetAddonProgress update = SetAddonProgress.newBuilder()
-                .setId(ProgressionProtocol.PROGRESS_KEY)
+                .setId(HumanProgressionProtocol.PROGRESS_KEY)
                 .setProgress(com.google.protobuf.Any.pack(savedProgress))
                 .build();
         BodySnapshot commandSnapshot = snapshot();

@@ -1,0 +1,67 @@
+syntax = "proto3";
+package kizuna.meridian.progression.v1;
+option java_package = "dev.kizuna.meridian.progression.pb";
+option java_outer_classname = "ProgressionMessages";
+
+// 由身体宿主按玩家保存；本仓库不提供第二套进度存档。
+message PlayerProgress {
+  uint32 schema_version = 1; // 当前为 1。
+  bool qi_notes_read = 2; // 对应残卷经服务端确认右键即取得，无须完成播放。
+  bool gathering_scroll_read = 3;
+  bool middle_jiao_scroll_read = 4;
+  bool inner_vision_scroll_read = 5;
+  bool true_qi_scroll_read = 6; // 只记读过，不开任何能力。
+  bool basic_breathing_granted = 7; // Human 按当前出身投影的基础吐纳授权，不代表读过残卷。
+}
+
+// 每卷独立记入身体；客户端不能通过完成意图指定要解锁的卷。
+enum ScrollKind {
+  SCROLL_KIND_UNSPECIFIED = 0;
+  QI_NOTES = 1;
+  GATHERING = 2;
+  MIDDLE_JIAO = 3;
+  INNER_VISION = 4;
+  TRUE_QI = 5;
+}
+
+// 时间、玩家身份和解锁值均不接受客户端上传。
+message ReadingIntent {
+  string session_id = 1; // 服务端随机 UUID，仅在当前连接有效。
+  oneof action {
+    Finished finished = 2;
+    Cancelled cancelled = 3;
+    Synchronize synchronize = 4;
+  }
+}
+message Finished {}
+message Cancelled {}
+message Synchronize {}
+
+message OpenScroll {
+  string session_id = 1;
+  string content_revision = 2;
+  ScrollKind scroll = 3;
+}
+enum ReadingResult {
+  READING_RESULT_UNSPECIFIED = 0;
+  UNLOCKED = 1;
+  ALREADY_UNLOCKED = 2;
+  TOO_EARLY = 3 [deprecated = true]; // 保留编号；即时解锁后不再判定最短阅读时间。
+  INVALID_SESSION = 4;
+  CANCELLED = 5;
+  HOST_NOT_CONNECTED = 6;
+  NOT_ALLOWED = 7;
+  COMPLETED = 8; // 仅结束播放会话，不授予或撤销权限。
+}
+message ReadingOutcome {
+  string session_id = 1;
+  ReadingResult result = 2;
+  ScrollKind scroll = 3;
+}
+message ProgressionEvent {
+  oneof event {
+    OpenScroll open = 1;
+    PlayerProgress progress = 2;
+    ReadingOutcome outcome = 3;
+  }
+}

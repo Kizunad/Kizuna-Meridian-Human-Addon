@@ -7,3 +7,30 @@ dependencies {
     api 'local.meridian:client'
     api 'dev.kizuna.meridian.technique:shared'
 }
+
+def descriptor = layout.buildDirectory.file('descriptors/human-v1.desc')
+protobuf {
+    generateProtoTasks {
+        ofSourceSet('main').configureEach { task ->
+            task.generateDescriptorSet = true
+            task.descriptorSetOptions.path = descriptor.get().asFile.path
+            task.descriptorSetOptions.includeImports = true
+            task.descriptorSetOptions.includeSourceInfo = true
+        }
+    }
+}
+
+processResources {
+    dependsOn tasks.named('generateProto')
+    from(descriptor) { into 'META-INF/meridian_human/protocol' }
+}
+
+tasks.register('protocolZip', Zip) {
+    dependsOn tasks.named('generateProto')
+    archiveClassifier = 'proto'
+    from('src/main/proto')
+    from(descriptor) { into 'descriptors' }
+    from(rootProject.files('LICENSE', 'NOTICE'))
+}
+
+tasks.named('assemble') { dependsOn tasks.named('protocolZip') }
