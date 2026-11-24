@@ -1,10 +1,7 @@
 package dev.kizuna.meridian.human.server;
 
-import org.tomlj.Toml;
+import dev.kizuna.meridian.config.TomlFile;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 
 /** 人体吐纳的服务端可调项：真炁以后吐纳产物里直接成为气态的份额，和产物里留成本属性的份额。 */
@@ -39,26 +36,20 @@ public final class HumanBreathingRules {
 
     public static HumanBreathingRules load(Path file) {
         // 首次启动写出可编辑配置；损坏配置明确拒绝启动，不静默恢复初值。
-        try {
-            if (!Files.exists(file)) {
-                Files.createDirectories(file.toAbsolutePath().getParent());
-                Files.writeString(file, defaultText());
-            }
-            return parse(Files.readString(file));
-        } catch (IOException failure) {
-            throw new IllegalStateException(HumanErrors.BREATHING_LOAD_FAILED, failure);
-        }
+        return parse(TomlFile.readOrExport(file, HumanBreathingRules.class, "/" + FILE_NAME));
     }
 
     public static HumanBreathingRules parse(String text) {
         // 份额必须显式写成 0 到 1 的小数；整数、越界都按配置错误拒绝。气态份额缺项也拒绝；
         // 本属性份额是后加的，旧配置文件里没有这一项就按随包的走。
-        var parsed = Toml.parse(text);
-        if (parsed.hasErrors()) {
-            throw HumanErrors.invalid(HumanErrors.INVALID_BREATHING);
+        var parsed = TomlFile.parse(text, FILE_NAME);
+        Object nativeValue;
+        if (parsed.contains(NATIVE_SHARE_KEY)) {
+            nativeValue = parsed.get(NATIVE_SHARE_KEY);
+        } else {
+            nativeValue = TomlFile.parse(defaultText(), FILE_NAME).get(NATIVE_SHARE_KEY);
         }
-        double nativeShare = parsed.contains(NATIVE_SHARE_KEY) ? share(parsed.get(NATIVE_SHARE_KEY))
-                : share(Toml.parse(defaultText()).get(NATIVE_SHARE_KEY));
+        double nativeShare = share(nativeValue);
         return new HumanBreathingRules(share(parsed.get(GAS_SHARE_KEY)), nativeShare);
     }
 
@@ -72,14 +63,7 @@ public final class HumanBreathingRules {
 
     private static String defaultText() {
         // 必需资源缺失属于装配错误，不能让导出内容和运行内容采用不同默认值。
-        try (var input = HumanBreathingRules.class.getResourceAsStream("/" + FILE_NAME)) {
-            if (input == null) {
-                throw new IllegalStateException(HumanErrors.BREATHING_LOAD_FAILED);
-            }
-            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException failure) {
-            throw new IllegalStateException(HumanErrors.BREATHING_LOAD_FAILED, failure);
-        }
+        return TomlFile.resource(HumanBreathingRules.class, "/" + FILE_NAME);
     }
 
     public double trueQiGasShare() {

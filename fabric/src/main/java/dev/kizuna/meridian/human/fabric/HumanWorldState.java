@@ -15,7 +15,9 @@ import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionRelea
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.RegionView;
 import dev.kizuna.meridian.human.protocol.pb.EnvironmentHostMessages.ReleaseResult;
 import dev.kizuna.meridian.human.server.HumanErrors;
+import dev.kizuna.meridian.persistence.DurableStateFile;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
+import dev.kizuna.meridian.protocol.ProtoWire;
 import dev.kizuna.meridian.protocol.EnvironmentProtobuf;
 import dev.kizuna.meridian.protocol.MeridianProtocol;
 import dev.kizuna.meridian.protocol.pb.BodyMessages;
@@ -68,6 +70,8 @@ import java.util.concurrent.Executors;
  */
 final class HumanWorldState {
     private static final Logger LOG = LoggerFactory.getLogger(HumanWorldState.class);
+    private static final String VERSION_KEY = "MeridianStateVersion";
+    private static final int FILE_VERSION = 1;
     private static final long WINDOW_MILLIS = 30_000;
     private static final int CHUNK_WIDTH_BLOCKS = 16;
     private static final int UNSAVED_TICK = -1;
@@ -170,6 +174,11 @@ final class HumanWorldState {
     static HumanWorldState load(Path file) throws IOException {
         // 文件外层是带数据版本的压缩 NBT，正文在 data 字段；缺正文时按空正文校验并拒绝加载。
         CompoundTag root = NbtIo.readCompressed(file, NbtAccounter.unlimitedHeap());
+        // 无版本键的旧档使用同一正文结构。有版本键时校验原始标签类型，防止数值转换掩盖坏档。
+        Tag version = root.get(VERSION_KEY);
+        if (version != null && (version.getId() != Tag.TAG_INT || root.getIntOr(VERSION_KEY, 0) != FILE_VERSION)) {
+            throw new IOException(file + "：无法读取存档版本 " + version);
+        }
         return read(root.getCompoundOrEmpty("data"));
     }
 
@@ -315,7 +324,8 @@ final class HumanWorldState {
             requireField(entry, "millis", Tag.TAG_LONG);
             var request = RegionDraw.parseFrom(entry.getByteArray("request").orElseThrow());
             validateDraw(request);
-            var result = DrawResult.parseFrom(entry.getByteArray("result").orElseThrow());
+            var result = ProtoWire.read(entry.getByteArray("result").orElseThrow(), DrawResult.parser());
+            // 存档必须是可结算的库存，非法属性、密度或元数会抛出校验异常。
             BodyProtobuf.fromInventory(result.getDrawnQi());
             long millis = entry.getLong("millis").orElseThrow();
             String expectedSource = drawSourceId(request);
@@ -728,7 +738,8 @@ final class HumanWorldState {
             var root = new CompoundTag();
             root.put("data", encode(saved, new CompoundTag()));
             NbtUtils.addCurrentDataVersion(root);
-            DurableStateFile.write(file, temporary -> NbtIo.writeCompressed(root, temporary), directorySync);
+            root.putInt(VERSION_KEY, FILE_VERSION);
+            DurableStateFile.write(file, output -> NbtIo.writeCompressed(root, output), directorySync);
             return new Written(covered, null);
         } catch (IOException | RuntimeException failure) {
             return new Written(covered, failure);
@@ -1023,7 +1034,7 @@ final class HumanWorldState {
         for (DrawRecord record : draws) {
             var entry = new CompoundTag();
             entry.putByteArray("request", record.request().toByteArray());
-            entry.putByteArray("result", record.result().toByteArray());
+            entry.putByteArray("result", ProtoWire.write(record.result()));
             entry.putLong("millis", record.millis());
             ids.add(entry);
         }

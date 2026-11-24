@@ -1,10 +1,12 @@
 package dev.kizuna.meridian.human.fabric;
 
+import dev.kizuna.meridian.persistence.DurableStateFile;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -21,8 +23,8 @@ public final class DurableStateFileTest {
         var capability = DurableStateFile.directorySync("Windows 11");
         assertEquals(DurableStateFile.DirectorySync.UNSUPPORTED, capability);
         Path file = directory.getRoot().toPath().resolve("state.dat");
-        DurableStateFile.write(file, temporary -> Files.writeString(temporary, "首次保存"), capability);
-        DurableStateFile.write(file, temporary -> Files.writeString(temporary, "再次保存"), capability);
+        DurableStateFile.write(file, output -> output.write("首次保存".getBytes(StandardCharsets.UTF_8)), capability);
+        DurableStateFile.write(file, output -> output.write("再次保存".getBytes(StandardCharsets.UTF_8)), capability);
         assertEquals("再次保存", Files.readString(file));
         assertFalse(Files.exists(file.resolveSibling("state.dat.tmp")));
     }
@@ -33,7 +35,8 @@ public final class DurableStateFileTest {
         Path file = directory.getRoot().toPath().resolve("state.dat");
         Files.writeString(file, "旧状态");
         try {
-            DurableStateFile.write(file, Files::createDirectory, DurableStateFile.DirectorySync.UNSUPPORTED);
+            DurableStateFile.write(file, output -> Files.createDirectory(file.resolveSibling("state.dat.tmp")),
+                    DurableStateFile.DirectorySync.UNSUPPORTED);
             fail("文件同步失败却完成保存");
         } catch (IOException expected) {
             assertEquals("旧状态", Files.readString(file));

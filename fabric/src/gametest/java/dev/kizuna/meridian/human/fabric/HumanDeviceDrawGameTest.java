@@ -151,6 +151,20 @@ public final class HumanDeviceDrawGameTest {
     }
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void endDrawWithoutSourceSurvivesReload(GameTestHelper context) {
+        // 末地没有区域，持久化结果合法省略 source_id，重载后仍要识别原请求。
+        ServerLevel end = context.getLevel().getServer().getLevel(net.minecraft.world.level.Level.END);
+        var state = new HumanWorldState();
+        RegionDraw request = draw("gametest:end-reload", end, SMALL_DRAW_QI, 0);
+        state.draw(request, end, 0);
+        var restored = HumanWorldState.read(state.save(new CompoundTag()));
+        DrawResult replay = restored.draw(request, end, 1);
+        context.assertTrue(replay.getDuplicate() && replay.getPersisted(), "无来源取用去重记录丢失");
+        context.assertFalse(replay.hasSourceId(), "无来源结果被填入来源");
+        context.succeed();
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void deviceDrawDeduplicatesAcrossReloadAndRejectsConflicts(GameTestHelper context) throws Exception {
         // 同 ID 重发拿到首次结果、不再扣区域；写盘后从真实文件重载仍然去重，并确认持久化。
         ServerLevel world = context.getLevel();

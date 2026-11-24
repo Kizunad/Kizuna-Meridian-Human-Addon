@@ -1,10 +1,8 @@
 package dev.kizuna.meridian.human.server;
 
 import dev.kizuna.meridian.protocol.pb.HealthMessages.ReviveBody;
-import org.tomlj.Toml;
+import dev.kizuna.meridian.config.TomlFile;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
 /** 重生与调试复活共用人体内容费用，不保存独立寿元账户。 */
@@ -37,23 +35,16 @@ public final class HumanRevival {
 
     private static double loadCostYears() {
         // 缺失或损坏的必需数据明确报错，不让两个入口使用不同默认值。
-        try (var input = HumanRevival.class.getResourceAsStream(RESOURCE)) {
-            if (input == null) {
-                throw HumanErrors.invalid(HumanErrors.INVALID_REVIVAL);
-            }
-            var data = Toml.parse(new String(input.readAllBytes(), StandardCharsets.UTF_8));
-            Object value = data.get("lifespan_cost_years");
-            if (data.hasErrors() || !(value instanceof Number number)) {
-                throw HumanErrors.invalid(HumanErrors.INVALID_REVIVAL);
-            }
-            double years = number.doubleValue();
-            double seconds = years * HumanBirth.SECONDS_PER_YEAR;
-            if (!Double.isFinite(seconds) || seconds <= 0) {
-                throw HumanErrors.invalid(HumanErrors.INVALID_REVIVAL);
-            }
-            return years;
-        } catch (IOException failure) {
-            throw new IllegalStateException(HumanErrors.INVALID_REVIVAL, failure);
+        var data = TomlFile.parse(TomlFile.resource(HumanRevival.class, RESOURCE), RESOURCE);
+        Object value = data.get("lifespan_cost_years");
+        if (!(value instanceof Number number)) {
+            throw HumanErrors.invalid(HumanErrors.INVALID_REVIVAL);
         }
+        double years = number.doubleValue();
+        double seconds = years * HumanBirth.SECONDS_PER_YEAR;
+        if (!Double.isFinite(seconds) || seconds <= 0) {
+            throw HumanErrors.invalid(HumanErrors.INVALID_REVIVAL);
+        }
+        return years;
     }
 }

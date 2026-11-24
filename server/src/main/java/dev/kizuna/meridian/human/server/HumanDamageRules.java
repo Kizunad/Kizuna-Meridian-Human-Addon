@@ -1,11 +1,8 @@
 package dev.kizuna.meridian.human.server;
 
-import org.tomlj.Toml;
+import dev.kizuna.meridian.config.TomlFile;
 import org.tomlj.TomlTable;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
@@ -36,33 +33,18 @@ public final class HumanDamageRules {
 
     public static HumanDamageRules load(Path file) {
         // 首次启动写出可编辑配置；损坏配置明确拒绝启动，不静默恢复初值。
-        try {
-            if (!Files.exists(file)) {
-                Files.createDirectories(file.toAbsolutePath().getParent());
-                Files.writeString(file, defaultText());
-            }
-            return parse(Files.readString(file));
-        } catch (IOException failure) {
-            throw new IllegalStateException(HumanErrors.SPILLOVER_LOAD_FAILED, failure);
-        }
+        return parse(TomlFile.readOrExport(file, HumanDamageRules.class, "/" + FILE_NAME));
     }
 
     private static String defaultText() {
         // 必需资源缺失属于装配错误，不能让玩家和类人采用不同默认规则。
-        try (var input = HumanDamageRules.class.getResourceAsStream("/" + FILE_NAME)) {
-            if (input == null) {
-                throw new IllegalStateException(HumanErrors.SPILLOVER_LOAD_FAILED);
-            }
-            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException failure) {
-            throw new IllegalStateException(HumanErrors.SPILLOVER_LOAD_FAILED, failure);
-        }
+        return TomlFile.resource(HumanDamageRules.class, "/" + FILE_NAME);
     }
 
     public static HumanDamageRules parse(String text) {
         // 模板与实体类型是独立维度，玩家开关不会影响使用同一模板的类人。
-        var parsed = Toml.parse(text);
-        if (parsed.hasErrors() || !(parsed.get("entities") instanceof TomlTable entities)
+        var parsed = TomlFile.parse(text, FILE_NAME);
+        if (!(parsed.get("entities") instanceof TomlTable entities)
                 || !(entities.get("default_enabled") instanceof Boolean)
                 || !(parsed.get("templates") instanceof TomlTable templates)) {
             throw HumanErrors.invalid(HumanErrors.INVALID_SPILLOVER);
@@ -74,9 +56,11 @@ public final class HumanDamageRules {
 
     private static BodilessNumb bodilessNumb(TomlTable table) {
         // 这一节是后加的：老配置文件里没有，就按随包初值算，不逼着服主重新生成文件。
-        TomlTable numb = table;
-        if (numb == null) {
-            numb = Toml.parse(defaultText()).getTable(BODILESS_NUMB);
+        TomlTable numb;
+        if (table == null) {
+            numb = TomlFile.parse(defaultText(), FILE_NAME).getTable(BODILESS_NUMB);
+        } else {
+            numb = table;
         }
         if (numb == null) {
             throw HumanErrors.invalid(HumanErrors.INVALID_SPILLOVER);

@@ -1,11 +1,8 @@
 package dev.kizuna.meridian.human.server;
 
-import org.tomlj.Toml;
-import org.tomlj.TomlParseResult;
+import dev.kizuna.meridian.config.TomlFile;
+import org.tomlj.TomlTable;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 
 /** 中焦周天的服务端可调项：真炁以后每圈的提纯增益和一批货的起炼下限。 */
@@ -40,29 +37,18 @@ public final class HumanCultivationRules {
 
     public static HumanCultivationRules load(Path file) {
         // 首次启动写出可编辑配置；损坏配置明确拒绝启动，不静默恢复初值。
-        try {
-            if (!Files.exists(file)) {
-                Files.createDirectories(file.toAbsolutePath().getParent());
-                Files.writeString(file, defaultText());
-            }
-            return parse(Files.readString(file));
-        } catch (IOException failure) {
-            throw new IllegalStateException(HumanErrors.CULTIVATION_RULES_LOAD_FAILED, failure);
-        }
+        return parse(TomlFile.readOrExport(file, HumanCultivationRules.class, "/" + FILE_NAME));
     }
 
     public static HumanCultivationRules parse(String text) {
         // 两项都必须显式写成区间内的有限小数；整数写法、零、负数、超上限、inf、nan 或缺项都按配置错误拒绝。
-        var parsed = Toml.parse(text);
-        if (parsed.hasErrors()) {
-            throw HumanErrors.invalid(HumanErrors.INVALID_CULTIVATION_RULES);
-        }
+        var parsed = TomlFile.parse(text, FILE_NAME);
         double gain = positiveDecimal(parsed, TRUE_QI_GAIN_KEY, Double.MAX_VALUE);
         double minimumBatch = positiveDecimal(parsed, TRUE_QI_MINIMUM_BATCH_KEY, HumanCultivationNumbers.BATCH_QI);
         return new HumanCultivationRules(gain, minimumBatch);
     }
 
-    private static double positiveDecimal(TomlParseResult parsed, String key, double maximum) {
+    private static double positiveDecimal(TomlTable parsed, String key, double maximum) {
         // 取大于 0、不超过上限的有限小数。写成「在区间内」再取反，nan 也按越界拒绝。
         if (!(parsed.get(key) instanceof Double value)) {
             throw HumanErrors.invalid(HumanErrors.INVALID_CULTIVATION_RULES);
@@ -76,14 +62,7 @@ public final class HumanCultivationRules {
 
     private static String defaultText() {
         // 必需资源缺失属于装配错误，不能让测试和运行内容采用不同默认值。
-        try (var input = HumanCultivationRules.class.getResourceAsStream("/" + FILE_NAME)) {
-            if (input == null) {
-                throw new IllegalStateException(HumanErrors.CULTIVATION_RULES_LOAD_FAILED);
-            }
-            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException failure) {
-            throw new IllegalStateException(HumanErrors.CULTIVATION_RULES_LOAD_FAILED, failure);
-        }
+        return TomlFile.resource(HumanCultivationRules.class, "/" + FILE_NAME);
     }
 
     public double trueQiDensityGain() {

@@ -1,5 +1,7 @@
 # 依赖、构建与宿主接入
 
+`world/data/meridian_human.dat` 使用 gzip NBT。根标签的 `MeridianStateVersion` 为整数 1，与原版 `DataVersion` 并列。旧文件缺少版本键时沿用原正文读取，旧版宿主仍从 `data` 读取新文件。版本键类型错误或版本不支持时，宿主拒绝加载。
+
 ## 玩家功法库依赖
 
 Human 的玩家施放宿主硬依赖相邻 `Kizuna-Meridian-Technique-Framework`。

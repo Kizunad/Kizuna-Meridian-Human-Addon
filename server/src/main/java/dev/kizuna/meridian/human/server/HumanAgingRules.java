@@ -1,11 +1,8 @@
 package dev.kizuna.meridian.human.server;
 
-import org.tomlj.Toml;
+import dev.kizuna.meridian.config.TomlFile;
 import org.tomlj.TomlTable;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
@@ -47,21 +44,13 @@ public final class HumanAgingRules {
 
     public static HumanAgingRules load(Path file) {
         // 首次启动写出可编辑配置，损坏配置明确拒绝启动。
-        try {
-            if (!Files.exists(file)) {
-                Files.createDirectories(file.toAbsolutePath().getParent());
-                Files.writeString(file, defaultText());
-            }
-            return parse(Files.readString(file));
-        } catch (IOException failure) {
-            throw new IllegalStateException(HumanErrors.AGING_LOAD_FAILED, failure);
-        }
+        return parse(TomlFile.readOrExport(file, HumanAgingRules.class, "/" + FILE_NAME));
     }
 
     public static HumanAgingRules parse(String text) {
         // 三个原版维度必须显式存在，其他维度回退主世界倍率。
-        var parsed = Toml.parse(text);
-        if (parsed.hasErrors() || !(parsed.get(DIMENSIONS_KEY) instanceof TomlTable table)) {
+        var parsed = TomlFile.parse(text, FILE_NAME);
+        if (!(parsed.get(DIMENSIONS_KEY) instanceof TomlTable table)) {
             throw HumanErrors.invalid(HumanErrors.INVALID_AGING_RULES);
         }
         Map<String, Double> dimensions = new HashMap<>();
@@ -94,14 +83,7 @@ public final class HumanAgingRules {
 
     private static String defaultText() {
         // 必需资源缺失属于装配错误，不能让不同身体采用不同默认倍率。
-        try (var input = HumanAgingRules.class.getResourceAsStream("/" + FILE_NAME)) {
-            if (input == null) {
-                throw new IllegalStateException(HumanErrors.AGING_LOAD_FAILED);
-            }
-            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException failure) {
-            throw new IllegalStateException(HumanErrors.AGING_LOAD_FAILED, failure);
-        }
+        return TomlFile.resource(HumanAgingRules.class, "/" + FILE_NAME);
     }
 
     public double multiplier(String dimensionId) {

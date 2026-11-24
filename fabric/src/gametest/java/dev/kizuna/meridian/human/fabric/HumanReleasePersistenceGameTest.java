@@ -1,5 +1,7 @@
 package dev.kizuna.meridian.human.fabric;
 
+import dev.kizuna.meridian.persistence.DurableStateFile;
+
 import dev.kizuna.meridian.core.Qi;
 import dev.kizuna.meridian.core.QiAccounting;
 import dev.kizuna.meridian.core.QiInventory;
@@ -17,6 +19,8 @@ import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.NbtAccounter;
+import net.minecraft.nbt.NbtIo;
 import net.minecraft.server.level.ServerLevel;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -44,6 +48,33 @@ public final class HumanReleasePersistenceGameTest {
     private static final long HALF_WINDOW_MILLIS = WINDOW_MILLIS / 2;
 
     private record RoundingFixture(HumanWorldState state, RegionView first, RegionView second) { }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void legacyGzipWorldRetainsPlayersAndRegionState(GameTestHelper context) throws IOException {
+        // 样本来自正式宿主保存的测试世界。用宿主路径读到内存，再保存到独立目录。
+        Path directory = Files.createTempDirectory(Path.of("."), "legacy-human-");
+        Path legacy = directory.resolve("legacy.dat");
+        try (var sample = HumanReleasePersistenceGameTest.class.getResourceAsStream("/legacy/meridian_human.dat")) {
+            Files.copy(java.util.Objects.requireNonNull(sample), legacy);
+        }
+        CompoundTag source = NbtIo.readCompressed(legacy, NbtAccounter.unlimitedHeap());
+        context.assertFalse(source.contains("MeridianStateVersion"), "样本已经带有新版本键");
+        CompoundTag oldData = source.getCompoundOrEmpty("data");
+        var restored = HumanWorldState.load(legacy);
+        CompoundTag loaded = restored.save(new CompoundTag());
+        context.assertTrue(oldData.getString("epoch").equals(loaded.getString("epoch")), "旧世界时钟世代丢失");
+        int players = oldData.getListOrEmpty("players").size();
+        context.assertTrue(players > 0 && loaded.getListOrEmpty("players").size() == players, "旧身体没有载入");
+        context.assertFalse(loaded.getListOrEmpty("environment_sources").isEmpty(), "旧世界区域没有载入");
+        Path upgraded = directory.resolve("meridian_human.dat");
+        restored.setDirty();
+        restored.save(upgraded.toFile());
+        CompoundTag root = NbtIo.readCompressed(upgraded, NbtAccounter.unlimitedHeap());
+        context.assertTrue(root.getIntOr("MeridianStateVersion", 0) == 1, "新文件缺少根版本号");
+        context.assertTrue(source.get("DataVersion").equals(root.get("DataVersion")), "原版数据版本丢失");
+        context.assertTrue(loaded.equals(root.getCompoundOrEmpty("data")), "写回改变了身体或区域账本");
+        context.succeed();
+    }
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void crossRegionRoundingTailReturnsAndSurvivesReload(GameTestHelper context) throws Exception {

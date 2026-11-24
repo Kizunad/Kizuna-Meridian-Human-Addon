@@ -11,6 +11,7 @@ import dev.kizuna.meridian.human.protocol.pb.ControlMessages.ControlSession;
 import dev.kizuna.meridian.human.server.PlayerControlDriver;
 import dev.kizuna.meridian.human.server.HumanErrors;
 import dev.kizuna.meridian.human.server.PlayerControlHost;
+import dev.kizuna.meridian.protocol.ProtoWire;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastRequest;
@@ -114,10 +115,11 @@ public final class HumanControl implements PlayerControlHost {
             UUID.fromString(sessionId); // 会话必须是合法 UUID，非法时抛出 IllegalArgumentException。
             UUID.fromString(session.getCasterUuid()); // 同样校验可信施药者身份。
             boolean accepted = apply(command, playerId);
-            return ControlReply.newBuilder()
+            var reply = ControlReply.newBuilder()
                     .setSessionId(sessionId)
                     .setAccepted(accepted)
-                    .build().toByteArray();
+                    .build();
+            return ProtoWire.write(reply);
         } catch (InvalidProtocolBufferException invalid) {
             throw new IllegalArgumentException(HumanErrors.INVALID_CONTROL_PROTOCOL, invalid);
         }
