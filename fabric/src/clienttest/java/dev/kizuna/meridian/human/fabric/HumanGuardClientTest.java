@@ -70,9 +70,9 @@ public final class HumanGuardClientTest implements FabricClientGameTest {
     private static final int STRIKE_LEAD_TICKS = 7;
     private static final long MILLIS_PER_TICK = 50;
     private static final double ATTACKER_SIDE = 1.1;
-    private static final int UNARMED_TICKS = 55;
-    private static final int ARMED_TICKS = 65;
-    private static final int AFTER_CONTACT_TICKS = 45;
+    private static final int UNARMED_TICKS = 5;
+    private static final int ARMED_TICKS = 5;
+    private static final int AFTER_CONTACT_TICKS = 1;
     private static final int FINISH_TICKS = 32;
     private static final int SETTLE_TICKS = 3;
     private static final int LONG_GUARD_TICKS = 45;
