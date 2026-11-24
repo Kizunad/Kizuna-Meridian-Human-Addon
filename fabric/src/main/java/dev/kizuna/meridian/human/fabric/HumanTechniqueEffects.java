@@ -5,6 +5,8 @@ import dev.kizuna.meridian.technique.fabric.world.TechniqueStatusBenefits;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueWorldEffects;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueWorldImpulses;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Hand;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItemConsumptionStrategy;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ImpulseDirection;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.MovementAction;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.MovementIntent;
@@ -136,9 +138,31 @@ final class HumanTechniqueEffects {
             executors(player).world().strike(effect);
         } else if (effect.hasBreakBlocks()) {
             executors(player).world().breakBlocks(effect);
+        } else if (effect.hasConsumeHeldItem()) {
+            consumeHeldItem(player, effect);
         } else {
             throw new TechniqueErrors.HostRejected(FailureCode.MODULE_UNAVAILABLE);
         }
+    }
+
+    private static void consumeHeldItem(ServerPlayer player, EffectIntent effect) {
+        // 宿主按起手冻结的手清空整叠，保留原版物品栈的组件与附魔语义直到清除。
+        if (effect.getConsumeHeldItem().getStrategy()
+                != HeldItemConsumptionStrategy.CONSUME_SELECTED_STACK) {
+            throw new TechniqueErrors.HostRejected(FailureCode.INVALID_REQUEST);
+        }
+        InteractionHand hand = interactionHand(effect.getSelectedHand());
+        player.setItemInHand(hand, net.minecraft.world.item.ItemStack.EMPTY);
+    }
+
+    private static InteractionHand interactionHand(Hand selectedHand) {
+        if (selectedHand == Hand.OFF_HAND) {
+            return InteractionHand.OFF_HAND;
+        }
+        if (selectedHand == Hand.MAIN_HAND) {
+            return InteractionHand.MAIN_HAND;
+        }
+        throw new TechniqueErrors.HostRejected(FailureCode.INVALID_REQUEST);
     }
 
     static void initialize() {

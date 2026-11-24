@@ -41,6 +41,7 @@
       "dev.kizuna.meridian.human.fabric.HumanRealmCommandGameTest",
       "dev.kizuna.meridian.human.fabric.HumanBodyViewTrafficGameTest",
       "dev.kizuna.meridian.human.fabric.HumanTechniqueStampGameTest",
+      "dev.kizuna.meridian.human.fabric.HumanHeldItemConsumptionGameTest",
       "dev.kizuna.meridian.human.fabric.HumanDirectStrikeGameTest",
       "dev.kizuna.meridian.human.fabric.HumanFistGameTest",
       "dev.kizuna.meridian.human.fabric.HumanReplacedPlayerGameTest",
