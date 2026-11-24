@@ -64,4 +64,16 @@ public class HumanTechniqueAnimationsTest {
             assertEquals(clip + "_off", HumanTechniqueAnimations.resolve(presentation, direction, CastHand.OFF));
         }
     }
+
+    @Test
+    public void piglinSwordMovesFollowTheFrozenWeaponHand() {
+        // 绕、抖、弹各有主手、副手两套剪辑；剑在哪只手由起手快照决定，左右镜像交给 PA。
+        var direction = new HumanTechniqueAnimations.Direction(0, 0, 0);
+        for (String move : new String[]{"wind_around", "quiver", "spring_back"}) {
+            String clip = "piglin_sword_" + move;
+            String presentation = "meridian_piglin_sword:" + clip;
+            assertEquals(clip, HumanTechniqueAnimations.resolve(presentation, direction, CastHand.MAIN));
+            assertEquals(clip + "_off", HumanTechniqueAnimations.resolve(presentation, direction, CastHand.OFF));
+        }
+    }
 }

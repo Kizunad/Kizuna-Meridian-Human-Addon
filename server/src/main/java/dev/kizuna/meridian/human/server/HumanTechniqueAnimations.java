@@ -1,5 +1,7 @@
 package dev.kizuna.meridian.human.server;
 
+import java.util.List;
+
 /** 玩家与类人共用的人体功法表现映射，不保存播放或身体状态。 */
 public final class HumanTechniqueAnimations {
     public record Direction(double yawDegrees, double x, double z) { }
@@ -29,6 +31,10 @@ public final class HumanTechniqueAnimations {
 
     private static final long MILLIS_PER_TICK = 50;
     private static final float FULL_RATE = 1;
+    private static final List<String> HANDED_PRESENTATIONS = List.of(
+            "meridian_door_breaker:door_breaker_",
+            "meridian_wayfarer:wayfarer_",
+            "meridian_piglin_sword:piglin_sword_");
 
     public static String resolve(String presentationId, Direction direction, CastHand selectedHand) {
         // 出招手来自起手快照；左右惯用手的镜像由 PA 在客户端处理。
@@ -36,9 +42,8 @@ public final class HumanTechniqueAnimations {
         if (path.equals("guard_arms")) {
             return guard(GuardMotion.HOLD);
         }
-        // 破门斩八式和行矢各式都分主手、副手两套剪辑。
-        boolean handed = presentationId.startsWith("meridian_door_breaker:door_breaker_")
-                || presentationId.startsWith("meridian_wayfarer:wayfarer_");
+        // 破门斩八式、行矢各式和流金剑各式都分主手、副手两套剪辑。
+        boolean handed = HANDED_PRESENTATIONS.stream().anyMatch(presentationId::startsWith);
         if (handed && selectedHand == CastHand.OFF) {
             return path + "_off";
         }

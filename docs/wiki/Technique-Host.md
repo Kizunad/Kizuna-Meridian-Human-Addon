@@ -160,6 +160,8 @@ Damage 类型自身的 `#minecraft:bypasses_shield` 标签决定是否绕过盾�
 功法表现已接入 PA。公开内容映射 `HumanTechniqueAnimations` 由玩家与类人宿主共用：
 轻步按输入方向选择四向片段，蓄力与调息使用对应现有片段。
 叩门、破门、撞门使用 `door_breaker_knock/cleave/ram`，起手选定副手时使用对应 `_off`；
+流金剑绕、抖、弹（`meridian_piglin_sword:piglin_sword_<式>`）同样按起手选定的持剑手选同名片段或 `_off`，
+目录写 `UNTIL_RECOVERY_END`，收势结束的 STOP 按施放 ID 停掉实际播放的那一段（主手版或 `_off` 版）；
 左右惯用手由 PA 运行时镜像，不由宿主重复换片段。其余五式暂用对应主副手 `attack_main/off`。
 玩家通过 `ServerPlayerAnimations.playFrom` 保留起播时刻，类人通过 Mobs-Addon 同步相同映射。
 片段不决定打击结算；三式目录打击与动画 `hit` 同为 1250、1600、1650 毫秒（25、32、33 tick）。
