@@ -3,7 +3,13 @@
   "id": "meridian_human_host",
   "version": "${version}",
   "name": "Kizuna's Meridian Human Addon - Fabric",
-  "description": "服务端玩家运动、环境吐纳、身体持久化与数值同步",
+  "contact": {
+    "homepage": "https://github.com/Kizunad/Kizuna-Meridian-Human-Addon",
+    "sources": "https://github.com/Kizunad/Kizuna-Meridian-Human-Addon",
+    "issues": "https://github.com/Kizunad/Kizuna-Meridian-Human-Addon/issues"
+  },
+  "icon": "assets/meridian_human_host/icon.png",
+  "description": "Tracks the player’s breathing, movement and physical condition as they move through the world.\n记录玩家活动时的身体状态、运动消耗和环境吐纳。",
   "authors": ["Kizunad"],
   "license": "PolyForm-Noncommercial-1.0.0",
   "environment": "*",

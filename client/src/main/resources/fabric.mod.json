@@ -3,7 +3,13 @@
   "id": "meridian_human",
   "version": "${version}",
   "name": "Kizuna's Meridian Human Addon - Client Content",
-  "description": "人体模型、位置映射与聚气请求内容",
+  "contact": {
+    "homepage": "https://github.com/Kizunad/Kizuna-Meridian-Human-Addon",
+    "sources": "https://github.com/Kizunad/Kizuna-Meridian-Human-Addon",
+    "issues": "https://github.com/Kizunad/Kizuna-Meridian-Human-Addon/issues"
+  },
+  "icon": "assets/meridian_human/icon.png",
+  "description": "Shows the human body and its meridians and lets players gather qi.\n呈现人体部位与经脉的位置，让玩家聚气。",
   "authors": ["Kizunad"],
   "license": "PolyForm-Noncommercial-1.0.0",
   "environment": "client",

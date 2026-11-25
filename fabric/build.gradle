@@ -45,7 +45,11 @@ dependencies {
 test { useJUnit() }
 processResources {
     inputs.property 'version', project.version
-    filesMatching('fabric.mod.json') { expand version: project.version }
+    def preserveJsonEscapes = true
+    inputs.property 'preserveJsonEscapes', preserveJsonEscapes
+    filesMatching('fabric.mod.json') {
+        expand([version: project.version]) { escapeBackslash = preserveJsonEscapes }
+    }
 }
 
 // 破门斩等高层附属只在运行时需要，由完整装配按清单读文件，避免本构建反过来组合高层仓库。
