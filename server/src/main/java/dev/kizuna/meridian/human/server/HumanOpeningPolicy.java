@@ -118,19 +118,25 @@ public final class HumanOpeningPolicy implements OpeningPolicy {
         int openedCount = (int) body.getMeridianStatesList().stream()
                 .filter(state -> state.getOpening().getStage() == MeridianOpeningStage.OPENED)
                 .count();
-        long requiredMillis = Math.addExact(conditions.getBaseDurationMillis(),
+        long normalMillis = Math.addExact(conditions.getBaseDurationMillis(),
                 Math.multiplyExact(conditions.getAdditionalMillisPerOpened(), openedCount));
-        var decision = OpeningPolicyDecision.newBuilder().setProtocolVersion(1)
+        long requiredMillis = HumanPhysique.holdMillis(body, normalMillis);
+        var participant = OpeningGuidanceTarget.newBuilder()
+                .setMeridianId(target.getId())
+                .setVolume(target.getLumenVolume() * conditions.getTargetStartFraction())
+                .build();
+        var decision = OpeningPolicyDecision.newBuilder()
+                .setProtocolVersion(1)
                 .setTargetStableVolume(target.getLumenVolume() + rule.getLumenVolumeGain())
                 .setRequiredMillis(requiredMillis)
-                .addParticipants(OpeningGuidanceTarget.newBuilder()
-                        .setMeridianId(target.getId())
-                        .setVolume(target.getLumenVolume() * conditions.getTargetStartFraction()));
+                .addParticipants(participant);
         List<String> observedOrgans = conditions.getIntakesList().stream()
                 .flatMap(intake -> intake.getOrganIdsList().stream()).distinct().toList();
         long window = conditions.getIntakesList().stream()
                 .mapToLong(IntakeRequirement::getWindowMillis).max().orElse(0);
-        return decision.addAllObservedOrganIds(observedOrgans).setReceiptWindowMillis(window).build();
+        return decision.addAllObservedOrganIds(observedOrgans)
+                .setReceiptWindowMillis(window)
+                .build();
     }
 
     private static OpeningPolicyDecision check(BodySnapshot body, MeridianOpeningRule rule,

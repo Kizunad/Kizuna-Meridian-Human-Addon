@@ -27,3 +27,13 @@ message IntakeRequirement {
   double minimum_qi_per_second = 2;
   int64 window_millis = 3;
 }
+
+// 常态体质与短时发力的在线截止时刻随同一具身体持久化。
+message OriginPhysique {
+  bool slow_opening = 1;
+  // 换回平常出身时显式写 false，以非空载荷覆盖旧特质；从未有特质的身体不占进度键。
+  optional bool enduring_limbs = 2;
+  int64 burst_until_tick = 3;
+  int64 ready_at_tick = 4;
+  bool awaiting_recovery = 5;
+}

@@ -59,6 +59,21 @@ public final class HumanLimbTempo {
         return structure.equals(body.structure());
     }
 
+    static boolean armMuscle(Anatomy.TissueDefinition tissue) {
+        // 挥击用臂、前臂和手掌的肌肉。
+        String part = tissue.partId().value();
+        return tissue.kind().value().equals(MUSCLE_KIND)
+                && (ARMS.get(Side.LEFT).contains(part) || ARMS.get(Side.RIGHT).contains(part));
+    }
+
+    static boolean legMuscle(Anatomy.TissueDefinition tissue) {
+        // 步态包括足部和附着在骨盆的臀大肌。
+        String part = tissue.partId().value();
+        return tissue.kind().value().equals(MUSCLE_KIND)
+                && (LEGS.get(Side.LEFT).contains(part) || LEGS.get(Side.RIGHT).contains(part)
+                || GLUTEUS.containsValue(tissue.id().value()));
+    }
+
     public Multipliers at(BodySnapshot body, Side mainHand, long millis) {
         // 主手臂取最慢，双腿分别取最慢后平均，胸肌和副手只影响其绑定功法。
         double arm = minimum(body, arms.get(mainHand), millis);

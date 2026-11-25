@@ -15,6 +15,18 @@ import static dev.kizuna.meridian.protocol.pb.OperationUiMessages.OperationMeter
 
 /** 人体条件的只读进度投影；UI 只画卡片，不解释人体配置。 */
 public final class HumanOpeningViews {
+    private static final int MILLIS_PER_TENTH = 100;
+    private static final double MILLIS_PER_SECOND = 1_000.0;
+    private static final int MILLIS_DECIMALS = 3;
+
+    private static String targetSeconds(long millis) {
+        // 整十分之一秒保留原来的一位小数，其余精确到身体时钟的毫秒。
+        if (millis % MILLIS_PER_TENTH == 0) {
+            return String.format(Locale.ROOT, "%.1f", millis / MILLIS_PER_SECOND);
+        }
+        return java.math.BigDecimal.valueOf(millis, MILLIS_DECIMALS).stripTrailingZeros().toPlainString();
+    }
+
     private HumanOpeningViews() {
         // 不保存窗口状态或额外真元账本。
     }
@@ -91,8 +103,8 @@ public final class HumanOpeningViews {
             holdReason = "等待新的灵气摄入，连续计时已重置";
         }
         result.addMeters(meter("hold", "连续适应", ratio(heldMillis, requiredMillis), holdState,
-                String.format(Locale.ROOT, "连续适应 %.1f / %.1f 秒；%s", heldMillis / 1000.0,
-                        requiredMillis / 1000.0, holdReason)));
+                String.format(Locale.ROOT, "连续适应 %.1f / %s 秒；%s", heldMillis / MILLIS_PER_SECOND,
+                        targetSeconds(requiredMillis), holdReason)));
 
         // 按人体启动裁定禁用按钮；点击后核心仍会在事务内重新校验，不信任卡片。
         FailureCode rejection = HumanOpeningPolicy.prepare(body, rule, conditions).getRejection();
