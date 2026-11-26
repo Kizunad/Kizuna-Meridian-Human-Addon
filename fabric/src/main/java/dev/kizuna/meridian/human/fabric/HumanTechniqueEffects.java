@@ -118,9 +118,14 @@ final class HumanTechniqueEffects {
             TechniqueStatusBenefits.apply(player, effect.getStatusBenefit());
         } else if (effect.hasImpulse()) {
             Vec3 direction = impulseDirection(player, effect);
-            double speedPerTick = effect.getImpulse().getSpeed().getValue() / TICKS_PER_SECOND;
-            TechniqueWorldImpulses.apply(player, effect.getImpulse().getDirection(),
-                    direction.scale(speedPerTick));
+            if (effect.getImpulse().hasMaximumDistance()) {
+                // 定距短移由共用执行器量距离、记朝向，受阻时取消同一施放此后的打击。
+                executors(player).world().step(effect, direction);
+            } else {
+                double speedPerTick = effect.getImpulse().getSpeed().getValue() / TICKS_PER_SECOND;
+                TechniqueWorldImpulses.apply(player, effect.getImpulse().getDirection(),
+                        direction.scale(speedPerTick));
+            }
             HumanTechniqueHost.markImpulseMovement(player.getUUID());
         } else if (effect.hasMovement()) {
             movement(player, effect);
@@ -340,6 +345,7 @@ final class HumanTechniqueEffects {
             case FORWARD -> Vec3.directionFromRotation(0, player.getYRot());
             case BACKWARD -> Vec3.directionFromRotation(0, player.getYRot()).reverse();
             case INPUT -> inputDirection(player, effect);
+            case SIDE -> TechniqueWorldImpulses.side(player.getYRot(), effect.getDirection());
             case TOWARD_TARGET -> targetDirection(player, effect.getTargetId());
             default -> throw new TechniqueErrors.HostRejected(FailureCode.INVALID_REQUEST);
         };
