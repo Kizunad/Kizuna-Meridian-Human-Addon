@@ -28,8 +28,12 @@ public final class HumanGuardStamina {
     public static Optional<String> rejection(BodySnapshot body, String technique, GuardStamina rules) {
         // 破防截止和恢复比例均须满足；普通松手不会留下破防记录。
         var progress = TechniqueState.read(body);
-        boolean broken = progress.containsGuardBreakEnds(technique);
-        if (broken && body.settledAt().elapsedMillis() < progress.getGuardBreakEndsOrThrow(technique)) {
+        String group = technique;
+        if (rules.hasBreakGroup()) {
+            group = rules.getBreakGroup();
+        }
+        boolean broken = progress.containsGuardBreakEnds(group);
+        if (broken && body.settledAt().elapsedMillis() < progress.getGuardBreakEndsOrThrow(group)) {
             return Optional.of(BROKEN);
         }
         var stamina = HumanStamina.from(body);
@@ -68,7 +72,8 @@ public final class HumanGuardStamina {
         var rules = active.getSustained().getGuard().getStamina();
         double available = HumanStamina.from(body).availableJoules();
         long duration = Math.max(1, (long) Math.ceil(available * MILLIS_PER_SECOND / rules.getJoulesPerSecond()));
-        return now + Math.min(target - now, duration);
+        long end = Math.min(target, TechniqueGuardStamina.holdDeadline(active));
+        return now + Math.min(end - now, duration);
     }
 
     public static Optional<BodyActivity> payment(BodySnapshot body, TechniqueProgress progress) {
@@ -84,11 +89,15 @@ public final class HumanGuardStamina {
         if (guard.hasStaminaPaidMillis()) {
             paid = guard.getStaminaPaidMillis();
         }
-        double joules = (now - paid) * guard.getGuard().getStamina().getJoulesPerSecond() / MILLIS_PER_SECOND;
+        long deadline = TechniqueGuardStamina.holdDeadline(active);
+        long chargeUntil = Math.min(now, deadline);
+        double joules = (chargeUntil - paid) * guard.getGuard().getStamina().getJoulesPerSecond() / MILLIS_PER_SECOND;
         var stamina = HumanStamina.from(body);
         BodyActivity plan;
         if (joules >= stamina.availableJoules()) {
             plan = TechniqueGuardStamina.exhaust(body, progress);
+        } else if (now >= deadline) {
+            plan = TechniqueGuardStamina.expire(progress);
         } else {
             plan = TechniqueGuardStamina.hold(body, progress, stamina.workingMuscles());
         }
