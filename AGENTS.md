@@ -26,3 +26,36 @@
 - 不提交、不推送；在自己的 worktree（`~/Code/wt-*`）里改，不改主目录。
 
 本仓额外要跑：`kz gradle ~/Code/<本仓的 worktree> -- demo`。
+
+## 速查
+
+### 自动生成
+
+- Fabric 模组 `meridian_human`，清单 `client/src/main/resources/fabric.mod.json`
+  - 入口类无
+- Fabric 模组 `meridian_human_host`，清单 `fabric/src/main/resources/fabric.mod.json`
+  - `client` → `dev.kizuna.meridian.human.fabric.client.HumanControlClient`、`dev.kizuna.meridian.human.fabric.client.HumanGuardClient`
+  - `main` → `dev.kizuna.meridian.human.fabric.HumanFabric`
+  - `meridian_activity_host` → `dev.kizuna.meridian.human.fabric.HumanActivityHost`
+  - `meridian_environment_host` → `dev.kizuna.meridian.human.fabric.HumanEnvironmentHost`
+  - `meridian_guard_cost` → `dev.kizuna.meridian.human.fabric.HumanGuardStamina::hit`
+  - `meridian_health_host` → `dev.kizuna.meridian.human.fabric.HumanHealthHost`
+  - `meridian_player_control_host` → `dev.kizuna.meridian.human.fabric.HumanControl`
+  - `meridian_technique_host` → `dev.kizuna.meridian.human.fabric.HumanTechniqueHost`
+- 数据目录：`fabric/src/gametest/resources/data/meridian/`、`fabric/src/gametest/resources/data/meridian_human_test/`、`fabric/src/guardTest/resources/data/meridian_human_test/`、`shared/src/main/resources/data/human/`
+- 资源目录：`client/src/main/resources/assets/meridian_human/`、`fabric/src/main/resources/assets/meridian_human_host/`
+- Protobuf 数据文件（含功法目录）：`fabric/src/gametest/resources/human_fist_test/technique_catalog.txtpb`、`fabric/src/guardTest/resources/data/meridian_human_test/breathing_practice.txtpb`、`fabric/src/guardTest/resources/human_guard_test/guard.txtpb`、`shared/src/main/resources/data/human/technique_template_groups.txtpb`
+- 随包 TOML：`server/src/main/resources/meridian-human-aging.toml`、`server/src/main/resources/meridian-human-breathing.toml`、`server/src/main/resources/meridian-human-cultivation.toml`、`server/src/main/resources/meridian-human-damage.toml`、`server/src/main/resources/meridian-human-revival.toml`
+- 测试源集：`client/src/test/`、`fabric/src/clienttest/`、`fabric/src/gametest/`、`fabric/src/guardTest/`、`fabric/src/test/`、`fabric/src/testFixtures/`、`server/src/test/`
+- `kz` 装配 ID：`human`（`--with` 使用工作树路径）
+- `kz test --part unit`：`test build`
+- `kz test --part gametest`
+  - `:fabric:runGametest -PhumanGametestRunDir=build/{name}`，运行目录 `fabric/build/{name}`
+- `kz client` 项目：`guard`、`reborn`
+
+### 常见坑
+
+- 2026-11-20 格挡或打击用例从命中回执读身体版本，按攻击前构型和实际疲劳差核算费用。来源 `GUARD-34-STAMINA-TASK.md`。
+- 2026-11-13 直接调用 Human 的 GameTest 任务时使用 `-PhumanGametestRunDir`。常规复测用 `kz test <树> --part gametest` 让清单分配新目录。来源 `ENV-CREDIT-TASK.md`。
+- 2026-11-26 查实体身份的路径先用只读查询。初次观察调用 `inspectBody` 可能创建身体并启动出生配装和大脑。来源 `MOB-PURSE-TASK.md`。
+- 2026-11-26 单测引发原版日志初始化时，将工作目录设在模块的 `build/test-runtime/`，用 `git status --short --untracked-files=all` 核对。来源 `TEST-LOGS-OUT-TASK.md`。
