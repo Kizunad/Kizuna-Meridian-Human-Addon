@@ -21,7 +21,14 @@ import java.util.UUID;
 /** 功法表现的服务端钩子；动画适配器负责将原始起播时刻和停止意图同步到客户端。 */
 public final class HumanTechniquePresentation {
     private static final long MILLIS_PER_TICK = 50;
-    private record PlayingClip(String id, Playback clock) { }
+    private static final String YUNXI_HOLD = "yunxi_flash_parry";
+    private static final String YUNXI_PRESENTATION = "/meridian_story:" + YUNXI_HOLD;
+    private record PlayingClip(String id, Playback clock, long stopTick) {
+        PlayingClip(String id, Playback clock) {
+            // 普通片段由目录 STOP 或施放结束直接清理。
+            this(id, clock, Long.MAX_VALUE);
+        }
+    }
     private static final Map<UUID, Map<String, PlayingClip>> playing = new HashMap<>();
 
     static void apply(ServerPlayer player, EffectIntent effect) {
@@ -29,7 +36,11 @@ public final class HumanTechniquePresentation {
         var presentation = effect.getPresentation();
         String key = effect.getCastId() + "/" + presentation.getId();
         if (presentation.getAction() == PresentationAction.STOP) {
-            stopClip(player, key);
+            if (key.endsWith(YUNXI_PRESENTATION)) {
+                deferHoldStop(player, key);
+            } else {
+                stopClip(player, key);
+            }
             return;
         }
         var input = effect.getDirection();
@@ -65,9 +76,16 @@ public final class HumanTechniquePresentation {
         if (clips == null) {
             return;
         }
-        for (var entry : clips.entrySet()) {
+        var entries = clips.entrySet().iterator();
+        while (entries.hasNext()) {
+            var entry = entries.next();
             PlayingClip current = entry.getValue();
             String id = current.id();
+            if (current.stopTick() <= player.level().getGameTime()) {
+                ServerPlayerAnimations.stop(player, id);
+                entries.remove();
+                continue;
+            }
             if (!id.equals(GuardStyle.ARMS.clip(GuardMotion.HOLD))
                     && !id.equals(GuardStyle.WEAPON.clip(GuardMotion.HOLD))) {
                 continue;
@@ -80,6 +98,39 @@ public final class HumanTechniquePresentation {
                 entry.setValue(new PlayingClip(next, clock));
             }
         }
+        if (clips.isEmpty()) {
+            playing.remove(player.getUUID());
+        }
+    }
+
+    private static void deferHoldStop(ServerPlayer player, String key) {
+        // 出口的第一刻覆盖旧守架，STOP 与收势通知任一先到都保留这一刻。
+        var clips = playing.get(player.getUUID());
+        if (clips != null) {
+            long nextTick = player.level().getGameTime() + 1;
+            clips.computeIfPresent(key, (ignored, hold) ->
+                    new PlayingClip(hold.id(), hold.clock(), Math.min(hold.stopTick(), nextTick)));
+        }
+    }
+
+    static void exitYunxiGuard(ServerPlayer player, String castId, GuardMotion motion) {
+        // 挡中、破防和守空共用一个出口身份。手别与倍率来自本次实际起播的守架，
+        // 出口片段只由这次守架记录的手别决定。
+        String key = castId + YUNXI_PRESENTATION;
+        String exitKey = castId + "/guard/exit";
+        var clips = playing.getOrDefault(player.getUUID(), Map.of());
+        var hold = clips.get(key);
+        boolean hasCast = HumanTechniqueHost.hasCast(player.getUUID(), castId);
+        if (hold == null || clips.containsKey(exitKey) || !hasCast) {
+            return;
+        }
+        String side = hold.id().endsWith("_off") ? "_off" : "";
+        String exit = motion == GuardMotion.HIT ? "_hit" : "_lower";
+        String clip = YUNXI_HOLD + exit + side;
+        var clock = new Playback(player.level().getGameTime(), hold.clock().rate());
+        ServerPlayerAnimations.playFrom(player, clip, clock.startTick(), clock.rate());
+        clips.put(exitKey, new PlayingClip(clip, clock));
+        deferHoldStop(player, key);
     }
 
     private static void stopClip(ServerPlayer player, String key) {

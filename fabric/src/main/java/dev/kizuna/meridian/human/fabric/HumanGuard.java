@@ -22,6 +22,7 @@ import java.util.Optional;
 
 /** 玩家守式只接准入和表现；持续阶段与防御事实分别由功法库和 Damage 提供。 */
 final class HumanGuard {
+    private static final String YUNXI_PARRY = "meridian_story:flash_parry";
     private static final TagKey<Item> GUARD_WEAPONS = TagKey.create(Registries.ITEM,
             Identifier.fromNamespaceAndPath("meridian_vanilla_damage", "guard_weapons"));
     private static MinecraftServer server;
@@ -62,7 +63,11 @@ final class HumanGuard {
                 if (player != null && active.hasSustained() && event.phase() == CastPhase.RECOVERING) {
                     var sustained = active.getSustained();
                     String cast = active.getRequest().getCastId();
-                    if (sustained.getExhausted()) {
+                    if (YUNXI_PARRY.equals(active.getRequest().getTechnique().getId())) {
+                        boolean recoil = sustained.getGuardContact() || sustained.getExhausted();
+                        GuardMotion motion = recoil ? GuardMotion.HIT : GuardMotion.LOWER;
+                        HumanTechniquePresentation.exitYunxiGuard(player, cast, motion);
+                    } else if (sustained.getExhausted()) {
                         GuardStyle style = style(player);
                         if (sustained.hasWeaponContactOnBreak()) {
                             style = sustained.getWeaponContactOnBreak() ? GuardStyle.WEAPON : GuardStyle.ARMS;
@@ -105,6 +110,10 @@ final class HumanGuard {
                     if (progress.getActiveCast().getSustained().getExhausted()) {
                         return;
                     }
+                }
+                if (YUNXI_PARRY.equals(guard.technique().getId())) {
+                    HumanTechniquePresentation.exitYunxiGuard(player, guard.castId(), GuardMotion.HIT);
+                    return;
                 }
                 HumanTechniquePresentation.refreshGuard(player);
                 GuardStyle contact = event.input().weaponGuarded() ? GuardStyle.WEAPON : GuardStyle.ARMS;

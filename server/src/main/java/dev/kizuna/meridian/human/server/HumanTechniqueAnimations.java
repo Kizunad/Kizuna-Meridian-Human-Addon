@@ -32,6 +32,7 @@ public final class HumanTechniqueAnimations {
     private static final long MILLIS_PER_TICK = 50;
     private static final float FULL_RATE = 1;
     private static final List<String> HANDED_PRESENTATIONS = List.of(
+            "meridian_story:yunxi_",
             "meridian_door_breaker:door_breaker_",
             "meridian_wayfarer:wayfarer_",
             "meridian_piglin_sword:piglin_sword_");
@@ -42,7 +43,7 @@ public final class HumanTechniqueAnimations {
         if (path.equals("guard_arms")) {
             return guard(GuardMotion.HOLD);
         }
-        // 破门斩八式、行矢各式和流金剑各式都分主手、副手两套剪辑。
+        // 有主副手两套剪辑的功法沿用起手快照选手。
         boolean handed = HANDED_PRESENTATIONS.stream().anyMatch(presentationId::startsWith);
         if (handed && selectedHand == CastHand.OFF) {
             return path + "_off";

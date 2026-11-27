@@ -2,6 +2,7 @@ package dev.kizuna.meridian.human.server;
 
 import dev.kizuna.meridian.human.server.HumanTechniqueAnimations.CastHand;
 import org.junit.Test;
+import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 
@@ -62,6 +63,21 @@ public class HumanTechniqueAnimationsTest {
             String presentation = "meridian_wayfarer:" + clip;
             assertEquals(clip, HumanTechniqueAnimations.resolve(presentation, direction, CastHand.MAIN));
             assertEquals(clip + "_off", HumanTechniqueAnimations.resolve(presentation, direction, CastHand.OFF));
+        }
+    }
+
+    @Test
+    public void yunxiClipsFollowTheFrozenSwordHand() {
+        // 四式在同一方向下只由施放快照选择出剑侧。
+        var direction = new HumanTechniqueAnimations.Direction(0, 0, 1);
+        var clips = List.of("yunxi_wind_thrust", "yunxi_moon_lift", "yunxi_flash_parry", "yunxi_cloud_cleaver");
+        for (var hand : CastHand.values()) {
+            String suffix = hand == CastHand.OFF ? "_off" : "";
+            var expected = clips.stream().map(clip -> clip + suffix).toList();
+            var selected = clips.stream()
+                    .map(clip -> HumanTechniqueAnimations.resolve("meridian_story:" + clip, direction, hand))
+                    .toList();
+            assertEquals(expected, selected);
         }
     }
 
