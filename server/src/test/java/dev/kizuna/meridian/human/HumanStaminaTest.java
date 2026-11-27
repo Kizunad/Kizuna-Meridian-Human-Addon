@@ -6,6 +6,9 @@ import dev.kizuna.meridian.core.TissueCapabilities;
 import dev.kizuna.meridian.human.server.HumanBirth;
 import dev.kizuna.meridian.human.server.HumanContent;
 import dev.kizuna.meridian.human.server.HumanStamina;
+import dev.kizuna.meridian.human.server.HumanPhysique;
+import dev.kizuna.meridian.human.protocol.pb.HumanOpeningMessages.OriginPhysique;
+import com.google.protobuf.Any;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.pb.ActivityMessages.BodyActivity;
 import dev.kizuna.meridian.protocol.pb.BodyMessages;
@@ -27,6 +30,37 @@ public final class HumanStaminaTest {
     private static final double RUN_WATTS = 120;
     private static final double RUN_SECONDS = 2;
     private static final double TOLERANCE = 1e-8;
+    private static final double BASE_BURST = 1.25;
+    private static final double STRONG_BURST = 1.375;
+    private static final double WEAK_BURST = 1.125;
+
+    @Test
+    public void activeArmPowerUsesSavedGradeAndKeepsLegacyPower() {
+        // 缺省档位的序列化载荷与引入档位之前一致；停效后也用同一个能力查询。
+        var legacy = OriginPhysique.newBuilder().setBurstUntilTick(1).build();
+        assertArmPower(legacy, BASE_BURST);
+        var strong = legacy.toBuilder().setArmBurst(OriginPhysique.ArmBurst.STRONG).build();
+        assertArmPower(strong, STRONG_BURST);
+        var weak = legacy.toBuilder().setArmBurst(OriginPhysique.ArmBurst.WEAK).build();
+        assertArmPower(weak, WEAK_BURST);
+        assertArmPower(strong.toBuilder().clearBurstUntilTick().build(), 1);
+    }
+
+    private static void assertArmPower(OriginPhysique state, double factor) {
+        // 分别读取两臂与腿的可用瓦数，验证修正经过正式能力入口。
+        var baseline = adult();
+        var saved = BodyProtobuf.toMessage(baseline).toBuilder()
+                .putAddonProgress(HumanPhysique.KEY, Any.pack(state))
+                .build();
+        var loaded = BodyProtobuf.fromMessage(saved);
+        for (String muscle : java.util.List.of("left_biceps_brachii", "right_biceps_brachii", THIGH)) {
+            var id = new Anatomy.TissueId(muscle);
+            double expectedFactor = muscle.equals(THIGH) ? 1 : factor;
+            double watts = TissueCapabilities.available(baseline, id).burstWatts();
+            assertTrue(watts > 0);
+            assertEquals(watts * expectedFactor, TissueCapabilities.available(loaded, id).burstWatts(), TOLERANCE);
+        }
+    }
 
     @Test
     public void freshAdultAndRunningLegUseTheSameMuscleBudget() {

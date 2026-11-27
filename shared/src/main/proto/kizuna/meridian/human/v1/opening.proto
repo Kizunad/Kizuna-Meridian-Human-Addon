@@ -36,4 +36,10 @@ message OriginPhysique {
   int64 burst_until_tick = 3;
   int64 ready_at_tick = 4;
   bool awaiting_recovery = 5;
+  enum ArmBurst {
+    NORMAL = 0;
+    STRONG = 1;
+    WEAK = 2;
+  }
+  ArmBurst arm_burst = 6;
 }

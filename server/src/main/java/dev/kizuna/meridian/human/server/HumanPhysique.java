@@ -11,6 +11,8 @@ public final class HumanPhysique implements TissueTraits {
     public static final String KEY = "meridian_human:origin_physique";
     private static final double ENDURANCE = 1.20;
     private static final double BURST = 1.25;
+    private static final double STRONG_BURST = 1.375;
+    private static final double WEAK_BURST = 1.125;
     private static final int EXTRA_HOLD_DIVISOR = 4;
 
     @Override
@@ -46,7 +48,15 @@ public final class HumanPhysique implements TissueTraits {
         }
         var state = unpack(saved);
         double endurance = state.getEnduringLimbs() ? ENDURANCE : 1;
-        double burst = arm && state.getBurstUntilTick() > 0 ? BURST : 1;
+        double burst = 1;
+        if (arm && state.getBurstUntilTick() > 0) {
+            burst = switch (state.getArmBurst()) {
+                case NORMAL -> BURST;
+                case STRONG -> STRONG_BURST;
+                case WEAK -> WEAK_BURST;
+                case UNRECOGNIZED -> throw HumanErrors.invalid(HumanErrors.INVALID_PROGRESS);
+            };
+        }
         return new Factors(endurance, burst);
     }
 
