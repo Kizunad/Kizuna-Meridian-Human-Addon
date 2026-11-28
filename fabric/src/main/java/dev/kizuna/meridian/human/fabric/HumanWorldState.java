@@ -100,6 +100,7 @@ final class HumanWorldState {
     private long savedChanges;
     private final Queue<Written> written = new ConcurrentLinkedQueue<>();
     private CompletableFuture<Void> writing = CompletableFuture.completedFuture(null);
+    private CompletableFuture<Void> tickFence = CompletableFuture.completedFuture(null);
     /** 写盘线程编码时抛出的程序错误，留到 tick 末交接或等待保存时抛出。 */
     private RuntimeException encodeFailure;
     private final List<PendingCredit> pendingCredits = new ArrayList<>();
@@ -706,6 +707,27 @@ final class HumanWorldState {
         startWrite(file.toPath());
     }
 
+    CompletableFuture<Void> persistInheritance(Path file) {
+        // 受方入账与原有世界账同存；返回本次快照的写盘结果，交接不占用下一 tick 的等待点。
+        collectWrites();
+        throwEncodeFailure();
+        if (!isDirty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return writeSnapshot(file).thenAccept(result -> {
+            if (result.failure() != null) {
+                throw new java.util.concurrent.CompletionException(result.failure());
+            }
+        });
+    }
+
+    void beginTick() {
+        // 原有世界保存和环境交接沿用原先的 tick 屏障，单独的传功写盘由其调用方等回执。
+        tickFence.join();
+        collectWrites();
+        throwEncodeFailure();
+    }
+
     void awaitSaves() {
         // 等写盘线程把已提交的写完，再在主线程收回结果；每 tick 开始、停服、flush 保存和测试用。
         writing.join();
@@ -726,10 +748,18 @@ final class HumanWorldState {
             }
             lastSaveTick = tick;
         }
+        writeSnapshot(file);
+        tickFence = writing;
+    }
+
+    private CompletableFuture<Written> writeSnapshot(Path file) {
+        // 截取同一版身体、回执和世界库存，沿现有顺序写盘和确认。
         SavedState saved = capture();
         var covered = new Covered(changes, Set.copyOf(releaseIds.keySet()), Set.copyOf(unsavedForgetIds),
                 Map.copyOf(drawIds));
-        writing = CompletableFuture.runAsync(() -> written.add(write(file, saved, covered)), WRITER);
+        var result = CompletableFuture.supplyAsync(() -> write(file, saved, covered), WRITER);
+        writing = result.thenAccept(written::add);
+        return result;
     }
 
     private Written write(Path file, SavedState saved, Covered covered) {

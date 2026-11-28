@@ -81,6 +81,7 @@ import java.util.function.Supplier;
 
 /** 单玩家的可信运动编排；账本、占用与恢复只由框架命令处理器修改。 */
 final class HumanPlayerBody {
+    final HumanInheritance inheritance = new HumanInheritance();
     static final String MOVEMENT_INSTANCE = "human.minecraft.locomotion";
     static final double WALK_ENDURANCE_SECONDS = 300;
     static final double SPRINT_ENDURANCE_SECONDS = 75;
@@ -164,6 +165,9 @@ final class HumanPlayerBody {
                 CONTENT.recipes(), (caller, body, plan) -> Optional.ofNullable(sourceId),
                 CONTENT.actions(), CONTENT.openings(),
                 caller -> debugAuthorized && caller.equals(id.value()), new HumanDamage("minecraft:player"));
+        if (saved.addonProgress().containsKey(HumanInheritance.PROGRESS)) {
+            HumanInheritance.receive(this);
+        }
         migrateModuleTags();
         if (!saved.addonProgress().containsKey(HumanProgressionProtocol.PROGRESS_KEY)) {
             // 新身体与尚无进度字段的存档都从未读开始，并写入同一身体事务。
@@ -880,6 +884,12 @@ final class HumanPlayerBody {
         if (response.hasFailure()) {
             throw HumanErrors.hostRejected(response.getFailure().getCode());
         }
+    }
+
+    void applyInheritance(ActivityMessages.BodyActivity activity) {
+        // 开脉与受功各用一笔权威活动，每次都按新构型重排下一次身体结算。
+        applyActivity(activity);
+        scheduleNextBoundary();
     }
 
     ResponseEnvelope applyTechnique(long millis, TechniqueHostRequest request) {

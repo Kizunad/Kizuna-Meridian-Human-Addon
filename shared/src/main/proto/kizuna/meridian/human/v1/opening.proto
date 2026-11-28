@@ -4,6 +4,7 @@ option java_package = "dev.kizuna.meridian.human.protocol.pb";
 option java_outer_classname = "HumanOpeningMessages";
 
 import "kizuna/meridian/v1/body.proto";
+import "kizuna/meridian/v1/activity.proto";
 
 // 人体条件由 Human 裁定；Human-UI 只读维持阈值显示预警，Framework 用 Any 固定任务。
 message HumanOpeningConditions {
@@ -26,6 +27,19 @@ message IntakeRequirement {
   repeated string organ_ids = 1;
   double minimum_qi_per_second = 2;
   int64 window_millis = 3;
+}
+
+message InheritanceBook {
+  // 开脉与接功连续提交；若停在中间，载入身体时先收妥这一笔。
+  kizuna.meridian.v1.LumenExport opened = 1;
+  map<string, InheritanceReceipt> receipts = 2;
+}
+message InheritanceReceipt {
+  string donor = 1;
+  string target = 2;
+  bytes funding_digest = 3;
+  double accepted_volume_limit = 4;
+  double credited_qi = 5;
 }
 
 // 常态体质与短时发力的在线截止时刻随同一具身体持久化。

@@ -245,10 +245,9 @@ public final class HumanFabric implements ModInitializer {
             return true;
         });
         ServerTickEvents.START_SERVER_TICK.register(server -> {
-            // 上一 tick 交给写盘线程的文件趁两 tick 之间的空闲写；新 tick 开始时还没写完就等它写完。
-            // 这样上一 tick 受理的释放和遗忘在这一 tick 一定已确认，别的代码也不会碰上写到一半的文件。
+            // 收回写盘结果，环境交接仍按原有 tick 屏障确认。
             if (state != null) {
-                state.awaitSaves();
+                state.beginTick();
             }
         });
         ServerTickEvents.END_SERVER_TICK.register(this::tick);
@@ -1146,7 +1145,7 @@ public final class HumanFabric implements ModInitializer {
         }
     }
 
-    private static Path stateFile(MinecraftServer server) {
+    static Path stateFile(MinecraftServer server) {
         // 身体世界存档沿用原来的位置，世界保存与 tick 末交接写同一个文件。
         return server.getWorldPath(LevelResource.ROOT).resolve("data/meridian_human.dat");
     }

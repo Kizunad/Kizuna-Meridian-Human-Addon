@@ -61,6 +61,7 @@ public final class HumanErrors {
     }
     public static final String TEMPLATE_REQUIRED = "需要已注册的人体模板";
     public static final String INVALID_OPENING_POLICY = "人体开脉条件配置不完整或超出可计算范围";
+    public static final String INVALID_INHERITANCE = "受功凭据与当前身体或原案不符";
     public static final String TEMPLATE_MISMATCH = "出生候选必须使用 human:adult 的第一版模板";
     public static final String EXPORT_DIRECTORY_REQUIRED = "需要唯一的内容导出目录参数";
     public static final String EXPORT_FAILED = "人体 Protobuf 内容导出失败";

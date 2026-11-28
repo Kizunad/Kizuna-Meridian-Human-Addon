@@ -89,17 +89,10 @@ public final class HumanOpeningPolicy implements OpeningPolicy {
     static OpeningPolicyDecision prepare(BodySnapshot body, MeridianOpeningRule rule,
                                          HumanOpeningConditions conditions) {
         // 境界、经脉强度和前置开拓由人体内容控制，框架只传入当前完整快照。
-        if (body.getRealmValue() < conditions.getMinimumRealmValue()) {
+        if (!meetsStructuralRequirements(body, rule, conditions)) {
             return rejected(FailureCode.OPENING_REQUIREMENTS_UNMET);
         }
         MeridianDefinition target = findMeridian(body, rule.getTargetMeridianId());
-        var openedIds = body.getMeridianStatesList().stream()
-                .filter(state -> state.getOpening().getStage() == MeridianOpeningStage.OPENED)
-                .map(MeridianState::getId).toList();
-        if (target.getResilience() < conditions.getMinimumResilience()
-                || !openedIds.containsAll(conditions.getRequiredOpenMeridianIdsList())) {
-            return rejected(FailureCode.OPENING_REQUIREMENTS_UNMET);
-        }
 
         // 启动同时看全身和目标经脉的实际体积；不能靠元数显示或临时扩容绕过门槛。
         double bodyFraction = lumenFraction(body, null);
@@ -109,6 +102,20 @@ public final class HumanOpeningPolicy implements OpeningPolicy {
             return rejected(FailureCode.INSUFFICIENT_QI);
         }
         return plan(body, rule, conditions);
+    }
+
+    public static boolean meetsStructuralRequirements(BodySnapshot body, MeridianOpeningRule rule,
+                                                       HumanOpeningConditions conditions) {
+        // 启动开脉和接受传功共用境界、经脉强度和前置脉，普通开脉另在 prepare 中核实储量。
+        if (body.getRealmValue() < conditions.getMinimumRealmValue()) {
+            return false;
+        }
+        var target = findMeridian(body, rule.getTargetMeridianId());
+        var opened = body.getMeridianStatesList().stream()
+                .filter(state -> state.getOpening().getStage() == MeridianOpeningStage.OPENED)
+                .map(MeridianState::getId).toList();
+        return target.getResilience() >= conditions.getMinimumResilience()
+                && opened.containsAll(conditions.getRequiredOpenMeridianIdsList());
     }
 
     static OpeningPolicyDecision plan(BodySnapshot body, MeridianOpeningRule rule,

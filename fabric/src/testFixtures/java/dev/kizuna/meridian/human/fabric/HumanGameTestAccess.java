@@ -103,6 +103,16 @@ public final class HumanGameTestAccess {
         }
     }
 
+    public static void openFundedMeridian(ServerPlayer player,
+            dev.kizuna.meridian.protocol.pb.ActivityMessages.LumenExport funding) {
+        // 保存开脉后、入账前的真实活动边界，供跨进程恢复回归使用。
+        var body = HumanTechniqueHost.state().find(player.getUUID());
+        if (!HumanInheritance.open(body, funding)) {
+            throw new IllegalStateException("测试受方无法开通约定经脉");
+        }
+        HumanTechniqueHost.bodyChanged(player.getUUID());
+    }
+
     public static void enterTrueQi(ServerPlayer player) {
         // 整体回归通过真实身体活动准备真炁境界，施放仍由正式玩家宿主执行。
         HumanPlayerBody body = HumanTechniqueHost.state().find(player.getUUID());
